@@ -1,0 +1,192 @@
+extends CharacterBody2D
+class_name Cat
+
+## Cat NPC - Virtual Pet
+## Manages the cat's animations, states, and behaviors for the AFK virtual pet game
+
+## Cat's current state
+@export_enum("Idle", "Walking", "Sleeping", "Eating", "Playing", "Happy", "Sad") var current_state: String = "Idle":
+	set(value):
+		if current_state != value:
+			current_state = value
+			_update_animation()
+			EventManager.pet_state_changed.emit(value)
+
+## Movement speed when walking
+@export var walk_speed: float = 50.0
+
+## Cat's stats
+@export_group("Stats")
+@export var hunger: float = 100.0:
+	set(value):
+		hunger = clamp(value, 0.0, 100.0)
+		EventManager.pet_hunger_changed.emit(hunger)
+
+@export var happiness: float = 100.0:
+	set(value):
+		happiness = clamp(value, 0.0, 100.0)
+		EventManager.pet_happiness_changed.emit(happiness)
+
+@export var health: float = 100.0:
+	set(value):
+		health = clamp(value, 0.0, 100.0)
+		EventManager.pet_health_changed.emit(health)
+
+@export var level: int = 1:
+	set(value):
+		if level != value and value > level:
+			EventManager.pet_leveled_up.emit(value)
+		level = value
+
+@export var experience: int = 0:
+	set(value):
+		experience = value
+		EventManager.pet_xp_changed.emit(experience, experience_to_next_level)
+
+@export var experience_to_next_level: int = 100
+
+# Node references
+@onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
+@onready var state_timer: Timer = $StateTimer
+
+# Internal state
+var _move_direction: Vector2 = Vector2.ZERO
+var _is_player_controlled: bool = false
+
+
+func _ready() -> void:
+	# Set up state timer for automatic state changes
+	if state_timer:
+		state_timer.timeout.connect(_on_state_timer_timeout)
+		state_timer.start()
+
+	# Initialize animation
+	_update_animation()
+
+	# Connect to EventManager for feeding
+	EventManager.pet_fed.connect(_on_pet_fed)
+
+	print("Cat initialized - Current state: %s" % current_state)
+
+
+func _physics_process(delta: float) -> void:
+	# Handle movement based on state
+	if current_state == "Walking" and not _is_player_controlled:
+		velocity = _move_direction * walk_speed
+		move_and_slide()
+
+		# Flip sprite based on movement direction
+		if _move_direction.x != 0:
+			animated_sprite.flip_h = _move_direction.x < 0
+
+
+func _update_animation() -> void:
+	if not animated_sprite:
+		return
+
+	# Map states to animation names
+	var animation_name = current_state.to_lower()
+
+	# Play animation if it exists
+	if animated_sprite.sprite_frames and animated_sprite.sprite_frames.has_animation(animation_name):
+		animated_sprite.play(animation_name)
+	else:
+		# Fallback to idle if animation doesn't exist
+		if animated_sprite.sprite_frames and animated_sprite.sprite_frames.has_animation("idle"):
+			animated_sprite.play("idle")
+
+
+func _on_state_timer_timeout() -> void:
+	# Randomly change state for AFK behavior
+	if not _is_player_controlled:
+		_random_state_change()
+
+
+func _random_state_change() -> void:
+	var states = ["Idle", "Walking", "Sleeping"]
+	var weights = [50, 30, 20]  # Percentage chance
+
+	# Add happy/sad states based on happiness level
+	if happiness > 70:
+		states.append("Happy")
+		weights.append(20)
+	elif happiness < 30:
+		states.append("Sad")
+		weights.append(20)
+
+	# Pick random state based on weights
+	var total_weight = 0
+	for w in weights:
+		total_weight += w
+
+	var random_value = randf() * total_weight
+	var cumulative = 0
+
+	for i in range(states.size()):
+		cumulative += weights[i]
+		if random_value <= cumulative:
+			current_state = states[i]
+
+			# Set random direction if walking
+			if current_state == "Walking":
+				_move_direction = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
+			else:
+				_move_direction = Vector2.ZERO
+
+			# Randomize next state change time
+			state_timer.wait_time = randf_range(3.0, 8.0)
+			break
+
+
+## Feed the cat
+func feed(food_item: Dictionary) -> void:
+	var nutrition = food_item.get("nutrition", 10)
+	hunger = min(hunger + nutrition, 100.0)
+	happiness = min(happiness + nutrition * 0.5, 100.0)
+
+	# Play eating animation temporarily
+	var previous_state = current_state
+	current_state = "Eating"
+
+	# Return to previous state after eating
+	await get_tree().create_timer(2.0).timeout
+	current_state = previous_state
+
+	EventManager.pet_fed.emit(food_item)
+
+
+## Play with the cat
+func play() -> void:
+	happiness = min(happiness + 20.0, 100.0)
+	hunger = max(hunger - 5.0, 0.0)
+
+	var previous_state = current_state
+	current_state = "Playing"
+
+	await get_tree().create_timer(3.0).timeout
+	current_state = previous_state
+
+
+## Give the cat experience
+func gain_experience(amount: int) -> void:
+	experience += amount
+
+	# Check for level up
+	while experience >= experience_to_next_level:
+		experience -= experience_to_next_level
+		level += 1
+		experience_to_next_level = int(experience_to_next_level * 1.5)
+
+
+## Set cat to manual control mode
+func set_player_controlled(controlled: bool) -> void:
+	_is_player_controlled = controlled
+	if controlled:
+		state_timer.stop()
+	else:
+		state_timer.start()
+
+
+func _on_pet_fed(food_item: Dictionary) -> void:
+	# React to being fed (from EventManager)
+	pass
