@@ -49,8 +49,15 @@ var color_themes = {
 var _original_scale: Vector2
 var _is_hovering: bool = false
 
+# Background texture and shader
+var background_texture: Texture2D
+var button_shader: Shader
+
 
 func _ready() -> void:
+	# Load the background texture and shader
+	background_texture = load("res://nodes/ui/buttons/button_background.png")
+	button_shader = load("res://nodes/ui/buttons/button_tint.gdshader")
 	_original_scale = scale
 	text = button_text
 
@@ -69,78 +76,15 @@ func _ready() -> void:
 
 
 func _apply_style() -> void:
-	if not is_inside_tree():
+	if not is_inside_tree() or not background_texture or not button_shader:
 		return
-
-	# Create a StyleBoxFlat for the button
-	var style_normal = StyleBoxFlat.new()
-	var style_hover = StyleBoxFlat.new()
-	var style_pressed = StyleBoxFlat.new()
 
 	var theme_colors = color_themes.get(button_style, color_themes["Primary"])
 
-	# Normal state
-	style_normal.bg_color = theme_colors["normal"]
-	style_normal.corner_radius_top_left = 8
-	style_normal.corner_radius_top_right = 8
-	style_normal.corner_radius_bottom_left = 8
-	style_normal.corner_radius_bottom_right = 8
-	style_normal.content_margin_left = 16
-	style_normal.content_margin_right = 16
-	style_normal.content_margin_top = 12
-	style_normal.content_margin_bottom = 12
-	# Inner shadow for 3D effect (darker on top/left, lighter on bottom/right)
-	style_normal.shadow_color = Color(0, 0, 0, 0.3)
-	style_normal.shadow_size = 4
-	style_normal.shadow_offset = Vector2(0, -2)
-	# Border for added depth
-	style_normal.border_width_left = 2
-	style_normal.border_width_top = 2
-	style_normal.border_width_right = 2
-	style_normal.border_width_bottom = 2
-	style_normal.border_color = Color(0, 0, 0, 0.4)
-
-	# Hover state
-	style_hover.bg_color = theme_colors["hover"]
-	style_hover.corner_radius_top_left = 8
-	style_hover.corner_radius_top_right = 8
-	style_hover.corner_radius_bottom_left = 8
-	style_hover.corner_radius_bottom_right = 8
-	style_hover.content_margin_left = 16
-	style_hover.content_margin_right = 16
-	style_hover.content_margin_top = 12
-	style_hover.content_margin_bottom = 12
-	# Inner shadow for 3D effect
-	style_hover.shadow_color = Color(0, 0, 0, 0.3)
-	style_hover.shadow_size = 4
-	style_hover.shadow_offset = Vector2(0, -2)
-	# Border
-	style_hover.border_width_left = 2
-	style_hover.border_width_top = 2
-	style_hover.border_width_right = 2
-	style_hover.border_width_bottom = 2
-	style_hover.border_color = Color(0, 0, 0, 0.4)
-
-	# Pressed state - inverted shadow for pushed-in effect
-	style_pressed.bg_color = theme_colors["pressed"]
-	style_pressed.corner_radius_top_left = 8
-	style_pressed.corner_radius_top_right = 8
-	style_pressed.corner_radius_bottom_left = 8
-	style_pressed.corner_radius_bottom_right = 8
-	style_pressed.content_margin_left = 16
-	style_pressed.content_margin_right = 16
-	style_pressed.content_margin_top = 12
-	style_pressed.content_margin_bottom = 12
-	# Inverted shadow for pushed-in effect
-	style_pressed.shadow_color = Color(0, 0, 0, 0.5)
-	style_pressed.shadow_size = 2
-	style_pressed.shadow_offset = Vector2(0, 1)
-	# Darker border for pressed state
-	style_pressed.border_width_left = 2
-	style_pressed.border_width_top = 2
-	style_pressed.border_width_right = 2
-	style_pressed.border_width_bottom = 2
-	style_pressed.border_color = Color(0, 0, 0, 0.6)
+	# Create StyleBoxTexture instances with shader materials
+	var style_normal = _create_textured_style(theme_colors["normal"])
+	var style_hover = _create_textured_style(theme_colors["hover"])
+	var style_pressed = _create_textured_style(theme_colors["pressed"])
 
 	# Apply styles
 	add_theme_stylebox_override("normal", style_normal)
@@ -151,6 +95,37 @@ func _apply_style() -> void:
 	add_theme_color_override("font_color", Color.WHITE)
 	add_theme_color_override("font_hover_color", Color.WHITE)
 	add_theme_color_override("font_pressed_color", Color.WHITE)
+
+
+func _create_textured_style(tint_color: Color) -> StyleBoxTexture:
+	# Create shader material with tint color
+	var shader_material = ShaderMaterial.new()
+	shader_material.shader = button_shader
+	shader_material.set_shader_parameter("tint_color", tint_color)
+
+	# Create a texture with the shader applied
+	# Note: We need to use a CanvasTexture to apply the shader
+	var canvas_texture = CanvasTexture.new()
+	canvas_texture.diffuse_texture = background_texture
+
+	# Create StyleBoxTexture
+	var style = StyleBoxTexture.new()
+	style.texture = background_texture
+	style.modulate_color = tint_color  # Use modulate as fallback
+
+	# Set margins for proper text placement
+	style.content_margin_left = 16
+	style.content_margin_right = 16
+	style.content_margin_top = 12
+	style.content_margin_bottom = 12
+
+	# Set texture margins to control stretching (adjust based on your texture)
+	style.texture_margin_left = 8
+	style.texture_margin_right = 8
+	style.texture_margin_top = 8
+	style.texture_margin_bottom = 8
+
+	return style
 
 
 func _on_mouse_entered() -> void:
