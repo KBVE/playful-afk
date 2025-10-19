@@ -1,0 +1,64 @@
+[gd_scene load_steps=4 format=3 uid="uid://introduction_scene"]
+
+[ext_resource type="Script" path="res://gameplay/introduction/introduction.gd" id="1_script"]
+[ext_resource type="PackedScene" uid="uid://forest_intro_bg" path="res://nodes/background/forest_intro/forest_intro_background.tscn" id="2_background"]
+[ext_resource type="PackedScene" uid="uid://game_panel_ui" path="res://nodes/ui/panel/game_panel.tscn" id="3_panel"]
+
+[node name="Introduction" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="ForestIntroBackground" parent="." instance=ExtResource("2_background")]
+layout_mode = 1
+
+[node name="WelcomePanel" parent="." instance=ExtResource("3_panel")]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -300.0
+offset_top = -200.0
+offset_right = 300.0
+offset_bottom = 200.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ContentContainer" parent="WelcomePanel" index="1"]
+theme_override_constants/margin_left = 40
+theme_override_constants/margin_top = 40
+theme_override_constants/margin_right = 40
+theme_override_constants/margin_bottom = 40
+
+[node name="Content" parent="WelcomePanel/ContentContainer" index="0"]
+theme_override_constants/separation = 20
+
+[node name="WelcomeText" type="RichTextLabel" parent="WelcomePanel/ContentContainer/Content"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_colors/default_color = Color(1, 1, 1, 1)
+theme_override_constants/outline_size = 3
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/normal_font_size = 16
+bbcode_enabled = true
+text = "[center][b]Welcome to Virtual AFK Pet![/b][/center]
+
+In this peaceful world, you'll care for your very own virtual companion. Your pet will grow, play, and thrive even when you're away.
+
+[b]Your journey begins...[/b]
+
+Feed your pet, keep them happy, and watch them flourish in this tranquil forest setting."
+fit_content = true
+scroll_active = false
+
+[node name="ContinueButton" type="Button" parent="WelcomePanel/ContentContainer/Content"]
+layout_mode = 2
+text = "Continue"
+
+[editable path="WelcomePanel"]

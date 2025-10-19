@@ -1,8 +1,9 @@
-[gd_scene load_steps=4 format=3 uid="uid://c8jxqm3vhqw7f"]
+[gd_scene load_steps=5 format=3 uid="uid://c8jxqm3vhqw7f"]
 
 [ext_resource type="Script" path="res://gameplay/title/title.gd" id="1_title"]
 [ext_resource type="PackedScene" uid="uid://bxk8qm3vhqw7g" path="res://nodes/ui/buttons/main_button.tscn" id="2_main_button"]
 [ext_resource type="PackedScene" uid="uid://red_forest_simple" path="res://nodes/background/red_forest/red_forest_simple.tscn" id="3_background"]
+[ext_resource type="PackedScene" uid="uid://game_logo_ui" path="res://nodes/ui/logo/game_logo.tscn" id="4_logo"]
 
 [node name="Title" type="Control"]
 layout_mode = 3
@@ -33,20 +34,20 @@ anchor_left = 0.5
 anchor_top = 0.5
 anchor_right = 0.5
 anchor_bottom = 0.5
-offset_left = -100.0
-offset_top = -80.0
-offset_right = 100.0
-offset_bottom = 80.0
+offset_left = -150.0
+offset_top = -150.0
+offset_right = 150.0
+offset_bottom = 150.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/separation = 20
+theme_override_constants/separation = 30
 alignment = 1
 
-[node name="GameTitle" type="Label" parent="VBoxContainer"]
+[node name="GameLogo" parent="VBoxContainer" instance=ExtResource("4_logo")]
 layout_mode = 2
-theme_override_font_sizes/font_size = 32
-text = "AFK Virtual Pet"
-horizontal_alignment = 1
+animate_on_ready = true
+entrance_animation = "BounceIn"
+enable_idle_bob = true
 
 [node name="StartButton" parent="VBoxContainer" instance=ExtResource("2_main_button")]
 layout_mode = 2

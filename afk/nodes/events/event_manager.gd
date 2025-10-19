@@ -73,6 +73,9 @@ signal popup_requested(popup_type, data)
 signal ui_update_requested(ui_element)
 
 # ===== Game State Events =====
+## Emitted when the game starts/begins
+signal game_started()
+
 ## Emitted when the game is paused. Parameters: (paused: bool)
 signal game_paused(paused)
 
@@ -118,6 +121,48 @@ signal audio_settings_changed(setting, value)
 
 func _ready() -> void:
 	print("EventManager initialized - Centralized event system ready")
+
+	# Connect to screen transition requests
+	screen_transition_requested.connect(_on_screen_transition_requested)
+
+
+## Handle scene transitions
+func _on_screen_transition_requested(from_scene: String, to_scene: String) -> void:
+	print("Scene transition: %s -> %s" % [from_scene, to_scene])
+
+	# Get the scene tree
+	var tree = get_tree()
+	if not tree:
+		push_error("Cannot transition scenes - no scene tree available")
+		return
+
+	# Change to the requested scene
+	var error = tree.change_scene_to_file(to_scene)
+	if error != OK:
+		push_error("Failed to change scene to: %s (Error code: %d)" % [to_scene, error])
+
+
+## Request a scene transition (convenience function)
+func transition_to_scene(scene_path: String) -> void:
+	var current_scene = get_tree().current_scene
+	var from_scene = current_scene.scene_file_path if current_scene else "Unknown"
+	screen_transition_requested.emit(from_scene, scene_path)
+
+
+## Transition to introduction scene
+func start_new_game() -> void:
+	game_started.emit()
+	transition_to_scene("res://gameplay/introduction/introduction.tscn")
+
+
+## Transition to main game scene
+func start_main_game() -> void:
+	transition_to_scene("res://gameplay/main/main.tscn")
+
+
+## Transition to title screen
+func return_to_title() -> void:
+	transition_to_scene("res://gameplay/title/title.tscn")
 
 
 ## Helper function to emit debug info about signal connections
