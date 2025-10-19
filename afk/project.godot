@@ -20,6 +20,10 @@ config/icon="res://icon.svg"
 EventManager="*res://nodes/events/event_manager.gd"
 NPCManager="*res://nodes/npc/npc_manager.gd"
 
+[display]
+
+window/stretch/mode="viewport"
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"

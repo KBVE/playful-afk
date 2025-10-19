@@ -1,0 +1,30 @@
+[gd_scene load_steps=5 format=3 uid="uid://red_forest_bg"]
+
+[ext_resource type="Script" path="res://nodes/background/red_forest/red_forest_background.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://nodes/background/red_forest/background_layer_1.png" id="2_layer1"]
+[ext_resource type="Texture2D" path="res://nodes/background/red_forest/background_layer_2.png" id="3_layer2"]
+[ext_resource type="Texture2D" path="res://nodes/background/red_forest/background_layer_3.png" id="4_layer3"]
+
+[node name="RedForestBackground" type="ParallaxBackground"]
+script = ExtResource("1_script")
+
+[node name="Layer1" type="ParallaxLayer" parent="."]
+motion_scale = Vector2(0.2, 1.0)
+
+[node name="Sprite2D" type="Sprite2D" parent="Layer1"]
+texture = ExtResource("2_layer1")
+centered = true
+
+[node name="Layer2" type="ParallaxLayer" parent="."]
+motion_scale = Vector2(0.5, 1.0)
+
+[node name="Sprite2D" type="Sprite2D" parent="Layer2"]
+texture = ExtResource("3_layer2")
+centered = true
+
+[node name="Layer3" type="ParallaxLayer" parent="."]
+motion_scale = Vector2(0.8, 1.0)
+
+[node name="Sprite2D" type="Sprite2D" parent="Layer3"]
+texture = ExtResource("4_layer3")
+centered = true

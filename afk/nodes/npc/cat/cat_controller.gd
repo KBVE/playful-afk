@@ -14,13 +14,13 @@ var animated_sprite: AnimatedSprite2D
 ## Animation mapping - maps state names to animation sequences (can be combos)
 var animation_sequences: Dictionary = {
 	# State: [animation_row_1, animation_row_2, ...] - plays in sequence
-	"idle": ["row1"],                    # Simple idle loop
-	"walking": ["row2"],                 # Walking loop
-	"sleeping": ["row3", "row4"],        # Combo: Get into bed → Sleep loop
-	"waking_up": ["row5"],               # Wake up animation
-	"eating": ["row6"],                  # Eating animation
-	"playing": ["row7", "row8"],         # Combo: Start playing → Playing loop
-	"happy": ["row9"],                   # Happy emotion
+	"idle": ["row1", "row2"],                    # Simple idle loop
+	"walking": ["row5"],                 # Walking loop
+	"sleeping": ["row3", "row7"],        # Combo: Get into bed → Sleep loop
+	"waking_up": ["row4"],               # Wake up animation
+	"eating": ["row8"],                  # Eating animation
+	"playing": ["row9"],         # Combo: Start playing → Playing loop
+	"happy": ["row6"],                   # Happy emotion
 	"sad": ["row10"],                    # Sad emotion
 }
 
@@ -32,6 +32,17 @@ var is_playing_sequence: bool = false
 ## Movement settings
 var move_speed: float = 50.0
 var move_direction: Vector2 = Vector2.ZERO
+
+## Movement state system
+enum MovementState { IDLE, ACCELERATING, MOVING, DECELERATING }
+var movement_state: MovementState = MovementState.IDLE
+var current_speed: float = 0.0
+var max_speed: float = 100.0
+var acceleration_rate: float = 400.0
+var deceleration_rate: float = 400.0
+var target_position_x: float = 0.0
+var deceleration_distance: float = 60.0
+var is_auto_moving: bool = false
 
 
 func _init(cat_instance: Cat = null) -> void:
@@ -198,3 +209,137 @@ func list_animation_sequences() -> void:
 	print("=== Available Animation Sequences ===")
 	for state in animation_sequences.keys():
 		print("  %s: %s" % [state, animation_sequences[state]])
+
+
+## Start automatic movement to a target position
+func move_to_position(target_x: float) -> void:
+	if not cat:
+		return
+
+	target_position_x = target_x
+	is_auto_moving = true
+
+	# Determine direction
+	var direction = 1 if target_x > cat.global_position.x else -1
+	move_direction = Vector2(direction, 0)
+
+	# Start accelerating
+	movement_state = MovementState.ACCELERATING
+	current_speed = 0.0
+
+	print("Starting auto-move to position: %s" % target_x)
+
+
+## Update movement (call this from _process or _physics_process)
+func update_movement(delta: float) -> void:
+	if not cat or not is_auto_moving:
+		return
+
+	match movement_state:
+		MovementState.IDLE:
+			_handle_movement_idle()
+		MovementState.ACCELERATING:
+			_handle_movement_acceleration(delta)
+		MovementState.MOVING:
+			_handle_movement_moving(delta)
+		MovementState.DECELERATING:
+			_handle_movement_deceleration(delta)
+
+
+func _handle_movement_idle() -> void:
+	current_speed = 0.0
+	# Keep playing current animation (idle or other)
+
+
+func _handle_movement_acceleration(delta: float) -> void:
+	if not cat:
+		return
+
+	# Start walking animation
+	if current_speed == 0.0:
+		play_state("walking")
+
+	# Accelerate
+	current_speed += acceleration_rate * delta
+	current_speed = min(current_speed, max_speed)
+
+	# Move cat
+	cat.global_position.x += current_speed * delta * move_direction.x
+
+	# Flip sprite
+	if animated_sprite:
+		animated_sprite.flip_h = (move_direction.x < 0)
+
+	# Transition to full speed movement
+	if current_speed >= max_speed:
+		movement_state = MovementState.MOVING
+
+
+func _handle_movement_moving(delta: float) -> void:
+	if not cat:
+		return
+
+	# Move at constant speed
+	cat.global_position.x += current_speed * delta * move_direction.x
+
+	# Check distance to target
+	var distance_to_target = abs(target_position_x - cat.global_position.x)
+
+	# Start decelerating when close
+	if distance_to_target <= deceleration_distance:
+		movement_state = MovementState.DECELERATING
+
+
+func _handle_movement_deceleration(delta: float) -> void:
+	if not cat:
+		return
+
+	# Check distance to target
+	var distance_to_target = abs(target_position_x - cat.global_position.x)
+
+	# If very close to target, just coast there slowly
+	if distance_to_target < 5.0:
+		# Move directly to target at very slow speed
+		var move_amount = min(distance_to_target, 20.0 * delta)
+		cat.global_position.x += move_amount * move_direction.x
+
+		# Check if reached
+		if abs(target_position_x - cat.global_position.x) < 1.0:
+			current_speed = 0.0
+			movement_state = MovementState.IDLE
+			is_auto_moving = false
+			play_state("idle")
+			print("Reached target position")
+		return
+
+	# Normal deceleration
+	current_speed -= deceleration_rate * delta
+	current_speed = max(current_speed, 0.0)
+
+	# Continue moving
+	cat.global_position.x += current_speed * delta * move_direction.x
+
+	# Check if stopped too early (shouldn't happen with proper distance calculation)
+	if current_speed <= 0.0:
+		current_speed = 0.0
+		movement_state = MovementState.IDLE
+		is_auto_moving = false
+		play_state("idle")
+		print("Stopped before reaching target")
+
+
+## Stop automatic movement
+func stop_auto_movement() -> void:
+	is_auto_moving = false
+	movement_state = MovementState.IDLE
+	current_speed = 0.0
+
+
+## Check if currently auto-moving
+func is_moving() -> bool:
+	return is_auto_moving and movement_state != MovementState.IDLE
+
+
+## Get current movement state
+func get_movement_state() -> MovementState:
+	return movement_state

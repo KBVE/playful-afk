@@ -1,0 +1,64 @@
+[gd_scene load_steps=10 format=3 uid="uid://red_forest_simple"]
+
+[ext_resource type="Script" path="res://nodes/background/red_forest/red_forest_simple.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://nodes/background/red_forest/background_layer_1.png" id="2_layer1"]
+[ext_resource type="Texture2D" path="res://nodes/background/red_forest/background_layer_2.png" id="3_layer2"]
+[ext_resource type="Texture2D" path="res://nodes/background/red_forest/background_layer_3.png" id="4_layer3"]
+[ext_resource type="Shader" path="res://nodes/background/red_forest/parallax_scroll.gdshader" id="5_shader"]
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_0"]
+shader = ExtResource("5_shader")
+shader_parameter/scroll_offset = 0.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_1"]
+shader = ExtResource("5_shader")
+shader_parameter/scroll_offset = 0.0
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_2"]
+shader = ExtResource("5_shader")
+shader_parameter/scroll_offset = 0.0
+
+[node name="RedForestSimple" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Layer1" type="TextureRect" parent="."]
+material = SubResource("ShaderMaterial_0")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_layer1")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Layer2" type="TextureRect" parent="."]
+material = SubResource("ShaderMaterial_1")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("3_layer2")
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Layer3" type="TextureRect" parent="."]
+material = SubResource("ShaderMaterial_2")
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("4_layer3")
+expand_mode = 1
+stretch_mode = 5

@@ -1,0 +1,23 @@
+[gd_scene load_steps=3 format=3 uid="uid://red_forest_container"]
+
+[ext_resource type="Script" path="res://nodes/background/red_forest/red_forest_container.gd" id="1_container"]
+[ext_resource type="PackedScene" uid="uid://red_forest_bg" path="res://nodes/background/red_forest/red_forest_background.tscn" id="2_background"]
+
+[node name="RedForestContainer" type="SubViewportContainer"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+stretch = true
+script = ExtResource("1_container")
+
+[node name="SubViewport" type="SubViewport" parent="."]
+transparent_bg = false
+handle_input_locally = false
+size = Vector2i(1152, 648)
+render_target_update_mode = 4
+
+[node name="Camera2D" type="Camera2D" parent="SubViewport"]
+
+[node name="RedForestBackground" parent="SubViewport" instance=ExtResource("2_background")]

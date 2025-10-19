@@ -1,7 +1,8 @@
-[gd_scene load_steps=3 format=3 uid="uid://c8jxqm3vhqw7f"]
+[gd_scene load_steps=4 format=3 uid="uid://c8jxqm3vhqw7f"]
 
 [ext_resource type="Script" path="res://gameplay/title/title.gd" id="1_title"]
 [ext_resource type="PackedScene" uid="uid://bxk8qm3vhqw7g" path="res://nodes/ui/buttons/main_button.tscn" id="2_main_button"]
+[ext_resource type="PackedScene" uid="uid://red_forest_simple" path="res://nodes/background/red_forest/red_forest_simple.tscn" id="3_background"]
 
 [node name="Title" type="Control"]
 layout_mode = 3
@@ -12,7 +13,11 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_title")
 
+[node name="RedForestSimple" parent="." instance=ExtResource("3_background")]
+layout_mode = 1
+
 [node name="ColorRect" type="ColorRect" parent="."]
+visible = false
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
