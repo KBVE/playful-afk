@@ -49,12 +49,19 @@ class_name Cat
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var state_timer: Timer = $StateTimer
 
+# Controller reference
+var controller: CatController
+
 # Internal state
 var _move_direction: Vector2 = Vector2.ZERO
 var _is_player_controlled: bool = false
 
 
 func _ready() -> void:
+	# Initialize controller
+	controller = CatController.new(self)
+	add_child(controller)
+
 	# Set up state timer for automatic state changes
 	if state_timer:
 		state_timer.timeout.connect(_on_state_timer_timeout)
@@ -72,28 +79,17 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	# Handle movement based on state
 	if current_state == "Walking" and not _is_player_controlled:
-		velocity = _move_direction * walk_speed
+		if controller:
+			controller.move_cat(_move_direction, true)
 		move_and_slide()
-
-		# Flip sprite based on movement direction
-		if _move_direction.x != 0:
-			animated_sprite.flip_h = _move_direction.x < 0
 
 
 func _update_animation() -> void:
-	if not animated_sprite:
+	if not controller:
 		return
 
-	# Map states to animation names
-	var animation_name = current_state.to_lower()
-
-	# Play animation if it exists
-	if animated_sprite.sprite_frames and animated_sprite.sprite_frames.has_animation(animation_name):
-		animated_sprite.play(animation_name)
-	else:
-		# Fallback to idle if animation doesn't exist
-		if animated_sprite.sprite_frames and animated_sprite.sprite_frames.has_animation("idle"):
-			animated_sprite.play("idle")
+	# Use controller to play state animations (supports combos)
+	controller.play_state(current_state.to_lower())
 
 
 func _on_state_timer_timeout() -> void:

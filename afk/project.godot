@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 EventManager="*res://nodes/events/event_manager.gd"
+NPCManager="*res://nodes/npc/npc_manager.gd"
 
 [rendering]
 
