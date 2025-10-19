@@ -1,0 +1,13 @@
+[gd_scene load_steps=3 format=3 uid="uid://game_logo_ui"]
+
+[ext_resource type="Script" path="res://nodes/ui/logo/game_logo.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://nodes/ui/logo/logo.png" id="2_texture"]
+
+[node name="GameLogo" type="TextureRect"]
+custom_minimum_size = Vector2(200, 100)
+offset_right = 300.0
+offset_bottom = 150.0
+texture = ExtResource("2_texture")
+expand_mode = 1
+stretch_mode = 5
+script = ExtResource("1_script")

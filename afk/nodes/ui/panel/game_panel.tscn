@@ -1,0 +1,44 @@
+[gd_scene load_steps=3 format=3 uid="uid://game_panel_ui"]
+
+[ext_resource type="Script" path="res://nodes/ui/panel/game_panel.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://nodes/ui/panel/panel.png" id="2_texture"]
+
+[node name="GamePanel" type="NinePatchRect"]
+custom_minimum_size = Vector2(200, 150)
+offset_right = 400.0
+offset_bottom = 300.0
+texture = ExtResource("2_texture")
+patch_margin_left = 32
+patch_margin_top = 32
+patch_margin_right = 32
+patch_margin_bottom = 32
+script = ExtResource("1_script")
+
+[node name="TitleLabel" type="Label" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_top = 10.0
+offset_bottom = 40.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_font_sizes/font_size = 18
+text = "Panel Title"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ContentContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 20
+theme_override_constants/margin_top = 20
+theme_override_constants/margin_right = 20
+theme_override_constants/margin_bottom = 20
+
+[node name="Content" type="VBoxContainer" parent="ContentContainer"]
+layout_mode = 2
