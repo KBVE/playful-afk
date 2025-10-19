@@ -1,0 +1,59 @@
+[gd_scene load_steps=3 format=3 uid="uid://c8jxqm3vhqw7f"]
+
+[ext_resource type="Script" path="res://gameplay/title/title.gd" id="1_title"]
+[ext_resource type="PackedScene" uid="uid://bxk8qm3vhqw7g" path="res://nodes/ui/buttons/main_button.tscn" id="2_main_button"]
+
+[node name="Title" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_title")
+
+[node name="ColorRect" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.2, 0.25, 0.35, 1)
+
+[node name="VBoxContainer" type="VBoxContainer" parent="."]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -100.0
+offset_top = -80.0
+offset_right = 100.0
+offset_bottom = 80.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/separation = 20
+alignment = 1
+
+[node name="GameTitle" type="Label" parent="VBoxContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 32
+text = "AFK Virtual Pet"
+horizontal_alignment = 1
+
+[node name="StartButton" parent="VBoxContainer" instance=ExtResource("2_main_button")]
+layout_mode = 2
+button_text = "Start Game"
+button_style = "Primary"
+
+[node name="OptionsButton" parent="VBoxContainer" instance=ExtResource("2_main_button")]
+layout_mode = 2
+button_text = "Options"
+button_style = "Secondary"
+
+[node name="QuitButton" parent="VBoxContainer" instance=ExtResource("2_main_button")]
+layout_mode = 2
+button_text = "Quit"
+button_style = "Danger"
