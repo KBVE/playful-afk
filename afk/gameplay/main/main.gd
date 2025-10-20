@@ -231,16 +231,8 @@ func _on_npc_dialogue_requested(npc: Node2D, npc_name: String, dialogue_text: St
 		print("ERROR: npc or chat_ui is null! npc=", npc, " chat_ui=", chat_ui)
 		return
 
-	# Get the NPC's AnimatedSprite2D for the portrait (will be duplicated in ChatUI)
-	var npc_sprite: AnimatedSprite2D = null
-	if npc.has_node("AnimatedSprite2D"):
-		npc_sprite = npc.get_node("AnimatedSprite2D")
-		print("Found AnimatedSprite2D: ", npc_sprite)
-	else:
-		print("ERROR: NPC does not have AnimatedSprite2D node!")
-
-	# Prepare chat UI with NPC data (ChatUI will duplicate the sprite)
-	chat_ui.show_dialogue(npc_name, npc_sprite)
+	# Prepare chat UI with NPC data (ChatUI will use cached sprite from NPCManager)
+	chat_ui.show_dialogue(npc_name, npc)
 	chat_ui.set_dialogue_text(dialogue_text)
 
 	# Open modal via EventManager

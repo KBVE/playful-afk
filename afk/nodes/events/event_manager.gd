@@ -267,39 +267,34 @@ func request_view_change(new_state: ViewState) -> void:
 	var old_state = current_view_state
 	current_view_state = new_state
 
-	# Manage UI visibility based on view state
-	_manage_ui_visibility(new_state, old_state)
-
 	print("EventManager: View state changed from ", ViewState.keys()[old_state], " to ", ViewState.keys()[new_state])
+
+	# Prepare the TARGET view (show what we're transitioning TO)
+	_prepare_view_for_transition(new_state)
+
+	# Emit signal so main can start the camera pan
 	view_state_changed.emit(new_state, old_state)
 
 
-## Manage UI visibility during view transitions
-func _manage_ui_visibility(new_state: ViewState, old_state: ViewState) -> void:
-	# Manage Bartender scene visibility
-	if bartender_scene:
-		if new_state == ViewState.BARTENDER:
-			# Show bartender scene when entering BARTENDER view
-			bartender_scene.visible = true
-			print("EventManager: Bartender scene shown")
-		elif old_state == ViewState.BARTENDER and new_state != ViewState.BARTENDER:
-			# Hide bartender scene when leaving BARTENDER view
-			bartender_scene.visible = false
-			print("EventManager: Bartender scene hidden")
+## Prepare the target view before camera pan starts
+func _prepare_view_for_transition(target_state: ViewState) -> void:
+	# Show/hide scenes based on TARGET state
+	match target_state:
+		ViewState.BARTENDER:
+			# Going TO bartender - show bartender scene, hide ChatUI (will show after pan)
+			if bartender_scene:
+				bartender_scene.visible = true
+				print("EventManager: Bartender scene shown (preparing for transition)")
+			if chat_ui:
+				chat_ui.visible = false
+				print("EventManager: ChatUI hidden (will show after pan)")
 
-	# Manage ChatUI visibility
-	if not chat_ui:
-		return
-
-	# Hide ChatUI when leaving BARTENDER view
-	if old_state == ViewState.BARTENDER and new_state != ViewState.BARTENDER:
-		chat_ui.visible = false
-		print("EventManager: ChatUI hidden (leaving bartender view)")
-
-	# Hide ChatUI when entering BARTENDER view (will be shown after camera pan)
-	if new_state == ViewState.BARTENDER:
-		chat_ui.visible = false
-		print("EventManager: ChatUI hidden (entering bartender view, will show after pan)")
+		ViewState.GROUND, ViewState.SKY:
+			# Going TO ground/sky - hide ChatUI immediately, keep bartender visible during pan
+			if chat_ui:
+				chat_ui.visible = false
+				print("EventManager: ChatUI hidden (leaving bartender)")
+			# NOTE: Bartender scene stays visible during pan, will be hidden after pan completes
 
 
 ## Get the current view state
@@ -311,10 +306,19 @@ func get_current_view() -> ViewState:
 func complete_view_transition(view_state: ViewState) -> void:
 	print("EventManager: View transition completed for ", ViewState.keys()[view_state])
 
-	# Show ChatUI when arriving at BARTENDER view
-	if view_state == ViewState.BARTENDER and chat_ui:
-		chat_ui.visible = true
-		print("EventManager: ChatUI shown (arrived at bartender view)")
+	# Apply final visibility states based on CURRENT view
+	match view_state:
+		ViewState.BARTENDER:
+			# Arrived at bartender - show ChatUI
+			if chat_ui:
+				chat_ui.visible = true
+				print("EventManager: ChatUI shown (arrived at bartender)")
+
+		ViewState.GROUND, ViewState.SKY:
+			# Arrived at ground/sky - hide bartender scene
+			if bartender_scene:
+				bartender_scene.visible = false
+				print("EventManager: Bartender scene hidden (arrived at ground/sky)")
 
 	view_transition_completed.emit(view_state)
 

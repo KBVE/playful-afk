@@ -26,14 +26,9 @@ func show_dialogue_with_npc(npc: Node2D, npc_name: String) -> void:
 	visible = true
 	current_npc = npc
 
-	# Get the NPC's AnimatedSprite2D for the portrait (will be duplicated in ChatUI)
-	var npc_sprite: AnimatedSprite2D = null
-	if npc.has_node("AnimatedSprite2D"):
-		npc_sprite = npc.get_node("AnimatedSprite2D")
-
-	# Show chat UI with NPC (ChatUI will duplicate the sprite)
+	# Show chat UI with NPC (ChatUI will use cached sprite from NPCManager)
 	if chat_ui:
-		chat_ui.show_dialogue(npc_name, npc_sprite)
+		chat_ui.show_dialogue(npc_name, npc)
 		# Set default dialogue text
 		chat_ui.set_dialogue_text("Hello traveler! What can I do for you?")
 
@@ -58,6 +53,6 @@ func hide_scene() -> void:
 ## Handle dialogue closed
 func _on_dialogue_closed() -> void:
 	print("Bartender: Dialogue closed")
-	hide_scene()
-	# Signal to main scene to return to ground view
+	# NOTE: Don't hide scene here - EventManager controls visibility
+	# Just emit the signal so main scene knows to transition
 	dialogue_finished.emit()

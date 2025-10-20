@@ -34,10 +34,11 @@ func _ready() -> void:
 	print("ChatUI initialized")
 
 
-## Show the chat UI with NPC animated sprite (DOES NOT make visible - caller must do that)
-func show_dialogue(npc_name: String, npc_sprite: AnimatedSprite2D = null) -> void:
+## Show the chat UI with NPC (DOES NOT make visible - caller must do that)
+## Uses cached UI sprite from NPCManager for better performance
+func show_dialogue(npc_name: String, npc: Node2D = null) -> void:
 	current_npc_name = npc_name
-	print("ChatUI: show_dialogue called with npc_name=", npc_name, " npc_sprite=", npc_sprite)
+	print("ChatUI: show_dialogue called with npc_name=", npc_name, " npc=", npc)
 
 	# Set NPC name
 	if npc_name_label:
@@ -46,24 +47,26 @@ func show_dialogue(npc_name: String, npc_sprite: AnimatedSprite2D = null) -> voi
 	else:
 		print("ChatUI ERROR: npc_name_label is null!")
 
-	# Clear previous NPC sprite
-	if current_npc_sprite:
-		current_npc_sprite.queue_free()
+	# Remove previous NPC sprite from UI (but don't free it - it's cached)
+	if current_npc_sprite and npc_portrait_container:
+		npc_portrait_container.remove_child(current_npc_sprite)
 		current_npc_sprite = null
 
-	# Add NPC sprite to portrait area (showing idle animation)
-	if npc_sprite and npc_portrait_container:
-		print("ChatUI: Duplicating sprite...")
-		current_npc_sprite = npc_sprite.duplicate() as AnimatedSprite2D
-		print("ChatUI: Duplicated sprite: ", current_npc_sprite)
-		print("ChatUI: npc_portrait_container: ", npc_portrait_container)
-		npc_portrait_container.add_child(current_npc_sprite)
-		print("ChatUI: Added sprite as child, playing idle animation...")
-		current_npc_sprite.play("idle")  # Play idle animation
-		current_npc_sprite.scale = Vector2(3, 3)  # Scale up for portrait
-		print("ChatUI: NPC sprite setup complete - visible=", current_npc_sprite.visible, " scale=", current_npc_sprite.scale)
+	# Get cached UI sprite from NPCManager (no duplication!)
+	if npc and npc_portrait_container:
+		var npc_type = NPCManager.get_npc_type(npc)
+		if npc_type != "":
+			current_npc_sprite = NPCManager.get_ui_sprite(npc_type)
+			if current_npc_sprite:
+				# Add cached sprite to UI (will be removed, not freed, when dialogue closes)
+				npc_portrait_container.add_child(current_npc_sprite)
+				current_npc_sprite.play("idle")  # Play idle animation
+				current_npc_sprite.scale = Vector2(3, 3)  # Scale up for portrait
+				print("ChatUI: Using cached UI sprite for ", npc_type)
+			else:
+				push_warning("ChatUI: No cached UI sprite found for ", npc_type)
 	else:
-		print("ChatUI ERROR: npc_sprite or npc_portrait_container is null! npc_sprite=", npc_sprite, " container=", npc_portrait_container)
+		print("ChatUI: npc or npc_portrait_container is null")
 
 	# Clear previous dialogue
 	if dialogue_text:
@@ -77,6 +80,12 @@ func show_dialogue(npc_name: String, npc_sprite: AnimatedSprite2D = null) -> voi
 func hide_dialogue() -> void:
 	visible = false
 	current_npc_name = ""
+
+	# Remove cached sprite from UI (but don't free it - it's cached in NPCManager)
+	if current_npc_sprite and npc_portrait_container:
+		npc_portrait_container.remove_child(current_npc_sprite)
+		current_npc_sprite = null
+
 	print("ChatUI: Dialogue hidden")
 
 

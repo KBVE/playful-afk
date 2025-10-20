@@ -17,6 +17,10 @@ var is_transitioning: bool = false
 ## Modal reference (created once and reused)
 var structure_modal: Modal = null
 
+## UI Sprite Cache - Pre-cloned sprites for modal display (performance optimization)
+## These sprites are created once and reused for modals instead of cloning every time
+var ui_sprite_cache: Dictionary = {}
+
 ## Click debouncing
 var click_debounce_time: float = 0.5  # Seconds between allowed clicks
 var time_since_last_click: float = 0.0
@@ -161,12 +165,12 @@ func _open_structure_modal(structure_name: String, structure_description: String
 	# Set modal title
 	structure_modal.set_title(structure_name)
 
-	# Get the structure sprite and add it to the modal
-	if current_structure and current_structure.has_node("Sprite2D"):
-		var structure_sprite = current_structure.get_node("Sprite2D") as Sprite2D
-		structure_modal.set_structure_sprite(structure_name, structure_sprite)
+	# Get the cached structure sprite and add it to the modal (no duplication!)
+	var cached_sprite = get_cached_structure_sprite(structure_name)
+	if cached_sprite:
+		structure_modal.set_structure_sprite(structure_name, cached_sprite)
 	else:
-		print("StructureManager: Warning - Structure has no Sprite2D node")
+		push_warning("StructureManager: No cached sprite found for ", structure_name)
 
 	# Check if this is the Dragon Den - special content with dice
 	if structure_name == "Dragon Den":
@@ -241,6 +245,10 @@ func register_structure(structure: Node2D) -> void:
 	var index = registered_structures.size() - 1
 	var position = _calculate_structure_position(index, level)
 	structure.position = position
+
+	# Cache the structure's sprite for UI display (performance optimization)
+	var structure_name = structure.name if structure.name else "Unknown"
+	cache_structure_sprite(structure_name, structure)
 
 	print("StructureManager: Registered structure at position ", position, " (Level: ", level, ")")
 
@@ -376,3 +384,32 @@ func _create_dragon_den_content(description: String) -> Control:
 	)
 
 	return container
+
+
+## ===== UI SPRITE CACHE SYSTEM =====
+## Pre-cloned sprites for modal display (performance optimization)
+## Avoids duplicating sprites every time a structure modal opens
+
+## Cache a structure's sprite for UI display
+func cache_structure_sprite(structure_name: String, structure: Node2D) -> void:
+	if not structure or not structure.has_node("Sprite2D"):
+		push_warning("StructureManager: Cannot cache sprite for ", structure_name, " - no Sprite2D found")
+		return
+
+	var sprite = structure.get_node("Sprite2D") as Sprite2D
+	if sprite:
+		# Duplicate sprite once and store in cache
+		var cached_sprite = sprite.duplicate() as Sprite2D
+		ui_sprite_cache[structure_name] = cached_sprite
+		print("StructureManager: Cached UI sprite for ", structure_name)
+
+
+## Get cached UI sprite for a structure
+## Returns the pre-cloned sprite ready to be added to modal
+## IMPORTANT: Do NOT duplicate or free this sprite - use it directly
+func get_cached_structure_sprite(structure_name: String) -> Sprite2D:
+	if ui_sprite_cache.has(structure_name) and ui_sprite_cache[structure_name] != null:
+		return ui_sprite_cache[structure_name]
+
+	push_warning("StructureManager: No cached UI sprite for ", structure_name)
+	return null

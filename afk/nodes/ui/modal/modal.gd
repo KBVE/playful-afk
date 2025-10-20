@@ -124,6 +124,11 @@ func close() -> void:
 
 	await tween.finished
 
+	# Remove cached structure sprite (but don't free it - it's in StructureManager's cache)
+	if structure_sprite_container:
+		for child in structure_sprite_container.get_children():
+			structure_sprite_container.remove_child(child)
+
 	visible = false
 	is_animating = false
 	is_open = false
@@ -170,22 +175,22 @@ func clear_content() -> void:
 		child.queue_free()
 
 
-## Set the structure sprite (duplicates the sprite from the structure node)
-func set_structure_sprite(structure_name: String, sprite: Sprite2D) -> void:
+## Set the structure sprite (uses cached sprite from StructureManager)
+## Uses pre-cloned sprite for better performance
+func set_structure_sprite(structure_name: String, cached_sprite: Sprite2D) -> void:
 	# Set structure name
 	if structure_name_label:
 		structure_name_label.text = structure_name
 
-	# Clear previous sprite
+	# Remove previous sprite from UI (but don't free it - it's cached)
 	if structure_sprite_container:
 		for child in structure_sprite_container.get_children():
-			child.queue_free()
+			structure_sprite_container.remove_child(child)
 
-		# Duplicate and add the sprite
-		if sprite:
-			var sprite_copy = sprite.duplicate() as Sprite2D
-			structure_sprite_container.add_child(sprite_copy)
-			print("Modal: Structure sprite set for ", structure_name)
+		# Add cached sprite to modal (will be removed, not freed, when modal closes)
+		if cached_sprite:
+			structure_sprite_container.add_child(cached_sprite)
+			print("Modal: Using cached structure sprite for ", structure_name)
 
 
 ## Handle overlay clicks

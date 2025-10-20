@@ -14,6 +14,13 @@ var warrior: Warrior = null
 var cat_scene: PackedScene = preload("res://nodes/npc/cat/cat.tscn")
 var warrior_scene: PackedScene = preload("res://nodes/npc/warrior/warrior.tscn")
 
+# UI Sprite Cache - Pre-cloned sprites for UI display (performance optimization)
+# These sprites are created once and reused for ChatUI/Modals instead of cloning every time
+var ui_sprite_cache: Dictionary = {
+	"cat": null,
+	"warrior": null
+}
+
 # Character Pool for Layer4 NPCs (scroll with Layer4 at 0.9 speed)
 const MAX_POOL_SIZE: int = 16
 var character_pool: Array[Dictionary] = []
@@ -33,11 +40,14 @@ func _ready() -> void:
 	# Initialize character pool (empty slots)
 	_initialize_character_pool()
 
+	# Initialize UI sprite cache (create pre-cloned sprites for UI)
+	_initialize_ui_sprite_cache()
+
 	# Connect to save/load events
 	EventManager.game_saved.connect(_on_game_saved)
 	EventManager.game_loaded.connect(_on_game_loaded)
 
-	print("NPCManager initialized - Cat, Warrior, and Character Pool ready")
+	print("NPCManager initialized - Cat, Warrior, Character Pool, and UI Sprite Cache ready")
 
 
 ## Initialize the cat virtual pet
@@ -382,3 +392,49 @@ func get_active_pool_characters() -> Array:
 		if slot["is_active"] and slot["character"] != null:
 			active.append(slot["character"])
 	return active
+
+
+## ===== UI SPRITE CACHE SYSTEM =====
+## Pre-cloned sprites for UI display (ChatUI, Modals, etc.)
+## Performance optimization - avoids cloning sprites every time
+
+## Initialize UI sprite cache - create pre-cloned sprites for each NPC type
+func _initialize_ui_sprite_cache() -> void:
+	# Create cat UI sprite
+	if cat and cat.has_node("AnimatedSprite2D"):
+		var cat_sprite = cat.get_node("AnimatedSprite2D") as AnimatedSprite2D
+		if cat_sprite:
+			var cat_ui_sprite = cat_sprite.duplicate() as AnimatedSprite2D
+			ui_sprite_cache["cat"] = cat_ui_sprite
+			print("NPCManager: Cat UI sprite cached")
+
+	# Create warrior UI sprite
+	if warrior and warrior.has_node("AnimatedSprite2D"):
+		var warrior_sprite = warrior.get_node("AnimatedSprite2D") as AnimatedSprite2D
+		if warrior_sprite:
+			var warrior_ui_sprite = warrior_sprite.duplicate() as AnimatedSprite2D
+			ui_sprite_cache["warrior"] = warrior_ui_sprite
+			print("NPCManager: Warrior UI sprite cached")
+
+	print("NPCManager: UI sprite cache initialized")
+
+
+## Get cached UI sprite for an NPC type (e.g., "cat", "warrior")
+## Returns the pre-cloned sprite ready to be added to UI
+## IMPORTANT: Do NOT duplicate or modify this sprite - use it directly
+func get_ui_sprite(npc_type: String) -> AnimatedSprite2D:
+	if ui_sprite_cache.has(npc_type) and ui_sprite_cache[npc_type] != null:
+		return ui_sprite_cache[npc_type]
+
+	push_warning("NPCManager: No UI sprite cached for type: ", npc_type)
+	return null
+
+
+## Get NPC type name from NPC node (used to look up cached sprite)
+func get_npc_type(npc: Node2D) -> String:
+	if npc is Cat:
+		return "cat"
+	elif npc is Warrior:
+		return "warrior"
+	else:
+		return ""
