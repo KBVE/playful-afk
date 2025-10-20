@@ -24,7 +24,29 @@ func _ready() -> void:
 	if layer3_objects:
 		initial_layer3_objects_position = layer3_objects.position.x
 
+	# Auto-register all structures with StructureManager
+	_register_structures()
+
 	print("RollingHillsBackground initialized")
+
+
+## Register all child structures with StructureManager for auto-positioning
+func _register_structures() -> void:
+	if not layer3_objects or not StructureManager:
+		return
+
+	# Get all structure children
+	var structures = layer3_objects.get_children()
+
+	print("RollingHillsBackground: Found ", structures.size(), " structures to register")
+
+	# Register each structure with the manager
+	for structure in structures:
+		if structure is Node2D:
+			StructureManager.register_structure(structure)
+			# Scale all structures using StructureManager's scale setting
+			var scale = StructureManager.structure_scale
+			structure.scale = Vector2(scale, scale)
 
 
 ## Scroll all layers based on an offset

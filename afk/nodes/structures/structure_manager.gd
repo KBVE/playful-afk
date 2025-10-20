@@ -18,6 +18,15 @@ var is_transitioning: bool = false
 var click_debounce_time: float = 0.5  # Seconds between allowed clicks
 var time_since_last_click: float = 0.0
 
+## Structure positioning system
+var registered_structures: Array[Node2D] = []
+var structure_spacing: float = 350.0  # Minimum horizontal spacing between structures
+var ground_y_base: float = 380.0  # Base Y position for structures (raised 60px total)
+var ground_y_variance: float = 20.0  # Random Y variance for natural look
+var start_x: float = 150.0  # Starting X position for first structure
+var viewport_width: float = 1152.0  # Screen width
+var structure_scale: float = 1.5  # Scale for all structures
+
 
 func _ready() -> void:
 	print("StructureManager initialized")
@@ -143,3 +152,56 @@ func force_close_modal() -> void:
 	is_transitioning = false
 	current_structure = null
 	print("StructureManager: Force closed modal")
+
+
+## Register a structure and automatically position it
+func register_structure(structure: Node2D) -> void:
+	if structure in registered_structures:
+		push_warning("StructureManager: Structure already registered")
+		return
+
+	registered_structures.append(structure)
+
+	# Calculate position based on number of registered structures
+	var index = registered_structures.size() - 1
+	var position = _calculate_structure_position(index)
+	structure.position = position
+
+	print("StructureManager: Registered structure at position ", position)
+
+
+## Calculate position for a structure based on its index
+func _calculate_structure_position(index: int) -> Vector2:
+	# Calculate X position with spacing
+	var x = start_x + (index * structure_spacing)
+
+	# Wrap around if we exceed viewport width
+	if x > viewport_width - 100:  # Leave margin on right edge
+		# Calculate how many structures fit in one row
+		var structures_per_row = int((viewport_width - start_x) / structure_spacing)
+		var row = index / structures_per_row
+		var col = index % structures_per_row
+		x = start_x + (col * structure_spacing)
+
+		# Offset Y for new rows (not implemented yet, but placeholder)
+		# y_offset = row * 100.0
+
+	# Add random Y variance for natural look (seeded by index for consistency)
+	var rng = RandomNumberGenerator.new()
+	rng.seed = hash(index)
+	var y_offset = rng.randf_range(-ground_y_variance, ground_y_variance)
+	var y = ground_y_base + y_offset
+
+	return Vector2(x, y)
+
+
+## Get the next available position for a new structure
+func get_next_structure_position() -> Vector2:
+	var next_index = registered_structures.size()
+	return _calculate_structure_position(next_index)
+
+
+## Clear all registered structures (useful for scene transitions)
+func clear_structures() -> void:
+	registered_structures.clear()
+	print("StructureManager: Cleared all registered structures")
