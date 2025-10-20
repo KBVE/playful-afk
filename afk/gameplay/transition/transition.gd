@@ -34,6 +34,7 @@ func _ready() -> void:
 	progress_bar.value = 0.0
 
 	# Hide parallax background initially
+	parallax_bg.visible = false
 	parallax_bg.modulate.a = 0.0
 
 	# Make sure this layer is on top
@@ -70,12 +71,18 @@ func transition_to(scene_path: String) -> void:
 	fade_rect.visible = true
 	fade_rect.mouse_filter = Control.MOUSE_FILTER_STOP
 
+	# Show parallax background immediately (before fade out completes)
+	parallax_bg.visible = true
+	parallax_bg.modulate.a = 0.0
+
 	# Start fade out
 	await _fade_out()
 
-	# Show parallax background
+	# Fade in parallax background after fade to black
+	print("Showing parallax background for transition to: ", target_scene)
 	var bg_tween = create_tween()
 	bg_tween.tween_property(parallax_bg, "modulate:a", 1.0, 0.3)
+	await bg_tween.finished
 
 	# Show spinner and progress bar
 	spinner.visible = true
@@ -113,6 +120,7 @@ func transition_to(scene_path: String) -> void:
 	await hide_ui.finished
 	spinner.visible = false
 	progress_bar.visible = false
+	parallax_bg.visible = false
 
 	# Fade in to new scene
 	await _fade_in()

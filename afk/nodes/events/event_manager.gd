@@ -128,8 +128,8 @@ func _ready() -> void:
 	# Connect to screen transition requests
 	screen_transition_requested.connect(_on_screen_transition_requested)
 
-	# Load and add transition scene
-	_setup_transition_layer()
+	# Load and add transition scene (deferred to avoid blocking)
+	call_deferred("_setup_transition_layer")
 
 
 ## Setup the transition layer
