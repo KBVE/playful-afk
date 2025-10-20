@@ -5,23 +5,27 @@
 [ext_resource type="Texture2D" path="res://nodes/background/rolling_hills/background2.png" id="3_layer2"]
 [ext_resource type="Texture2D" path="res://nodes/background/rolling_hills/background3.png" id="4_layer3"]
 [ext_resource type="Texture2D" path="res://nodes/background/rolling_hills/background4.png" id="5_layer4"]
-[ext_resource type="Shader" path="res://nodes/background/red_forest/parallax_scroll.gdshader" id="6_shader"]
+[ext_resource type="Shader" path="res://nodes/background/rolling_hills/parallax_tiling.gdshader" id="6_shader"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_1"]
 shader = ExtResource("6_shader")
 shader_parameter/scroll_offset = 0.0
+shader_parameter/tile_scale = 3.0
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_2"]
 shader = ExtResource("6_shader")
 shader_parameter/scroll_offset = 0.0
+shader_parameter/tile_scale = 3.0
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_3"]
 shader = ExtResource("6_shader")
 shader_parameter/scroll_offset = 0.0
+shader_parameter/tile_scale = 3.0
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_4"]
 shader = ExtResource("6_shader")
 shader_parameter/scroll_offset = 0.0
+shader_parameter/tile_scale = 3.0
 
 [node name="RollingHillsBackground" type="Control"]
 layout_mode = 3
@@ -42,7 +46,7 @@ grow_horizontal = 2
 grow_vertical = 2
 texture = ExtResource("2_layer1")
 expand_mode = 1
-stretch_mode = 5
+stretch_mode = 6
 
 [node name="Layer2" type="TextureRect" parent="."]
 material = SubResource("ShaderMaterial_2")
@@ -54,7 +58,7 @@ grow_horizontal = 2
 grow_vertical = 2
 texture = ExtResource("3_layer2")
 expand_mode = 1
-stretch_mode = 5
+stretch_mode = 6
 
 [node name="Layer3" type="TextureRect" parent="."]
 material = SubResource("ShaderMaterial_3")
@@ -66,7 +70,9 @@ grow_horizontal = 2
 grow_vertical = 2
 texture = ExtResource("4_layer3")
 expand_mode = 1
-stretch_mode = 5
+stretch_mode = 6
+
+[node name="Layer3Objects" type="Node2D" parent="."]
 
 [node name="Layer4" type="TextureRect" parent="."]
 material = SubResource("ShaderMaterial_4")
@@ -78,4 +84,4 @@ grow_horizontal = 2
 grow_vertical = 2
 texture = ExtResource("5_layer4")
 expand_mode = 1
-stretch_mode = 5
+stretch_mode = 6
