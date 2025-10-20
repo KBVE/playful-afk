@@ -11,8 +11,12 @@ signal farm_clicked
 @onready var collision_shape: CollisionShape2D = $ClickArea/CollisionShape2D
 
 ## Floating animation properties
-@export var float_amplitude: float = 10.0  ## How high/low it floats
-@export var float_speed: float = 2.0  ## Speed of floating animation
+@export var float_amplitude: float = 3.0  ## How high/low it floats
+@export var float_speed: float = 0.5  ## Speed of floating animation
+
+## Fade properties
+@export var distance_opacity: float = 0.6  ## Opacity when not hovered (distant)
+@export var near_opacity: float = 1.0  ## Opacity when hovered (near)
 
 var time_elapsed: float = 0.0
 var initial_y_position: float = 0.0
@@ -23,6 +27,8 @@ func _ready() -> void:
 		sprite.centered = true
 		sprite.scale = Vector2(1.0, 1.0)
 		initial_y_position = sprite.position.y
+		# Start with distance fade
+		sprite.modulate.a = distance_opacity
 
 	# Connect click area signal
 	if click_area:
@@ -58,15 +64,17 @@ func _play_click_animation() -> void:
 
 ## Handle mouse enter for visual feedback
 func _on_mouse_entered() -> void:
-	# Slightly brighten the sprite when hovered
+	# Remove fade and brighten when hovered (farm comes into focus)
 	if sprite:
-		sprite.modulate = Color(1.2, 1.2, 1.2, 1.0)
+		var tween = create_tween()
+		tween.tween_property(sprite, "modulate", Color(1.1, 1.1, 1.1, near_opacity), 0.2)
 
 ## Handle mouse exit
 func _on_mouse_exited() -> void:
-	# Return to normal color
+	# Return to faded distant appearance
 	if sprite:
-		sprite.modulate = Color(1.0, 1.0, 1.0, 1.0)
+		var tween = create_tween()
+		tween.tween_property(sprite, "modulate", Color(1.0, 1.0, 1.0, distance_opacity), 0.2)
 
 ## Set the scale of the cat farm
 func set_farm_scale(new_scale: Vector2) -> void:
