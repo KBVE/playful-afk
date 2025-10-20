@@ -309,8 +309,11 @@ func complete_view_transition(view_state: ViewState) -> void:
 	# Apply final visibility states based on CURRENT view
 	match view_state:
 		ViewState.BARTENDER:
-			# Arrived at bartender - show ChatUI
-			if chat_ui:
+			# Arrived at bartender - fade in ChatUI
+			if chat_ui and chat_ui.has_method("fade_in"):
+				chat_ui.fade_in()
+				print("EventManager: ChatUI fading in (arrived at bartender)")
+			elif chat_ui:
 				chat_ui.visible = true
 				print("EventManager: ChatUI shown (arrived at bartender)")
 

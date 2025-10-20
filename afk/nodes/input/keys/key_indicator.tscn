@@ -1,0 +1,21 @@
+[gd_scene load_steps=3 format=3 uid="uid://key_indicator"]
+
+[ext_resource type="Script" path="res://nodes/input/keys/key_indicator.gd" id="1_script"]
+[ext_resource type="FontFile" uid="uid://cy15kjeobttji" path="res://nodes/ui/fonts/alagard.ttf" id="2_font"]
+
+[node name="KeyIndicator" type="HBoxContainer"]
+script = ExtResource("1_script")
+
+[node name="KeyIcon" type="TextureRect" parent="."]
+custom_minimum_size = Vector2(24, 24)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_font")
+theme_override_font_sizes/font_size = 14
+theme_override_colors/font_color = Color(0.8, 0.8, 0.8, 1)
+text = "Close"
+vertical_alignment = 1

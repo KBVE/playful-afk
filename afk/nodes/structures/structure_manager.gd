@@ -162,15 +162,16 @@ func _open_structure_modal(structure_name: String, structure_description: String
 	# Clear previous content
 	structure_modal.clear_content()
 
-	# Set modal title
+	# Set modal title (use display name for user-friendly title)
 	structure_modal.set_title(structure_name)
 
-	# Get the cached structure sprite and add it to the modal (no duplication!)
-	var cached_sprite = get_cached_structure_sprite(structure_name)
+	# Get the cached structure sprite using node name as cache key
+	var cache_key = current_structure.name if current_structure else ""
+	var cached_sprite = get_cached_structure_sprite(cache_key)
 	if cached_sprite:
 		structure_modal.set_structure_sprite(structure_name, cached_sprite)
 	else:
-		push_warning("StructureManager: No cached sprite found for ", structure_name)
+		push_warning("StructureManager: No cached sprite found for node '", cache_key, "'")
 
 	# Check if this is the Dragon Den - special content with dice
 	if structure_name == "Dragon Den":
@@ -247,10 +248,10 @@ func register_structure(structure: Node2D) -> void:
 	structure.position = position
 
 	# Cache the structure's sprite for UI display (performance optimization)
-	var structure_name = structure.name if structure.name else "Unknown"
-	cache_structure_sprite(structure_name, structure)
+	# Use the node name as cache key for consistency
+	cache_structure_sprite(structure.name, structure)
 
-	print("StructureManager: Registered structure at position ", position, " (Level: ", level, ")")
+	print("StructureManager: Registered structure '", structure.name, "' at position ", position, " (Level: ", level, ")")
 
 
 ## Calculate position for a structure based on its index and level
