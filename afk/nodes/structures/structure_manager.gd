@@ -20,11 +20,28 @@ var time_since_last_click: float = 0.0
 
 ## Structure positioning system
 var registered_structures: Array[Node2D] = []
-var structure_spacing: float = 230.0  # Minimum horizontal spacing between structures (reduced for more structures)
-var ground_y_variance: float = 20.0  # Random Y variance for natural look
-var start_x: float = 100.0  # Starting X position for first structure
-var viewport_width: float = 1152.0  # Screen width
-var structure_scale: float = 1.5  # Scale for all structures
+var structure_scale: float = 1.3  # Scale for all structures
+
+## Fixed structure slots with intentional offsets for natural look
+## Format: [x_position, y_position]
+var structure_slots: Array = [
+	Vector2(80, 380),    # Slot 0 - Ground left
+	Vector2(280, 390),   # Slot 1 - Ground, slightly lower
+	Vector2(480, 375),   # Slot 2 - Ground, slightly higher
+	Vector2(680, 120),   # Slot 3 - Sky left, slightly higher
+	Vector2(880, 90),    # Slot 4 - Sky right, slightly lower
+	Vector2(680, 290),   # Slot 5 - Elevated left, offset from sky
+	Vector2(880, 270),   # Slot 6 - Elevated right, lower than slot 5
+	Vector2(1080, 380),  # Slot 7 - Ground right (LOCKED)
+	Vector2(1080, 110),  # Slot 8 - Sky far right (LOCKED)
+	Vector2(1080, 285),  # Slot 9 - Elevated far right (LOCKED)
+	Vector2(80, 105),    # Slot 10 - Sky far left (LOCKED)
+	Vector2(280, 280),   # Slot 11 - Elevated far left (LOCKED)
+	Vector2(480, 100),   # Slot 12 - Sky middle left (LOCKED)
+	Vector2(480, 268),   # Slot 13 - Elevated middle (LOCKED)
+	Vector2(280, 95),    # Slot 14 - Sky left lower (LOCKED)
+]
+var current_slot_index: int = 0
 
 ## Y positions for different structure levels
 var level_y_positions: Dictionary = {
@@ -188,30 +205,13 @@ func register_structure(structure: Node2D) -> void:
 
 ## Calculate position for a structure based on its index and level
 func _calculate_structure_position(index: int, level: BaseStructure.StructureLevel = BaseStructure.StructureLevel.GROUND) -> Vector2:
-	# Calculate X position with spacing
-	var x = start_x + (index * structure_spacing)
+	# Use fixed slot positions for natural, hand-crafted placement
+	if index < structure_slots.size():
+		return structure_slots[index]
 
-	# Wrap around if we exceed viewport width
-	if x > viewport_width - 100:  # Leave margin on right edge
-		# Calculate how many structures fit in one row
-		var structures_per_row = int((viewport_width - start_x) / structure_spacing)
-		var row = index / structures_per_row
-		var col = index % structures_per_row
-		x = start_x + (col * structure_spacing)
-
-		# Offset Y for new rows (not implemented yet, but placeholder)
-		# y_offset = row * 100.0
-
-	# Get base Y position for the structure's level
-	var base_y = level_y_positions.get(level, level_y_positions[BaseStructure.StructureLevel.GROUND])
-
-	# Add random Y variance for natural look (seeded by index for consistency)
-	var rng = RandomNumberGenerator.new()
-	rng.seed = hash(index)
-	var y_offset = rng.randf_range(-ground_y_variance, ground_y_variance)
-	var y = base_y + y_offset
-
-	return Vector2(x, y)
+	# Fallback if we run out of slots (shouldn't happen with current setup)
+	push_warning("Structure index ", index, " exceeds available slots!")
+	return Vector2(100 + (index * 200), 380)
 
 
 ## Get the next available position for a new structure

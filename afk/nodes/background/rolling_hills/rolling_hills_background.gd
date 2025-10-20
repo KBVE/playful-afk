@@ -14,15 +14,19 @@ class_name RollingHillsBackground
 @onready var layer3: TextureRect = $Layer3
 @onready var layer4: TextureRect = $Layer4
 @onready var layer3_objects: Node2D = $Layer3Objects
+@onready var layer4_objects: Node2D = $Layer4Objects
 
 var scroll_offset: float = 0.0
 var initial_layer3_objects_position: float = 0.0
+var initial_layer4_objects_position: float = 0.0
 
 
 func _ready() -> void:
-	# Store initial position for objects container
+	# Store initial position for objects containers
 	if layer3_objects:
 		initial_layer3_objects_position = layer3_objects.position.x
+	if layer4_objects:
+		initial_layer4_objects_position = layer4_objects.position.x
 
 	# Auto-register all structures with StructureManager
 	_register_structures()
@@ -65,6 +69,10 @@ func scroll_to(offset: float) -> void:
 	# Also scroll objects in layer 3 at the same speed as layer 3
 	if layer3_objects:
 		layer3_objects.position.x = initial_layer3_objects_position - (scroll_offset * scroll_speed_layer3)
+
+	# Scroll objects in layer 4 at the same speed as layer 4 (0.9 speed)
+	if layer4_objects:
+		layer4_objects.position.x = initial_layer4_objects_position - (scroll_offset * scroll_speed_layer4)
 
 
 ## Reset scroll

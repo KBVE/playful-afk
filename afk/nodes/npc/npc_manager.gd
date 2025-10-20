@@ -7,8 +7,17 @@ extends Node
 # Virtual Pet Reference
 var cat: Cat = null
 
+# NPC References
+var warrior: Warrior = null
+
 # NPC Configuration
 var cat_scene: PackedScene = preload("res://nodes/npc/cat/cat.tscn")
+var warrior_scene: PackedScene = preload("res://nodes/npc/warrior/warrior.tscn")
+
+# Character Pool for Layer4 NPCs (scroll with Layer4 at 0.9 speed)
+const MAX_POOL_SIZE: int = 16
+var character_pool: Array[Dictionary] = []
+var foreground_container: Node2D = null
 
 # Save/Load data
 var npc_save_data: Dictionary = {}
@@ -18,11 +27,17 @@ func _ready() -> void:
 	# Initialize the cat (virtual pet)
 	_initialize_cat()
 
+	# Initialize the warrior NPC
+	_initialize_warrior()
+
+	# Initialize character pool (empty slots)
+	_initialize_character_pool()
+
 	# Connect to save/load events
 	EventManager.game_saved.connect(_on_game_saved)
 	EventManager.game_loaded.connect(_on_game_loaded)
 
-	print("NPCManager initialized - Cat virtual pet ready")
+	print("NPCManager initialized - Cat, Warrior, and Character Pool ready")
 
 
 ## Initialize the cat virtual pet
@@ -87,26 +102,91 @@ func reset_cat() -> void:
 	print("Cat has been reset to default state")
 
 
+## Initialize the warrior NPC
+func _initialize_warrior() -> void:
+	if warrior == null:
+		warrior = warrior_scene.instantiate()
+		add_child(warrior)
+
+		# Load saved data if available
+		if npc_save_data.has("warrior"):
+			_load_warrior_data(npc_save_data["warrior"])
+
+		print("Warrior NPC instantiated and ready")
+
+
+## Save warrior data to dictionary
+func save_warrior_data() -> Dictionary:
+	if warrior == null:
+		return {}
+
+	return {
+		"health": warrior.health,
+		"strength": warrior.strength,
+		"defense": warrior.defense,
+		"level": warrior.level,
+		"current_state": warrior.current_state,
+		"position": {
+			"x": warrior.position.x,
+			"y": warrior.position.y
+		}
+	}
+
+
+## Load warrior data from dictionary
+func _load_warrior_data(data: Dictionary) -> void:
+	if warrior == null:
+		return
+
+	warrior.health = data.get("health", 100.0)
+	warrior.strength = data.get("strength", 50.0)
+	warrior.defense = data.get("defense", 50.0)
+	warrior.level = data.get("level", 1)
+	warrior.current_state = data.get("current_state", "Idle")
+
+	# Restore position if available
+	if data.has("position"):
+		var pos = data["position"]
+		warrior.position = Vector2(pos.get("x", 0), pos.get("y", 0))
+
+	print("Warrior data loaded successfully")
+
+
+## Reset warrior to default state
+func reset_warrior() -> void:
+	if warrior:
+		warrior.queue_free()
+		warrior = null
+
+	_initialize_warrior()
+	print("Warrior has been reset to default state")
+
+
 
 
 ## Handle game save event
 func _on_game_saved(success: bool) -> void:
 	if success:
 		npc_save_data["cat"] = save_cat_data()
+		npc_save_data["warrior"] = save_warrior_data()
 		print("NPC data saved")
 
 
 ## Handle game load event
 func _on_game_loaded(success: bool) -> void:
-	if success and npc_save_data.has("cat"):
-		_load_cat_data(npc_save_data["cat"])
+	if success:
+		if npc_save_data.has("cat"):
+			_load_cat_data(npc_save_data["cat"])
+		if npc_save_data.has("warrior"):
+			_load_warrior_data(npc_save_data["warrior"])
 		print("NPC data loaded")
 
 
 ## Get all NPC data for saving to file
 func get_save_data() -> Dictionary:
 	return {
-		"cat": save_cat_data()
+		"cat": save_cat_data(),
+		"warrior": save_warrior_data()
 	}
 
 
@@ -116,3 +196,189 @@ func load_save_data(data: Dictionary) -> void:
 
 	if npc_save_data.has("cat"):
 		_load_cat_data(npc_save_data["cat"])
+
+	if npc_save_data.has("warrior"):
+		_load_warrior_data(npc_save_data["warrior"])
+
+
+## ===== CHARACTER POOL SYSTEM =====
+## Manages Layer4 characters that scroll with background Layer4 at 0.9 speed
+
+## Initialize character pool with empty slots
+func _initialize_character_pool() -> void:
+	character_pool.clear()
+
+	for i in range(MAX_POOL_SIZE):
+		character_pool.append({
+			"character": null,
+			"is_active": false,
+			"slot_index": i,
+			"position": Vector2.ZERO,
+			"character_type": ""  # "warrior", "cat", etc.
+		})
+
+	print("Character pool initialized with %d slots" % MAX_POOL_SIZE)
+
+
+## Set the Layer4Objects container reference (called from main scene)
+func set_layer4_container(container: Node2D) -> void:
+	foreground_container = container
+	print("Layer4Objects container set - characters will scroll with Layer4 at 0.9 speed")
+
+
+## Add warrior to pool at a specific slot
+func add_warrior_to_pool(slot_index: int, position: Vector2 = Vector2.ZERO, activate: bool = false, movement_bounds: Vector2 = Vector2(100.0, 1052.0)) -> Warrior:
+	if slot_index < 0 or slot_index >= MAX_POOL_SIZE:
+		push_error("Invalid slot index: %d" % slot_index)
+		return null
+
+	# Create a new warrior instance
+	var new_warrior = warrior_scene.instantiate() as Warrior
+
+	if _add_character_to_slot(new_warrior, slot_index, position, activate, "warrior", movement_bounds):
+		return new_warrior
+	else:
+		new_warrior.queue_free()
+		return null
+
+
+## Internal: Add any character to a slot
+func _add_character_to_slot(character: Node2D, slot_index: int, position: Vector2, activate: bool, char_type: String, movement_bounds: Vector2 = Vector2(100.0, 1052.0)) -> bool:
+	if not foreground_container:
+		push_error("ForegroundCharacters container not set! Call set_layer4_container() first.")
+		return false
+
+	var slot = character_pool[slot_index]
+
+	# Remove existing character if any
+	if slot["character"] != null:
+		push_warning("Slot %d already occupied, replacing character" % slot_index)
+		_remove_character_from_slot(slot_index)
+
+	# Add character to slot
+	slot["character"] = character
+	slot["position"] = position
+	slot["is_active"] = activate
+	slot["character_type"] = char_type
+
+	# Add to scene (in Layer4Objects - will scroll with Layer4)
+	foreground_container.add_child(character)
+	character.position = position
+	character.visible = activate
+
+	# Configure character
+	if not activate:
+		_deactivate_character(character)
+	else:
+		_activate_character(character, movement_bounds)
+
+	print("Added %s to pool slot %d (active: %s)" % [char_type, slot_index, activate])
+	return true
+
+
+## Activate a character in a slot
+func activate_pool_character(slot_index: int) -> bool:
+	if slot_index < 0 or slot_index >= MAX_POOL_SIZE:
+		return false
+
+	var slot = character_pool[slot_index]
+	if slot["character"] == null or slot["is_active"]:
+		return false
+
+	slot["is_active"] = true
+	var character = slot["character"]
+	character.visible = true
+	_activate_character(character)
+
+	print("Activated character in slot %d" % slot_index)
+	return true
+
+
+## Deactivate a character in a slot
+func deactivate_pool_character(slot_index: int) -> bool:
+	if slot_index < 0 or slot_index >= MAX_POOL_SIZE:
+		return false
+
+	var slot = character_pool[slot_index]
+	if slot["character"] == null or not slot["is_active"]:
+		return false
+
+	slot["is_active"] = false
+	var character = slot["character"]
+	character.visible = false
+	_deactivate_character(character)
+
+	print("Deactivated character in slot %d" % slot_index)
+	return true
+
+
+## Internal: Activate character logic
+func _activate_character(character: Node2D, movement_bounds: Vector2 = Vector2(100.0, 1052.0)) -> void:
+	# Enable physics
+	if character.has_method("set_physics_process"):
+		character.set_physics_process(true)
+
+	# Start AI if it's a Warrior with custom movement bounds
+	if character is Warrior and character.controller:
+		character.controller.start_random_movement(movement_bounds.x, movement_bounds.y)
+
+	# Enable state timer
+	if character.has_node("StateTimer"):
+		var timer = character.get_node("StateTimer")
+		if timer is Timer and timer.is_stopped():
+			timer.start()
+
+
+## Internal: Deactivate character logic
+func _deactivate_character(character: Node2D) -> void:
+	# Disable physics
+	if character.has_method("set_physics_process"):
+		character.set_physics_process(false)
+
+	# Stop AI if it's a Warrior
+	if character is Warrior and character.controller:
+		character.controller.stop_random_movement()
+
+	# Stop state timer
+	if character.has_node("StateTimer"):
+		var timer = character.get_node("StateTimer")
+		if timer is Timer:
+			timer.stop()
+
+
+## Internal: Remove character from slot
+func _remove_character_from_slot(slot_index: int) -> void:
+	var slot = character_pool[slot_index]
+	if slot["character"] != null:
+		slot["character"].queue_free()
+		slot["character"] = null
+		slot["is_active"] = false
+		slot["character_type"] = ""
+
+
+## Update all active pooled characters
+func update_pool_characters(delta: float) -> void:
+	for slot in character_pool:
+		if slot["is_active"] and slot["character"] != null:
+			var character = slot["character"]
+			# Update Warrior controllers
+			if character is Warrior and character.controller:
+				character.controller.update_movement(delta)
+
+
+## Get active character count
+func get_active_pool_count() -> int:
+	var count = 0
+	for slot in character_pool:
+		if slot["is_active"]:
+			count += 1
+	return count
+
+
+## Get all active pooled characters
+func get_active_pool_characters() -> Array:
+	var active = []
+	for slot in character_pool:
+		if slot["is_active"] and slot["character"] != null:
+			active.append(slot["character"])
+	return active

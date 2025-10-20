@@ -1,4 +1,4 @@
-[gd_scene load_steps=12 format=3 uid="uid://rolling_hills_bg"]
+[gd_scene load_steps=14 format=3 uid="uid://rolling_hills_bg"]
 
 [ext_resource type="Script" path="res://nodes/background/rolling_hills/rolling_hills_background.gd" id="1_script"]
 [ext_resource type="Texture2D" path="res://nodes/background/rolling_hills/background1.png" id="2_layer1"]
@@ -12,6 +12,8 @@
 [ext_resource type="PackedScene" uid="uid://city_tower_structure" path="res://nodes/structures/city_tower/city_tower.tscn" id="10_city_tower"]
 [ext_resource type="PackedScene" uid="uid://dragon_den_structure" path="res://nodes/structures/dragon_den/dragon_den.tscn" id="11_dragon_den"]
 [ext_resource type="PackedScene" uid="uid://inn_structure" path="res://nodes/structures/inn/inn.tscn" id="12_inn"]
+[ext_resource type="PackedScene" uid="uid://barracks_structure" path="res://nodes/structures/barracks/barracks.tscn" id="13_barracks"]
+[ext_resource type="PackedScene" uid="uid://locked_structure" path="res://nodes/structures/locked/locked.tscn" id="14_locked"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_1"]
 shader = ExtResource("6_shader")
@@ -95,6 +97,24 @@ stretch_mode = 6
 
 [node name="Inn" parent="Layer3Objects" instance=ExtResource("12_inn")]
 
+[node name="Barracks" parent="Layer3Objects" instance=ExtResource("13_barracks")]
+
+[node name="Locked1" parent="Layer3Objects" instance=ExtResource("14_locked")]
+
+[node name="Locked2" parent="Layer3Objects" instance=ExtResource("14_locked")]
+
+[node name="Locked3" parent="Layer3Objects" instance=ExtResource("14_locked")]
+
+[node name="Locked4" parent="Layer3Objects" instance=ExtResource("14_locked")]
+
+[node name="Locked5" parent="Layer3Objects" instance=ExtResource("14_locked")]
+
+[node name="Locked6" parent="Layer3Objects" instance=ExtResource("14_locked")]
+
+[node name="Locked7" parent="Layer3Objects" instance=ExtResource("14_locked")]
+
+[node name="Locked8" parent="Layer3Objects" instance=ExtResource("14_locked")]
+
 [node name="Layer4" type="TextureRect" parent="."]
 material = SubResource("ShaderMaterial_4")
 layout_mode = 1
@@ -107,3 +127,5 @@ mouse_filter = 2
 texture = ExtResource("5_layer4")
 expand_mode = 1
 stretch_mode = 6
+
+[node name="Layer4Objects" type="Node2D" parent="."]

@@ -1,0 +1,15 @@
+[gd_scene load_steps=3 format=3 uid="uid://barracks_structure"]
+
+[ext_resource type="Script" path="res://nodes/structures/barracks/barracks.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://nodes/structures/barracks/barracks.png" id="2_texture"]
+
+[node name="Barracks" type="Node2D"]
+script = ExtResource("1_script")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_texture")
+centered = true
+
+[node name="Area2D" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Area2D"]

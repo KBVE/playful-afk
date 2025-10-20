@@ -10,7 +10,7 @@ func _ready() -> void:
 	structure_description = "A fearsome dragon's lair.\nProvides powerful defense\nand spawns at game start.\n\n(More features coming soon...)"
 
 	# Set structure metadata - SPAWN + DEFENSE
-	structure_level = StructureLevel.GROUND
+	structure_level = StructureLevel.SKY
 	structure_types = StructureType.SPAWN | StructureType.DEFENSE
 
 	# Call parent _ready to initialize common functionality

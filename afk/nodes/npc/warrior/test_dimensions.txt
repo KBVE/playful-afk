@@ -1,0 +1,7 @@
+Image: 448x392
+Columns: 7
+Rows: 8
+
+Option 1: 448/7 = 64 per column, 392/8 = 49 per row (64x49)
+Option 2: With 8 pixel margin = 56x49 frames
+Option 3: 448/7 = 64, but check if there's padding

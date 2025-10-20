@@ -9,6 +9,7 @@ extends Node2D
 @onready var game_view: Control = $GameView
 @onready var pet_container: Control = $GameView/PetContainer
 @onready var background: Control = $GameView/RollingHillsBackground
+@onready var foreground_characters: Control = $GameView/ForegroundCharacters
 
 # Camera positions
 var camera_ground_position: Vector2 = Vector2(576, 324)  # Center of ground view (1152x648)
@@ -25,6 +26,9 @@ var cat_start_position: float = 0.0
 var cat_target_position: float = 0.0
 var move_right: bool = true
 
+# Character pool reference (managed by NPCManager)
+# Use NPCManager.character_pool to access pooled characters
+
 
 func _ready() -> void:
 	print("Main gameplay scene loaded")
@@ -34,6 +38,9 @@ func _ready() -> void:
 
 	# Setup the pet
 	_setup_pet()
+
+	# Setup character pool and warriors
+	_setup_character_pool()
 
 	# Connect to event manager
 	EventManager.game_paused.connect(_on_game_paused)
@@ -54,8 +61,8 @@ func _setup_pet() -> void:
 
 	# Position cat in the center-bottom of the screen
 	var viewport_size = get_viewport_rect().size
-	cat.position = Vector2(viewport_size.x / 2, viewport_size.y - 150)
-	cat.scale = Vector2(4, 4)  # Make cat bigger for main gameplay
+	cat.position = Vector2(viewport_size.x / 2, viewport_size.y - 80)
+	cat.scale = Vector2(3, 3)  # Make cat bigger for main gameplay
 
 	# Store starting position for parallax
 	cat_start_position = cat.position.x
@@ -68,6 +75,36 @@ func _setup_pet() -> void:
 	_start_cat_movement()
 
 	print("Cat setup complete in main scene at position: ", cat.position)
+
+
+func _setup_character_pool() -> void:
+	# Set Layer4Objects container in NPCManager (scrolls with Layer4 at 0.9 speed)
+	if background and background.layer4_objects:
+		NPCManager.set_layer4_container(background.layer4_objects)
+	else:
+		push_error("Layer4Objects not found in background!")
+		return
+
+	# Add warrior to pool at slot 0 (activate it)
+	# Position relative to Layer4Objects (will scroll with background at 0.9 speed)
+	var viewport_size = get_viewport_rect().size
+	var warrior_position = Vector2(200, viewport_size.y - 150)
+
+	# Define movement bounds relative to Layer4 (warrior moves within layer bounds)
+	var movement_bounds = Vector2(100.0, viewport_size.x - 100.0)
+
+	var warrior = NPCManager.add_warrior_to_pool(0, warrior_position, true, movement_bounds)
+	if warrior:
+		warrior.scale = Vector2(2, 2)  # Smaller than cat (cat is 4x, warrior is 2x)
+		warrior.set_physics_process(false)  # Disable physics/gravity (same as cat)
+		warrior.set_player_controlled(false)  # Enable autonomous behavior
+		print("Warrior added to character pool at slot 0")
+
+	# Example: Add more warriors to pool (but keep them inactive)
+	# NPCManager.add_warrior_to_pool(1, Vector2(400, viewport_size.y - 150), false, movement_bounds)
+	# NPCManager.add_warrior_to_pool(2, Vector2(600, viewport_size.y - 150), false, movement_bounds)
+
+	print("Character pool setup complete - %d active characters" % NPCManager.get_active_pool_count())
 
 
 func _start_cat_movement() -> void:
@@ -126,6 +163,9 @@ func _process(delta: float) -> void:
 	# Update cat controller movement
 	if cat and cat.controller:
 		cat.controller.update_movement(delta)
+
+	# Update all pooled characters (warriors, etc.)
+	NPCManager.update_pool_characters(delta)
 
 	# Update parallax background based on cat movement
 	if cat and background:
