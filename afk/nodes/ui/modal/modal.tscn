@@ -4,6 +4,20 @@
 [ext_resource type="Texture2D" path="res://nodes/ui/panel/panel.png" id="2_panel_texture"]
 [ext_resource type="FontFile" path="res://nodes/ui/fonts/alagard.ttf" id="3_font"]
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_1"]
+bg_color = Color(0.686275, 0.439216, 0.443137, 0.3)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_2"]
+bg_color = Color(0.686275, 0.439216, 0.443137, 0.5)
+corner_radius_top_left = 4
+corner_radius_top_right = 4
+corner_radius_bottom_right = 4
+corner_radius_bottom_left = 4
+
 [sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_1"]
 
 [node name="Modal" type="CanvasLayer"]
@@ -74,14 +88,15 @@ vertical_alignment = 1
 [node name="CloseButton" type="Button" parent="ModalContainer/Panel/VBoxContainer/TitleBar"]
 custom_minimum_size = Vector2(40, 40)
 layout_mode = 2
-theme_override_colors/font_color = Color(0.686275, 0.439216, 0.443137, 1)
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_hover_color = Color(1, 1, 1, 1)
+theme_override_colors/font_pressed_color = Color(1, 1, 1, 1)
 theme_override_fonts/font = ExtResource("3_font")
 theme_override_font_sizes/font_size = 24
-theme_override_styles/normal = SubResource("StyleBoxEmpty_1")
-theme_override_styles/hover = SubResource("StyleBoxEmpty_1")
-theme_override_styles/pressed = SubResource("StyleBoxEmpty_1")
+theme_override_styles/normal = SubResource("StyleBoxFlat_1")
+theme_override_styles/hover = SubResource("StyleBoxFlat_2")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_2")
 theme_override_styles/focus = SubResource("StyleBoxEmpty_1")
-flat = false
 text = "X"
 
 [node name="HSeparator" type="HSeparator" parent="ModalContainer/Panel/VBoxContainer"]
