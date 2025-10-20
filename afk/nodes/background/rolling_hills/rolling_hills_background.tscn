@@ -7,6 +7,7 @@
 [ext_resource type="Texture2D" path="res://nodes/background/rolling_hills/background4.png" id="5_layer4"]
 [ext_resource type="Shader" path="res://nodes/background/rolling_hills/parallax_tiling.gdshader" id="6_shader"]
 [ext_resource type="PackedScene" uid="uid://c7j8k9m0n1p2q" path="res://nodes/structures/cat_farm/cat_farm.tscn" id="7_cat_farm"]
+[ext_resource type="PackedScene" uid="uid://castle_structure" path="res://nodes/structures/castle/castle.tscn" id="8_castle"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_1"]
 shader = ExtResource("6_shader")
@@ -80,6 +81,10 @@ stretch_mode = 6
 
 [node name="CatFarm" parent="Layer3Objects" instance=ExtResource("7_cat_farm")]
 position = Vector2(400, 450)
+scale = Vector2(2, 2)
+
+[node name="Castle" parent="Layer3Objects" instance=ExtResource("8_castle")]
+position = Vector2(800, 430)
 scale = Vector2(2, 2)
 
 [node name="Layer4" type="TextureRect" parent="."]
