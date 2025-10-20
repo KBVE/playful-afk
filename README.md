@@ -12,3 +12,6 @@ https://brullov.itch.io/oak-woods
 
 Mondstadt Theme Forest Intro
 https://theflavare.itch.io/mondstadt-theme-background-pixel-art
+
+Background Hill
+https://szadiart.itch.io/bakcground-hill

@@ -43,7 +43,18 @@ func _ready() -> void:
 func _on_start_pressed() -> void:
 	print("Start game pressed - transitioning to introduction")
 	EventManager.sfx_play_requested.emit("button_click")
+
+	# Return cat to NPCManager before scene change
+	_cleanup_cat()
+
 	EventManager.start_new_game()
+
+
+func _cleanup_cat() -> void:
+	# Reparent cat back to NPCManager so it persists across scenes
+	if NPCManager.cat and NPCManager.cat.get_parent() != NPCManager:
+		NPCManager.cat.reparent(NPCManager)
+		print("Cat reparented back to NPCManager")
 
 
 func _on_options_pressed() -> void:
@@ -68,9 +79,7 @@ func _setup_cat_testing() -> void:
 
 	# IMPORTANT: Reparent cat to this Control node so it renders in the UI layer
 	var cat = NPCManager.cat
-	if cat.get_parent():
-		cat.get_parent().remove_child(cat)
-	add_child(cat)
+	cat.reparent(self)
 
 	# Position cat at bottom left of screen
 	cat.position = Vector2(50, screen_height - 100)

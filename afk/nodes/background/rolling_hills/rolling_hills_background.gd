@@ -1,0 +1,40 @@
+extends Control
+class_name RollingHillsBackground
+
+## Simple layered background using TextureRect nodes
+## 4 layers with parallax scrolling for rolling hills environment
+
+@export var scroll_speed_layer1: float = 0.15
+@export var scroll_speed_layer2: float = 0.35
+@export var scroll_speed_layer3: float = 0.6
+@export var scroll_speed_layer4: float = 0.9
+
+@onready var layer1: TextureRect = $Layer1
+@onready var layer2: TextureRect = $Layer2
+@onready var layer3: TextureRect = $Layer3
+@onready var layer4: TextureRect = $Layer4
+
+var scroll_offset: float = 0.0
+
+
+func _ready() -> void:
+	print("RollingHillsBackground initialized")
+
+
+## Scroll all layers based on an offset
+func scroll_to(offset: float) -> void:
+	scroll_offset = offset
+
+	if layer1 and layer1.material:
+		layer1.material.set_shader_parameter("scroll_offset", scroll_offset * scroll_speed_layer1)
+	if layer2 and layer2.material:
+		layer2.material.set_shader_parameter("scroll_offset", scroll_offset * scroll_speed_layer2)
+	if layer3 and layer3.material:
+		layer3.material.set_shader_parameter("scroll_offset", scroll_offset * scroll_speed_layer3)
+	if layer4 and layer4.material:
+		layer4.material.set_shader_parameter("scroll_offset", scroll_offset * scroll_speed_layer4)
+
+
+## Reset scroll
+func reset() -> void:
+	scroll_to(0.0)
