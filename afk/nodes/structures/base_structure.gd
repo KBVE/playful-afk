@@ -5,6 +5,23 @@ class_name BaseStructure
 ## Handles common functionality like floating animation, click detection, and modal opening
 ## Child classes only need to define their name and description
 
+## Structure Level - determines vertical placement
+enum StructureLevel {
+	GROUND = 1,   ## Base location on the ground
+	ELEVATED = 2, ## Higher up, more Y offset
+	SKY = 3       ## Up in the sky layer
+}
+
+## Structure Type - bitwise flags for categorization and spawning
+enum StructureType {
+	NONE = 0,
+	SPAWN = 1,    ## Included in starting scene
+	DEFENSE = 2,  ## Defensive structure
+	TOWN = 4,     ## Town/settlement structure
+	FARM = 8,     ## Resource farming structure
+	CASTLE = 16,  ## Castle/fortress structure
+}
+
 signal structure_clicked
 
 @onready var sprite: Sprite2D = $Sprite2D
@@ -12,6 +29,8 @@ signal structure_clicked
 ## Structure properties (override in child classes)
 @export var structure_name: String = "Structure"
 @export var structure_description: String = "This is a structure."
+@export var structure_level: StructureLevel = StructureLevel.GROUND  ## Default to ground level
+@export_flags("SPAWN", "DEFENSE", "TOWN", "FARM", "CASTLE") var structure_types: int = 0  ## Bitwise flags
 
 ## Floating animation properties
 @export var float_amplitude: float = 3.0  ## How high/low it floats
@@ -42,6 +61,9 @@ func _ready() -> void:
 	if InputManager:
 		InputManager.register_interactive_object(self, click_radius, self)
 		print(structure_name, " registered with InputManager (radius: ", click_radius, ")")
+
+	# Log structure metadata
+	print(structure_name, " - Level: ", structure_level, ", Types: ", _get_type_names())
 
 
 func _exit_tree() -> void:
@@ -114,3 +136,33 @@ func get_structure_bounds() -> Rect2:
 		var scaled_size = texture_size * sprite.scale
 		return Rect2(position - scaled_size / 2, scaled_size)
 	return Rect2()
+
+
+## Check if structure has a specific type flag
+func has_type(type: StructureType) -> bool:
+	return (structure_types & type) != 0
+
+
+## Check if structure should spawn in starting scene
+func is_spawn_structure() -> bool:
+	return has_type(StructureType.SPAWN)
+
+
+## Get human-readable type names for debugging
+func _get_type_names() -> String:
+	if structure_types == 0:
+		return "NONE"
+
+	var type_names: Array[String] = []
+	if has_type(StructureType.SPAWN):
+		type_names.append("SPAWN")
+	if has_type(StructureType.DEFENSE):
+		type_names.append("DEFENSE")
+	if has_type(StructureType.TOWN):
+		type_names.append("TOWN")
+	if has_type(StructureType.FARM):
+		type_names.append("FARM")
+	if has_type(StructureType.CASTLE):
+		type_names.append("CASTLE")
+
+	return " | ".join(type_names)

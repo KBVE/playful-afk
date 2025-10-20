@@ -9,5 +9,9 @@ func _ready() -> void:
 	structure_name = "Cat Farm"
 	structure_description = "This is where you can manage your cats,\ncollect resources, and expand your farm.\n\n(More features coming soon...)"
 
+	# Set structure metadata
+	structure_level = StructureLevel.GROUND
+	structure_types = StructureType.FARM
+
 	# Call parent _ready to initialize common functionality
 	super._ready()

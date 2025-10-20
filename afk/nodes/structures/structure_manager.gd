@@ -21,11 +21,17 @@ var time_since_last_click: float = 0.0
 ## Structure positioning system
 var registered_structures: Array[Node2D] = []
 var structure_spacing: float = 350.0  # Minimum horizontal spacing between structures
-var ground_y_base: float = 380.0  # Base Y position for structures (raised 60px total)
 var ground_y_variance: float = 20.0  # Random Y variance for natural look
 var start_x: float = 150.0  # Starting X position for first structure
 var viewport_width: float = 1152.0  # Screen width
 var structure_scale: float = 1.5  # Scale for all structures
+
+## Y positions for different structure levels
+var level_y_positions: Dictionary = {
+	BaseStructure.StructureLevel.GROUND: 380.0,    # Base ground level
+	BaseStructure.StructureLevel.ELEVATED: 280.0,  # Higher up (100px higher)
+	BaseStructure.StructureLevel.SKY: 100.0        # Sky layer (280px higher)
+}
 
 
 func _ready() -> void:
@@ -162,16 +168,21 @@ func register_structure(structure: Node2D) -> void:
 
 	registered_structures.append(structure)
 
-	# Calculate position based on number of registered structures
+	# Get structure level if it's a BaseStructure
+	var level = BaseStructure.StructureLevel.GROUND
+	if structure is BaseStructure:
+		level = structure.structure_level
+
+	# Calculate position based on number of registered structures and level
 	var index = registered_structures.size() - 1
-	var position = _calculate_structure_position(index)
+	var position = _calculate_structure_position(index, level)
 	structure.position = position
 
-	print("StructureManager: Registered structure at position ", position)
+	print("StructureManager: Registered structure at position ", position, " (Level: ", level, ")")
 
 
-## Calculate position for a structure based on its index
-func _calculate_structure_position(index: int) -> Vector2:
+## Calculate position for a structure based on its index and level
+func _calculate_structure_position(index: int, level: BaseStructure.StructureLevel = BaseStructure.StructureLevel.GROUND) -> Vector2:
 	# Calculate X position with spacing
 	var x = start_x + (index * structure_spacing)
 
@@ -186,19 +197,36 @@ func _calculate_structure_position(index: int) -> Vector2:
 		# Offset Y for new rows (not implemented yet, but placeholder)
 		# y_offset = row * 100.0
 
+	# Get base Y position for the structure's level
+	var base_y = level_y_positions.get(level, level_y_positions[BaseStructure.StructureLevel.GROUND])
+
 	# Add random Y variance for natural look (seeded by index for consistency)
 	var rng = RandomNumberGenerator.new()
 	rng.seed = hash(index)
 	var y_offset = rng.randf_range(-ground_y_variance, ground_y_variance)
-	var y = ground_y_base + y_offset
+	var y = base_y + y_offset
 
 	return Vector2(x, y)
 
 
 ## Get the next available position for a new structure
-func get_next_structure_position() -> Vector2:
+func get_next_structure_position(level: BaseStructure.StructureLevel = BaseStructure.StructureLevel.GROUND) -> Vector2:
 	var next_index = registered_structures.size()
-	return _calculate_structure_position(next_index)
+	return _calculate_structure_position(next_index, level)
+
+
+## Get all structures with a specific type flag
+func get_structures_by_type(type: BaseStructure.StructureType) -> Array[Node2D]:
+	var matching_structures: Array[Node2D] = []
+	for structure in registered_structures:
+		if structure is BaseStructure and structure.has_type(type):
+			matching_structures.append(structure)
+	return matching_structures
+
+
+## Get all spawn structures (for starting scene)
+func get_spawn_structures() -> Array[Node2D]:
+	return get_structures_by_type(BaseStructure.StructureType.SPAWN)
 
 
 ## Clear all registered structures (useful for scene transitions)

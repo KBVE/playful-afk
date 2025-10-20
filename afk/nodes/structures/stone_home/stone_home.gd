@@ -9,5 +9,9 @@ func _ready() -> void:
 	structure_name = "Stone Home"
 	structure_description = "A sturdy stone dwelling.\nProvides shelter and comfort\nfor your pets and villagers.\n\n(More features coming soon...)"
 
+	# Set structure metadata
+	structure_level = StructureLevel.GROUND
+	structure_types = StructureType.TOWN
+
 	# Call parent _ready to initialize common functionality
 	super._ready()
