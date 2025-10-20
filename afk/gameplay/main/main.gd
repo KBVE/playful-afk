@@ -161,6 +161,7 @@ func pan_camera_to_sky() -> void:
 	tween.tween_property(camera, "position", camera_sky_position, camera_pan_duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 
 	await tween.finished
+
 	is_camera_panning = false
 	print("Camera reached sky view")
 
@@ -177,5 +178,6 @@ func pan_camera_to_ground() -> void:
 	tween.tween_property(camera, "position", camera_ground_position, camera_pan_duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 
 	await tween.finished
+
 	is_camera_panning = false
 	print("Camera reached ground view")

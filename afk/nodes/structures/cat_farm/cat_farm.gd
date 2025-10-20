@@ -81,11 +81,19 @@ func _show_farm_modal() -> void:
 	get_tree().root.add_child(modal)
 	modal.set_title("Cat Farm")
 
-	# Add placeholder content
+	# Add placeholder content with the custom font
 	var content_label = Label.new()
-	content_label.text = "Welcome to the Cat Farm!\n\nThis is where you can manage your cats,\ncollect resources, and expand your farm.\n\n(More features coming soon...)"
+	content_label.text = "This is where you can manage your cats,\ncollect resources, and expand your farm.\n\n(More features coming soon...)"
 	content_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	content_label.add_theme_font_size_override("font_size", 18)
+
+	# Load and apply the alagard font
+	var font = load("res://nodes/ui/fonts/alagard.ttf")
+	content_label.add_theme_font_override("font", font)
+	content_label.add_theme_font_size_override("font_size", 20)
+	content_label.add_theme_color_override("font_color", Color(1, 1, 1, 1))  # White text
+	content_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))  # Black outline
+	content_label.add_theme_constant_override("outline_size", 4)  # Outline thickness
+
 	modal.set_content(content_label)
 
 	# Connect modal close to camera pan back

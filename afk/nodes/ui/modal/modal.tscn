@@ -78,7 +78,9 @@ layout_mode = 2
 [node name="TitleLabel" type="Label" parent="ModalContainer/Panel/VBoxContainer/TitleBar"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_colors/font_color = Color(0.686275, 0.439216, 0.443137, 1)
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
+theme_override_constants/outline_size = 4
 theme_override_fonts/font = ExtResource("3_font")
 theme_override_font_sizes/font_size = 24
 text = "Modal Title"

@@ -1,18 +1,8 @@
-[gd_scene load_steps=7 format=3 uid="uid://main_gameplay_scene"]
+[gd_scene load_steps=4 format=3 uid="uid://main_gameplay_scene"]
 
 [ext_resource type="Script" path="res://gameplay/main/main.gd" id="1_script"]
 [ext_resource type="PackedScene" uid="uid://rolling_hills_bg" path="res://nodes/background/rolling_hills/rolling_hills_background.tscn" id="2_background"]
 [ext_resource type="PackedScene" uid="uid://sky_cloudbox" path="res://nodes/background/sky_cloudbox/sky_cloudbox.tscn" id="3_sky"]
-[ext_resource type="Shader" path="res://nodes/background/blend_transition.gdshader" id="4_blend_shader"]
-[ext_resource type="Texture2D" path="res://nodes/background/rolling_hills/background1.png" id="5_ground_texture"]
-[ext_resource type="Texture2D" path="res://nodes/background/sky_cloudbox/4.png" id="6_sky_texture"]
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_blend"]
-shader = ExtResource("4_blend_shader")
-shader_parameter/blend_height = 0.5
-shader_parameter/gradient_softness = 0.4
-shader_parameter/ground_texture = ExtResource("5_ground_texture")
-shader_parameter/sky_texture = ExtResource("6_sky_texture")
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_script")
@@ -26,15 +16,6 @@ offset_left = 0.0
 offset_top = -648.0
 offset_right = 1152.0
 offset_bottom = 0.0
-
-[node name="BlendTransition" type="ColorRect" parent="."]
-material = SubResource("ShaderMaterial_blend")
-offset_left = 0.0
-offset_top = 0.0
-offset_right = 1152.0
-offset_bottom = 0.0
-mouse_filter = 2
-visible = false
 
 [node name="GameView" type="Control" parent="."]
 layout_mode = 3

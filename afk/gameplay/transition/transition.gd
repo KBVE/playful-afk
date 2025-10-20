@@ -17,7 +17,7 @@ var is_transitioning: bool = false
 # Transition timing
 var fade_out_duration: float = 0.4
 var fade_in_duration: float = 0.4
-var min_transition_time: float = 5.0  # Minimum 5 seconds to show loading
+var min_transition_time: float = 1.0  # Minimum 1 second to show loading
 
 # Parallax scrolling
 var parallax_scroll_offset: float = 0.0
