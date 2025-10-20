@@ -300,6 +300,11 @@ func _create_dragon_den_content(description: String) -> Control:
 	button_style.corner_radius_top_right = 8
 	button_style.corner_radius_bottom_left = 8
 	button_style.corner_radius_bottom_right = 8
+	# Add internal padding/margin to the button text
+	button_style.content_margin_left = 20
+	button_style.content_margin_right = 20
+	button_style.content_margin_top = 10
+	button_style.content_margin_bottom = 10
 
 	var button_hover_style = button_style.duplicate()
 	button_hover_style.bg_color = Color(0.7, 0.4, 0.15, 1.0)

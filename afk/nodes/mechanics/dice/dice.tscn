@@ -1,18 +1,17 @@
 [gd_scene load_steps=3 format=3 uid="uid://dice_d20"]
 
 [ext_resource type="Script" path="res://nodes/mechanics/dice/dice.gd" id="1_script"]
-[ext_resource type="Texture2D" path="res://nodes/mechanics/dice/Dice-Sheet.png" id="2_sheet"]
+[ext_resource type="Texture2D" path="res://nodes/mechanics/dice/Dice0.png" id="2_dice0"]
 
 [node name="Dice" type="Node2D"]
 script = ExtResource("1_script")
 total_roll_duration = 2.0
-initial_shake_intensity = 8.0
-initial_frame_speed = 0.03
-final_frame_speed = 0.3
+initial_shake_intensity = 5.0
+initial_frame_speed = 0.02
+final_frame_speed = 0.4
+stop_threshold = 0.7
+settle_time = 0.5
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-texture = ExtResource("2_sheet")
+texture = ExtResource("2_dice0")
 centered = true
-hframes = 20
-vframes = 1
-frame = 0

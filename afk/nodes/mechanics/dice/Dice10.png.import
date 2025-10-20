@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://p4tdosg2y7ao"
-path="res://.godot/imported/Dice-Sheet.png-62884d4a03f2e5c199a8f2dabfd4aafe.ctex"
+uid="uid://bwqcg0nvcyy5i"
+path="res://.godot/imported/Dice10.png-12960c4bc7130b0983b66b3c705f4607.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://nodes/mechanics/dice/Dice-Sheet.png"
-dest_files=["res://.godot/imported/Dice-Sheet.png-62884d4a03f2e5c199a8f2dabfd4aafe.ctex"]
+source_file="res://nodes/mechanics/dice/Dice10.png"
+dest_files=["res://.godot/imported/Dice10.png-12960c4bc7130b0983b66b3c705f4607.ctex"]
 
 [params]
 

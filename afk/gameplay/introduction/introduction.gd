@@ -55,13 +55,11 @@ func _on_continue_pressed() -> void:
 	# Play button click sound
 	EventManager.sfx_play_requested.emit("button_click")
 
-	# If text is still writing, skip to the end
+	# Stop text animation if still writing
 	if is_writing:
 		is_writing = false
 		if welcome_text:
 			welcome_text.visible_characters = -1  # Show all text immediately
-		print("Text animation skipped")
-		return
 
 	print("Continue pressed - transitioning to main game...")
 
