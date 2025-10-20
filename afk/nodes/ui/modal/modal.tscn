@@ -80,6 +80,8 @@ theme_override_font_sizes/font_size = 24
 theme_override_styles/normal = SubResource("StyleBoxEmpty_1")
 theme_override_styles/hover = SubResource("StyleBoxEmpty_1")
 theme_override_styles/pressed = SubResource("StyleBoxEmpty_1")
+theme_override_styles/focus = SubResource("StyleBoxEmpty_1")
+flat = false
 text = "X"
 
 [node name="HSeparator" type="HSeparator" parent="ModalContainer/Panel/VBoxContainer"]

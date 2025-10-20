@@ -12,7 +12,9 @@ position = Vector2(576, 324)
 enabled = true
 
 [node name="SkyCloudbox" parent="." instance=ExtResource("3_sky")]
+offset_left = 0.0
 offset_top = -648.0
+offset_right = 1152.0
 offset_bottom = 0.0
 
 [node name="GameView" type="Control" parent="."]

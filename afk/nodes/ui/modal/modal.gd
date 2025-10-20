@@ -47,6 +47,8 @@ func _ready() -> void:
 	# Set up close button
 	if close_button:
 		close_button.pressed.connect(_on_close_button_pressed)
+		close_button.mouse_entered.connect(_on_close_button_hover_enter)
+		close_button.mouse_exited.connect(_on_close_button_hover_exit)
 
 	# Set modal container initial scale for animation
 	if modal_container:
@@ -180,6 +182,20 @@ func _on_overlay_clicked(event: InputEvent) -> void:
 func _on_close_button_pressed() -> void:
 	close_button_pressed.emit()
 	close()
+
+
+## Handle close button hover enter
+func _on_close_button_hover_enter() -> void:
+	if close_button:
+		var tween = create_tween()
+		tween.tween_property(close_button, "scale", Vector2(1.2, 1.2), 0.1)
+
+
+## Handle close button hover exit
+func _on_close_button_hover_exit() -> void:
+	if close_button:
+		var tween = create_tween()
+		tween.tween_property(close_button, "scale", Vector2(1.0, 1.0), 0.1)
 
 
 ## Handle escape key to close
