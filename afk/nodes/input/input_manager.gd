@@ -15,6 +15,10 @@ var interactive_objects: Array[Dictionary] = []
 ## Currently hovered object
 var current_hovered_object: Node2D = null
 
+## Modal management
+var active_modals: Array[Node] = []
+var input_blocked: bool = false
+
 ## Performance settings
 @export var check_interval: float = 0.016  ## How often to check hover (60fps default)
 
@@ -56,12 +60,21 @@ func _process(delta: float) -> void:
 	time_since_last_check += delta
 
 	# Only check hover at the specified interval (performance optimization)
-	if time_since_last_check >= check_interval:
+	# Skip if input is blocked by modals
+	if time_since_last_check >= check_interval and not input_blocked:
 		time_since_last_check = 0.0
 		_check_hover_state()
+	elif input_blocked and current_hovered_object != null:
+		# If input becomes blocked, clear current hover
+		_trigger_hover_exit(current_hovered_object)
+		current_hovered_object = null
 
 
 func _input(event: InputEvent) -> void:
+	# Skip input handling if blocked by modals
+	if input_blocked:
+		return
+
 	# Handle mouse clicks
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
@@ -176,3 +189,25 @@ func cleanup_invalid_objects() -> void:
 	for i in range(interactive_objects.size() - 1, -1, -1):
 		if not is_instance_valid(interactive_objects[i]["object"]):
 			interactive_objects.remove_at(i)
+
+
+## Register a modal - blocks input to interactive objects
+func register_modal(modal: Node) -> void:
+	if not active_modals.has(modal):
+		active_modals.append(modal)
+		input_blocked = true
+		print("InputManager: Modal registered, input blocked (", active_modals.size(), " active modals)")
+
+
+## Unregister a modal - restores input if no other modals are active
+func unregister_modal(modal: Node) -> void:
+	var index = active_modals.find(modal)
+	if index != -1:
+		active_modals.remove_at(index)
+
+		# Only unblock input if no modals remain
+		if active_modals.is_empty():
+			input_blocked = false
+			print("InputManager: All modals closed, input restored")
+		else:
+			print("InputManager: Modal unregistered (", active_modals.size(), " modals still active)")
