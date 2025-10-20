@@ -119,27 +119,43 @@ signal sfx_play_requested(sfx_name)
 signal audio_settings_changed(setting, value)
 
 
+var transition_scene: CanvasLayer = null
+
+
 func _ready() -> void:
 	print("EventManager initialized - Centralized event system ready")
 
 	# Connect to screen transition requests
 	screen_transition_requested.connect(_on_screen_transition_requested)
 
+	# Load and add transition scene
+	_setup_transition_layer()
 
-## Handle scene transitions
+
+## Setup the transition layer
+func _setup_transition_layer() -> void:
+	var transition_packed = load("res://gameplay/transition/transition.tscn")
+	if transition_packed:
+		transition_scene = transition_packed.instantiate()
+		get_tree().root.add_child.call_deferred(transition_scene)
+		print("Transition layer initialized")
+	else:
+		push_error("Failed to load transition scene")
+
+
+## Handle scene transitions with fade effect
 func _on_screen_transition_requested(from_scene: String, to_scene: String) -> void:
 	print("Scene transition: %s -> %s" % [from_scene, to_scene])
 
-	# Get the scene tree
-	var tree = get_tree()
-	if not tree:
-		push_error("Cannot transition scenes - no scene tree available")
+	if not transition_scene:
+		push_error("Transition scene not available - falling back to direct transition")
+		var error = get_tree().change_scene_to_file(to_scene)
+		if error != OK:
+			push_error("Failed to change scene to: %s (Error code: %d)" % [to_scene, error])
 		return
 
-	# Change to the requested scene
-	var error = tree.change_scene_to_file(to_scene)
-	if error != OK:
-		push_error("Failed to change scene to: %s (Error code: %d)" % [to_scene, error])
+	# Use the transition scene for smooth fade
+	transition_scene.transition_to(to_scene)
 
 
 ## Request a scene transition (convenience function)
