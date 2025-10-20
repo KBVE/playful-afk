@@ -14,9 +14,6 @@ var is_modal_open: bool = false
 var current_structure: Node2D = null
 var is_transitioning: bool = false
 
-## Modal reference (created once and reused)
-var structure_modal: Modal = null
-
 ## UI Sprite Cache - Pre-cloned sprites for modal display (performance optimization)
 ## These sprites are created once and reused for modals instead of cloning every time
 var ui_sprite_cache: Dictionary = {}
@@ -61,8 +58,15 @@ var level_y_positions: Dictionary = {
 func _ready() -> void:
 	print("StructureManager initialized")
 
-	# Create and initialize the reusable modal (deferred to ensure tree is ready)
-	call_deferred("_setup_modal")
+	# Connect to EventManager's modal signals
+	# Wait for EventManager to setup modal first
+	await get_tree().process_frame
+	var modal = EventManager.get_ui(EventManager.UIType.MODAL)
+	if modal:
+		modal.modal_closed.connect(_on_modal_closed)
+		print("StructureManager: Connected to modal_closed signal")
+	else:
+		push_error("StructureManager: Could not get modal from EventManager!")
 
 
 func _process(delta: float) -> void:
@@ -113,17 +117,6 @@ func handle_structure_click(structure: Node2D, structure_name: String, structure
 	_open_structure_modal(structure_name, structure_description)
 
 
-## Setup the reusable modal (called once in _ready)
-func _setup_modal() -> void:
-	# Load and instantiate the modal
-	var modal_scene = load("res://nodes/ui/modal/modal.tscn")
-	structure_modal = modal_scene.instantiate() as Modal
-	get_tree().root.add_child(structure_modal)
-
-	# Connect modal close signal
-	structure_modal.modal_closed.connect(_on_modal_closed)
-
-	print("StructureManager: Modal setup complete")
 
 
 ## Open the modal for a structure
@@ -152,31 +145,35 @@ func _open_structure_modal(structure_name: String, structure_description: String
 	is_transitioning = false
 	is_modal_open = true
 
-	# Ensure modal is ready
-	if not structure_modal:
-		push_error("StructureManager: Modal not initialized!")
+	# Get modal from EventManager (single source of truth)
+	print("StructureManager: Requesting modal from EventManager...")
+	print("StructureManager: Modal ready? ", EventManager.is_ui_ready(EventManager.UIType.MODAL))
+	var modal = EventManager.get_ui(EventManager.UIType.MODAL)
+	if not modal:
+		push_error("StructureManager: Modal not found in EventManager!")
+		push_error("StructureManager: UI Registry state: ", EventManager.ui_registry)
 		return
 
-	print("StructureManager: Modal is ready, setting up content...")
+	print("StructureManager: Modal retrieved from EventManager, setting up content...")
 
 	# Clear previous content
-	structure_modal.clear_content()
+	modal.clear_content()
 
 	# Set modal title (use display name for user-friendly title)
-	structure_modal.set_title(structure_name)
+	modal.set_title(structure_name)
 
 	# Get the cached structure sprite using node name as cache key
 	var cache_key = current_structure.name if current_structure else ""
 	var cached_sprite = get_cached_structure_sprite(cache_key)
 	if cached_sprite:
-		structure_modal.set_structure_sprite(structure_name, cached_sprite)
+		modal.set_structure_sprite(structure_name, cached_sprite)
 	else:
 		push_warning("StructureManager: No cached sprite found for node '", cache_key, "'")
 
 	# Check if this is the Dragon Den - special content with dice
 	if structure_name == "Dragon Den":
 		var content = _create_dragon_den_content(structure_description)
-		structure_modal.set_content(content)
+		modal.set_content(content)
 	else:
 		# Standard content for other structures
 		var content_label = Label.new()
@@ -191,10 +188,14 @@ func _open_structure_modal(structure_name: String, structure_description: String
 		content_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))  # Black outline
 		content_label.add_theme_constant_override("outline_size", 4)  # Outline thickness
 
-		structure_modal.set_content(content_label)
+		modal.set_content(content_label)
 
-	# Open the reusable modal
-	structure_modal.open()
+	# Open the reusable modal via EventManager (handles visibility and input blocking)
+	EventManager.show_ui(EventManager.UIType.MODAL)
+
+	# Also call the modal's open() for its animation
+	modal.open()
+
 	structure_modal_opened.emit(current_structure)
 	print("StructureManager: Modal opened for ", structure_name)
 
@@ -202,6 +203,9 @@ func _open_structure_modal(structure_name: String, structure_description: String
 ## Called when the modal is closed
 func _on_modal_closed() -> void:
 	print("StructureManager: Modal closed, panning camera back")
+
+	# Hide modal via EventManager (handles visibility and input unblocking)
+	EventManager.hide_ui(EventManager.UIType.MODAL)
 
 	# Mark as transitioning
 	is_transitioning = true

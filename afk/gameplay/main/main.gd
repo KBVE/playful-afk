@@ -57,7 +57,8 @@ func _ready() -> void:
 		EventManager.register_bartender_scene(bartender)
 
 	if chat_ui:
-		EventManager.register_chat_ui(chat_ui)
+		# Register ChatUI as a persistent UI element (won't be destroyed, just shown/hidden)
+		EventManager.register_ui(EventManager.UIType.CHAT_UI, chat_ui)
 		chat_ui.dialogue_closed.connect(_on_chat_ui_closed)
 
 
@@ -231,12 +232,8 @@ func _on_npc_dialogue_requested(npc: Node2D, npc_name: String, dialogue_text: St
 	chat_ui.show_dialogue(npc_name, npc)
 	chat_ui.set_dialogue_text(dialogue_text)
 
-	# Open modal via EventManager
-	EventManager.open_modal(chat_ui)
-
-	# Register with InputManager for input blocking
-	if InputManager:
-		InputManager.register_modal(chat_ui)
+	# Show ChatUI via EventManager (handles visibility, input blocking, and stack management)
+	EventManager.show_ui(EventManager.UIType.CHAT_UI)
 
 	# Request view change to bartender (ChatUI will be shown after pan completes)
 	EventManager.request_view_change(EventManager.ViewState.BARTENDER)
@@ -253,12 +250,8 @@ func _on_chat_ui_closed() -> void:
 func _on_npc_dialogue_closed() -> void:
 	print("Main: NPC dialogue closed event received")
 
-	# Close modal via EventManager
-	EventManager.close_modal(chat_ui)
-
-	# Unregister from InputManager
-	if InputManager and chat_ui:
-		InputManager.unregister_modal(chat_ui)
+	# Hide ChatUI via EventManager (handles visibility, input blocking, and stack management)
+	EventManager.hide_ui(EventManager.UIType.CHAT_UI)
 
 	# Request view change back to ground
 	EventManager.request_view_change(EventManager.ViewState.GROUND)

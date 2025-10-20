@@ -96,6 +96,15 @@ enum ViewState {
 	BARTENDER  ## Bartender view for NPC dialogue
 }
 
+## UI element types for centralized management
+enum UIType {
+	MODAL,        ## Generic modal window (structure info, etc.)
+	CHAT_UI,      ## NPC dialogue chat interface
+	INVENTORY,    ## Inventory screen (future)
+	PAUSE_MENU,   ## Pause menu (future)
+	SETTINGS      ## Settings screen (future)
+}
+
 ## Emitted when the view state changes. Parameters: (new_state: ViewState, old_state: ViewState)
 signal view_state_changed(new_state, old_state)
 
@@ -155,13 +164,14 @@ var transition_scene: CanvasLayer = null
 ## Current view state
 var current_view_state: ViewState = ViewState.GROUND
 
-## Current active modal (if any)
-var active_modal: Control = null
+## UI Registry - centralized storage for all UI elements
+## Note: Can store Control, CanvasLayer, or any Node-based UI
+var ui_registry: Dictionary = {}
 
-## ChatUI reference (set by main scene)
-var chat_ui: Control = null
+## UI State Stack - tracks which UIs are currently open (LIFO order)
+var ui_state_stack: Array[UIType] = []
 
-## Bartender scene reference (set by main scene)
+## Bartender scene reference (background scene, not a UI element)
 var bartender_scene: Control = null
 
 
@@ -170,6 +180,9 @@ func _ready() -> void:
 
 	# Connect to screen transition requests
 	screen_transition_requested.connect(_on_screen_transition_requested)
+
+	# Setup all UI elements FIRST (synchronously so they're ready for other managers)
+	_setup_ui_elements()
 
 	# Load and add transition scene (deferred to avoid blocking)
 	call_deferred("_setup_transition_layer")
@@ -184,6 +197,70 @@ func _setup_transition_layer() -> void:
 		print("Transition layer initialized")
 	else:
 		push_error("Failed to load transition scene")
+
+
+## Setup all UI elements - SINGLE SOURCE OF TRUTH
+## All UIs are created, instantiated, and registered here
+func _setup_ui_elements() -> void:
+	print("EventManager: Setting up all UI elements...")
+
+	# Setup Modal (for structures, dialogs, etc.)
+	_setup_modal_ui()
+
+	# Setup ChatUI (for NPC dialogues)
+	_setup_chat_ui()
+
+	# Future UIs can be added here:
+	# _setup_inventory_ui()
+	# _setup_pause_menu_ui()
+	# _setup_settings_ui()
+
+	print("EventManager: All UI elements setup complete")
+
+
+## Setup Modal UI
+func _setup_modal_ui() -> void:
+	print("EventManager: Setting up Modal UI...")
+
+	var modal_scene = load("res://nodes/ui/modal/modal.tscn")
+	if not modal_scene:
+		push_error("EventManager: Failed to load modal scene")
+		return
+
+	print("EventManager: Modal scene loaded, instantiating...")
+	var modal = modal_scene.instantiate()
+	if not modal:
+		push_error("EventManager: Failed to instantiate modal")
+		return
+
+	print("EventManager: Modal instantiated (type: %s), adding to tree..." % modal.get_class())
+
+	# Add to tree deferred (tree is busy during _ready)
+	get_tree().root.add_child.call_deferred(modal)
+
+	# Connect modal signals (Modal class always has modal_closed signal)
+	print("EventManager: Connecting modal signals...")
+	modal.modal_closed.connect(_on_modal_closed_internally)
+
+	# Register in UI system immediately (modal exists, just not in tree yet)
+	print("EventManager: Registering modal in UI registry...")
+	register_ui(UIType.MODAL, modal)
+
+	print("EventManager: Modal UI created and registered successfully (will be added to tree next frame)")
+
+
+## Internal handler for modal closed (from EventManager-owned modal)
+func _on_modal_closed_internally() -> void:
+	print("EventManager: Modal closed internally, cleaning up UI stack")
+	# Remove from UI stack
+	hide_ui(UIType.MODAL)
+
+
+## Setup ChatUI
+func _setup_chat_ui() -> void:
+	# ChatUI is part of the main scene, so we'll register it when main scene provides it
+	# This is called from main.gd's _ready() after the scene is loaded
+	print("EventManager: ChatUI will be registered by main scene")
 
 
 ## Handle scene transitions with fade effect
@@ -246,12 +323,6 @@ func list_all_signals() -> Array:
 
 # ===== View State Management =====
 
-## Register the ChatUI with EventManager
-func register_chat_ui(ui: Control) -> void:
-	chat_ui = ui
-	print("EventManager: ChatUI registered")
-
-
 ## Register the Bartender scene with EventManager
 func register_bartender_scene(scene: Control) -> void:
 	bartender_scene = scene
@@ -281,6 +352,8 @@ func request_view_change(new_state: ViewState) -> void:
 
 ## Prepare the target view before camera pan starts
 func _prepare_view_for_transition(target_state: ViewState) -> void:
+	var chat_ui = get_ui(UIType.CHAT_UI)
+
 	# Show/hide scenes based on TARGET state
 	match target_state:
 		ViewState.BARTENDER:
@@ -309,6 +382,8 @@ func get_current_view() -> ViewState:
 func complete_view_transition(view_state: ViewState) -> void:
 	print("EventManager: View transition completed for ", ViewState.keys()[view_state])
 
+	var chat_ui = get_ui(UIType.CHAT_UI)
+
 	# Apply final visibility states based on CURRENT view
 	match view_state:
 		ViewState.BARTENDER:
@@ -329,46 +404,154 @@ func complete_view_transition(view_state: ViewState) -> void:
 	view_transition_completed.emit(view_state)
 
 
-# ===== Modal State Management =====
+# ===== UI Management System =====
 
-## Open a modal (registers it and emits signal)
+## Register a UI element with the EventManager
+## This creates a persistent reference that can be shown/hidden without destruction
+func register_ui(ui_type: UIType, ui_element: Node) -> void:
+	if ui_registry.has(ui_type):
+		push_warning("EventManager: UI type %s already registered, replacing" % UIType.keys()[ui_type])
+
+	ui_registry[ui_type] = ui_element
+
+	# Ensure UI starts hidden (will be shown when needed)
+	ui_element.visible = false
+
+	print("EventManager: Registered UI - %s (%s)" % [UIType.keys()[ui_type], ui_element.name])
+
+
+## Unregister a UI element (for cleanup)
+func unregister_ui(ui_type: UIType) -> void:
+	if ui_registry.has(ui_type):
+		ui_registry.erase(ui_type)
+		print("EventManager: Unregistered UI - %s" % UIType.keys()[ui_type])
+
+
+## Get a UI element by type
+func get_ui(ui_type: UIType) -> Node:
+	return ui_registry.get(ui_type, null)
+
+
+## Check if a UI type is registered and ready
+func is_ui_ready(ui_type: UIType) -> bool:
+	return ui_registry.has(ui_type)
+
+
+## Show a UI element (adds to stack and makes visible)
+func show_ui(ui_type: UIType) -> void:
+	var ui_element = get_ui(ui_type)
+
+	if not ui_element:
+		push_error("EventManager: Cannot show UI - %s not registered" % UIType.keys()[ui_type])
+		return
+
+	# Check if already in stack
+	if ui_state_stack.has(ui_type):
+		print("EventManager: UI %s already visible" % UIType.keys()[ui_type])
+		return
+
+	# Add to stack and show
+	ui_state_stack.push_back(ui_type)
+	ui_element.visible = true
+
+	# Register with InputManager if it's a blocking UI (modal, chat, etc.)
+	if _is_blocking_ui(ui_type):
+		InputManager.register_modal(ui_element)
+
+	print("EventManager: Showed UI - %s (stack size: %d)" % [UIType.keys()[ui_type], ui_state_stack.size()])
+
+	# Emit appropriate signal
+	match ui_type:
+		UIType.MODAL:
+			modal_opened.emit(ui_element)
+		UIType.CHAT_UI:
+			pass  # ChatUI has its own fade-in logic
+
+
+## Hide a UI element (removes from stack and hides)
+func hide_ui(ui_type: UIType) -> void:
+	var ui_element = get_ui(ui_type)
+
+	if not ui_element:
+		push_warning("EventManager: Cannot hide UI - %s not registered (ignoring)" % UIType.keys()[ui_type])
+		return
+
+	# Check if UI is actually in the stack before trying to hide
+	var index = ui_state_stack.find(ui_type)
+	if index == -1:
+		push_warning("EventManager: UI %s not in stack, already hidden (ignoring)" % UIType.keys()[ui_type])
+		return
+
+	# Remove from stack
+	ui_state_stack.remove_at(index)
+
+	# Hide the element
+	ui_element.visible = false
+
+	# Unregister from InputManager if it was blocking
+	if _is_blocking_ui(ui_type):
+		InputManager.unregister_modal(ui_element)
+
+	print("EventManager: Hid UI - %s (stack size: %d)" % [UIType.keys()[ui_type], ui_state_stack.size()])
+
+	# Emit appropriate signal
+	match ui_type:
+		UIType.MODAL:
+			modal_closed.emit(ui_element)
+		UIType.CHAT_UI:
+			pass  # ChatUI has its own fade-out logic
+
+
+## Check if a UI type blocks background input
+func _is_blocking_ui(ui_type: UIType) -> bool:
+	match ui_type:
+		UIType.MODAL, UIType.CHAT_UI, UIType.PAUSE_MENU, UIType.SETTINGS:
+			return true
+		_:
+			return false
+
+
+## Get the topmost (most recent) UI from the stack
+func get_top_ui() -> UIType:
+	if ui_state_stack.is_empty():
+		return -1  # No UI open
+	return ui_state_stack.back()
+
+
+## Check if any UI is currently open
+func has_active_ui() -> bool:
+	return not ui_state_stack.is_empty()
+
+
+## Close the topmost UI (for ESC key handling)
+func close_top_ui() -> void:
+	if ui_state_stack.is_empty():
+		push_warning("EventManager: No UI to close (stack is empty)")
+		return
+
+	var top_ui = ui_state_stack.back()
+	print("EventManager: Closing top UI - %s" % UIType.keys()[top_ui])
+	hide_ui(top_ui)
+
+
+# ===== Legacy Modal API (for backwards compatibility) =====
+# These will be deprecated once all code uses the new UI system
+
+## Open a modal (DEPRECATED - use show_ui(UIType.MODAL) instead)
 func open_modal(modal: Control) -> void:
-	if active_modal == modal:
-		print("EventManager: Modal already open")
-		return
-
-	if active_modal:
-		print("EventManager: Warning - Opening new modal while another is active")
-
-	active_modal = modal
-	print("EventManager: Modal opened - ", modal.name if modal else "null")
-	modal_opened.emit(modal)
+	push_warning("EventManager: open_modal() is deprecated, use show_ui(UIType.MODAL)")
+	show_ui(UIType.MODAL)
 
 
-## Close the active modal
+## Close the active modal (DEPRECATED - use hide_ui(UIType.MODAL) instead)
 func close_modal(modal: Control = null) -> void:
-	# If no modal specified, close the active one
-	var modal_to_close = modal if modal else active_modal
-
-	if not modal_to_close:
-		print("EventManager: No modal to close")
-		return
-
-	if active_modal == modal_to_close:
-		active_modal = null
-
-	print("EventManager: Modal closed - ", modal_to_close.name if modal_to_close else "null")
-	modal_closed.emit(modal_to_close)
+	push_warning("EventManager: close_modal() is deprecated, use hide_ui(UIType.MODAL)")
+	hide_ui(UIType.MODAL)
 
 
-## Check if a modal is currently active
+## Check if a modal is currently active (DEPRECATED - use has_active_ui() instead)
 func has_active_modal() -> bool:
-	return active_modal != null
-
-
-## Get the currently active modal
-func get_active_modal() -> Control:
-	return active_modal
+	return ui_state_stack.has(UIType.MODAL)
 
 
 # ===== NPC Dialogue Management =====
@@ -388,27 +571,22 @@ func close_npc_dialogue() -> void:
 # ===== ESC Key Handling =====
 
 ## Handle ESC key press - determines context and takes appropriate action
-## Priority: NPC Dialogue > Modals > View Reset > Pause
+## Priority: Active UI > View Reset > Pause
 func handle_escape() -> void:
-	print("EventManager: ESC pressed - state: %s, modal: %s" % [
+	var top_ui = get_top_ui()
+	print("EventManager: ESC pressed - view: %s, top UI: %s, stack size: %d" % [
 		ViewState.keys()[current_view_state],
-		"yes" if has_active_modal() else "no"
+		UIType.keys()[top_ui] if top_ui != -1 else "none",
+		ui_state_stack.size()
 	])
 
 	# Handle based on current context (highest priority first)
-	if _is_in_npc_dialogue():
-		_handle_escape_from_dialogue()
-	elif has_active_modal():
-		_handle_escape_from_modal()
+	if has_active_ui():
+		_handle_escape_from_ui(top_ui)
 	elif _is_away_from_ground():
 		_handle_escape_return_to_ground()
 	else:
 		_handle_escape_at_ground()
-
-
-## Check if player is currently in NPC dialogue
-func _is_in_npc_dialogue() -> bool:
-	return current_view_state == ViewState.BARTENDER
 
 
 ## Check if player is away from ground view
@@ -416,16 +594,27 @@ func _is_away_from_ground() -> bool:
 	return current_view_state != ViewState.GROUND
 
 
-## Handle ESC when in NPC dialogue - close dialogue and return to ground
-func _handle_escape_from_dialogue() -> void:
-	print("EventManager: ESC → Closing NPC dialogue")
-	close_npc_dialogue()
+## Handle ESC when a UI is open - close the topmost UI
+func _handle_escape_from_ui(ui_type: UIType) -> void:
+	print("EventManager: ESC → Closing UI: %s" % UIType.keys()[ui_type])
 
+	# Special handling for specific UI types
+	match ui_type:
+		UIType.CHAT_UI:
+			# ChatUI needs full dialogue close flow
+			close_npc_dialogue()
 
-## Handle ESC when a modal is open - close the modal
-func _handle_escape_from_modal() -> void:
-	print("EventManager: ESC → Closing modal")
-	close_modal()
+		UIType.MODAL:
+			# Modal has its own close() animation, trigger it
+			var modal = get_ui(UIType.MODAL)
+			if modal and modal.has_method("close"):
+				modal.close()  # This will emit modal_closed signal which StructureManager handles
+			else:
+				close_top_ui()
+
+		_:
+			# Generic UI close
+			close_top_ui()
 
 
 ## Handle ESC when away from ground - reset view to ground
