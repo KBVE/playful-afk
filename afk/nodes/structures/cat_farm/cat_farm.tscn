@@ -1,0 +1,19 @@
+[gd_scene load_steps=4 format=3 uid="uid://c7j8k9m0n1p2q"]
+
+[ext_resource type="Script" path="res://nodes/structures/cat_farm/cat_farm.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://nodes/structures/cat_farm/cat_farm.png" id="2_texture"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_1"]
+radius = 96.0
+
+[node name="CatFarm" type="Node2D"]
+script = ExtResource("1_script")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_texture")
+centered = true
+
+[node name="ClickArea" type="Area2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="ClickArea"]
+shape = SubResource("CircleShape2D_1")
