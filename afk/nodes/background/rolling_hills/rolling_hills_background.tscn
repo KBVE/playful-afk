@@ -11,6 +11,7 @@
 [ext_resource type="PackedScene" uid="uid://stone_home_structure" path="res://nodes/structures/stone_home/stone_home.tscn" id="9_stone_home"]
 [ext_resource type="PackedScene" uid="uid://city_tower_structure" path="res://nodes/structures/city_tower/city_tower.tscn" id="10_city_tower"]
 [ext_resource type="PackedScene" uid="uid://dragon_den_structure" path="res://nodes/structures/dragon_den/dragon_den.tscn" id="11_dragon_den"]
+[ext_resource type="PackedScene" uid="uid://inn_structure" path="res://nodes/structures/inn/inn.tscn" id="12_inn"]
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_1"]
 shader = ExtResource("6_shader")
@@ -91,6 +92,8 @@ stretch_mode = 6
 [node name="CityTower" parent="Layer3Objects" instance=ExtResource("10_city_tower")]
 
 [node name="DragonDen" parent="Layer3Objects" instance=ExtResource("11_dragon_den")]
+
+[node name="Inn" parent="Layer3Objects" instance=ExtResource("12_inn")]
 
 [node name="Layer4" type="TextureRect" parent="."]
 material = SubResource("ShaderMaterial_4")

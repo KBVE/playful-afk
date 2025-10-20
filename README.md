@@ -51,6 +51,14 @@ A fearsome dragon's lair that provides the ultimate defensive power for your kin
 - **Benefits**: Powerful defense, dragon allies
 - **Special**: Spawns at game start
 
+#### Inn
+
+A cozy inn where travelers rest and gather. This warm and welcoming establishment serves as a town hub, providing comfort and hospitality to visitors and citizens alike. Built on elevated ground for better visibility, the Inn appears at the start of your journey, offering a place for weary adventurers to find respite and share tales of their travels.
+
+- **Type**: TOWN, SPAWN
+- **Level**: ELEVATED
+- **Benefits**: Comfort, town hub, traveler services
+- **Special**: Spawns at game start
 
 
 
