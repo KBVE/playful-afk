@@ -15,3 +15,6 @@ https://theflavare.itch.io/mondstadt-theme-background-pixel-art
 
 Background Hill
 https://szadiart.itch.io/bakcground-hill
+
+Free Sky Background
+https://free-game-assets.itch.io/free-sky-with-clouds-background-pixel-art-set

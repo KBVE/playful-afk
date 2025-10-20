@@ -1,21 +1,30 @@
-[gd_scene load_steps=3 format=3 uid="uid://main_gameplay_scene"]
+[gd_scene load_steps=4 format=3 uid="uid://main_gameplay_scene"]
 
 [ext_resource type="Script" path="res://gameplay/main/main.gd" id="1_script"]
 [ext_resource type="PackedScene" uid="uid://rolling_hills_bg" path="res://nodes/background/rolling_hills/rolling_hills_background.tscn" id="2_background"]
+[ext_resource type="PackedScene" uid="uid://sky_cloudbox" path="res://nodes/background/sky_cloudbox/sky_cloudbox.tscn" id="3_sky"]
 
-[node name="Main" type="Control"]
-layout_mode = 3
-anchors_preset = 15
-anchor_right = 1.0
-anchor_bottom = 1.0
-grow_horizontal = 2
-grow_vertical = 2
+[node name="Main" type="Node2D"]
 script = ExtResource("1_script")
 
-[node name="RollingHillsBackground" parent="." instance=ExtResource("2_background")]
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(576, 324)
+enabled = true
+
+[node name="SkyCloudbox" parent="." instance=ExtResource("3_sky")]
+offset_top = -648.0
+offset_bottom = 0.0
+
+[node name="GameView" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 0
+offset_right = 1152.0
+offset_bottom = 648.0
+
+[node name="RollingHillsBackground" parent="GameView" instance=ExtResource("2_background")]
 layout_mode = 1
 
-[node name="PetContainer" type="Control" parent="."]
+[node name="PetContainer" type="Control" parent="GameView"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0

@@ -61,6 +61,47 @@ func _on_input_manager_clicked() -> void:
 	# Add a small bounce effect when clicked
 	_play_click_animation()
 
+	# Trigger camera pan and modal
+	_show_farm_modal()
+
+
+## Show the farm interaction modal
+func _show_farm_modal() -> void:
+	# Find the main scene to trigger camera pan
+	var main_scene = get_tree().root.get_node_or_null("Main")
+	if not main_scene:
+		print("Warning: Could not find Main scene for camera pan")
+		return
+
+	# Pan camera to sky
+	await main_scene.pan_camera_to_sky()
+
+	# Create and show modal
+	var modal = load("res://nodes/ui/modal/modal.tscn").instantiate()
+	get_tree().root.add_child(modal)
+	modal.set_title("Cat Farm")
+
+	# Add placeholder content
+	var content_label = Label.new()
+	content_label.text = "Welcome to the Cat Farm!\n\nThis is where you can manage your cats,\ncollect resources, and expand your farm.\n\n(More features coming soon...)"
+	content_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	content_label.add_theme_font_size_override("font_size", 18)
+	modal.set_content(content_label)
+
+	# Connect modal close to camera pan back
+	modal.modal_closed.connect(_on_modal_closed.bind(main_scene))
+
+	modal.open()
+	print("Farm modal opened")
+
+
+## Called when the modal is closed
+func _on_modal_closed(main_scene: Node) -> void:
+	# Pan camera back to ground view
+	if main_scene and main_scene.has_method("pan_camera_to_ground"):
+		await main_scene.pan_camera_to_ground()
+	print("Returned to ground view")
+
 ## Play a small bounce animation when clicked
 func _play_click_animation() -> void:
 	var tween = create_tween()

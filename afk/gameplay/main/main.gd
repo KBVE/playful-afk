@@ -1,10 +1,20 @@
-extends Control
+extends Node2D
 
 ## Main Gameplay Scene for AFK Virtual Pet Game
 ## This is where the player interacts with their pet and manages resources
+## Features camera panning between ground view and sky view
 
-@onready var pet_container: Control = $PetContainer
-@onready var background: Control = $RollingHillsBackground
+@onready var camera: Camera2D = $Camera2D
+@onready var sky_cloudbox: Control = $SkyCloudbox
+@onready var game_view: Control = $GameView
+@onready var pet_container: Control = $GameView/PetContainer
+@onready var background: Control = $GameView/RollingHillsBackground
+
+# Camera positions
+var camera_ground_position: Vector2 = Vector2(576, 324)  # Center of ground view (1152x648)
+var camera_sky_position: Vector2 = Vector2(576, -324)  # Center of sky view (648 pixels up)
+var camera_pan_duration: float = 1.0
+var is_camera_panning: bool = false
 
 # Game state
 var is_paused: bool = false
@@ -137,3 +147,35 @@ func _input(event: InputEvent) -> void:
 	# Handle escape key to pause
 	if event.is_action_pressed("ui_cancel"):
 		EventManager.game_paused.emit(not is_paused)
+
+
+## Pan camera to sky view (for cat farm interaction)
+func pan_camera_to_sky() -> void:
+	if is_camera_panning or not camera:
+		return
+
+	is_camera_panning = true
+	print("Panning camera to sky view")
+
+	var tween = create_tween()
+	tween.tween_property(camera, "position", camera_sky_position, camera_pan_duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+	await tween.finished
+	is_camera_panning = false
+	print("Camera reached sky view")
+
+
+## Pan camera back to ground view
+func pan_camera_to_ground() -> void:
+	if is_camera_panning or not camera:
+		return
+
+	is_camera_panning = true
+	print("Panning camera to ground view")
+
+	var tween = create_tween()
+	tween.tween_property(camera, "position", camera_ground_position, camera_pan_duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+	await tween.finished
+	is_camera_panning = false
+	print("Camera reached ground view")

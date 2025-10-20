@@ -35,11 +35,11 @@ func _ready() -> void:
 
 	# Initialize as hidden
 	visible = false
-	modulate.a = 0.0
 
 	# Set up overlay
 	if overlay:
 		overlay.color = overlay_color
+		overlay.modulate.a = 0.0  # Start transparent
 		overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 		if can_close_on_overlay_click:
 			overlay.gui_input.connect(_on_overlay_clicked)
@@ -52,6 +52,7 @@ func _ready() -> void:
 	if modal_container:
 		modal_container.pivot_offset = modal_container.size / 2
 		modal_container.scale = Vector2(0.8, 0.8)
+		modal_container.modulate.a = 0.0  # Start transparent
 
 	print("Modal initialized: ", name)
 
@@ -77,11 +78,11 @@ func open() -> void:
 	tween.set_parallel(true)
 
 	# Fade in overlay
-	tween.tween_property(self, "modulate:a", 1.0, animation_duration)
+	if overlay:
+		tween.tween_property(overlay, "modulate:a", 1.0, animation_duration)
 
 	# Scale and fade in modal
 	if modal_container:
-		modal_container.modulate.a = 0.0
 		tween.tween_property(modal_container, "scale", Vector2(1.0, 1.0), animation_duration).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tween.tween_property(modal_container, "modulate:a", 1.0, animation_duration)
 
@@ -109,7 +110,8 @@ func close() -> void:
 	tween.set_parallel(true)
 
 	# Fade out overlay
-	tween.tween_property(self, "modulate:a", 0.0, animation_duration)
+	if overlay:
+		tween.tween_property(overlay, "modulate:a", 0.0, animation_duration)
 
 	# Scale and fade out modal
 	if modal_container:
