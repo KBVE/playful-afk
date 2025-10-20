@@ -3,12 +3,11 @@ class_name CatFarm
 
 ## A cat farm structure that can be placed in parallax backgrounds
 ## Automatically handles sprite rendering, floating animation, and click detection
+## Uses InputManager for efficient centralized input handling
 
 signal farm_clicked
 
 @onready var sprite: Sprite2D = $Sprite2D
-@onready var click_area: Area2D = $ClickArea
-@onready var collision_shape: CollisionShape2D = $ClickArea/CollisionShape2D
 
 ## Floating animation properties
 @export var float_amplitude: float = 3.0  ## How high/low it floats
@@ -17,6 +16,9 @@ signal farm_clicked
 ## Fade properties
 @export var distance_opacity: float = 0.6  ## Opacity when not hovered (distant)
 @export var near_opacity: float = 1.0  ## Opacity when hovered (near)
+
+## Click detection
+@export var click_radius: float = 81.6  ## Radius for click/hover detection
 
 var time_elapsed: float = 0.0
 var initial_y_position: float = 0.0
@@ -29,12 +31,18 @@ func _ready() -> void:
 		initial_y_position = sprite.position.y
 		# Start with distance fade
 		sprite.modulate.a = distance_opacity
+		print("Cat Farm sprite initialized with opacity: ", distance_opacity)
 
-	# Connect click area signal
-	if click_area:
-		click_area.input_event.connect(_on_click_area_input_event)
-		click_area.mouse_entered.connect(_on_mouse_entered)
-		click_area.mouse_exited.connect(_on_mouse_exited)
+	# Register with InputManager for efficient input handling
+	if InputManager:
+		InputManager.register_interactive_object(self, click_radius, self)
+		print("Cat Farm registered with InputManager (radius: ", click_radius, ")")
+
+
+func _exit_tree() -> void:
+	# Unregister from InputManager when this node is removed
+	if InputManager:
+		InputManager.unregister_interactive_object(self)
 
 func _process(delta: float) -> void:
 	# Update floating animation
@@ -42,15 +50,13 @@ func _process(delta: float) -> void:
 	if sprite:
 		sprite.position.y = initial_y_position + sin(time_elapsed * float_speed) * float_amplitude
 
-## Handle input events on the click area
-func _on_click_area_input_event(_viewport: Node, event: InputEvent, _shape_idx: int) -> void:
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			_on_farm_clicked()
 
-## Called when the farm is clicked
-func _on_farm_clicked() -> void:
-	print("Cat Farm clicked!")
+## Called by InputManager when this object is clicked
+func _on_input_manager_clicked() -> void:
+	print("========================================")
+	print("CAT FARM CLICKED!")
+	print("Position: ", global_position)
+	print("========================================")
 	farm_clicked.emit()
 	# Add a small bounce effect when clicked
 	_play_click_animation()
@@ -62,17 +68,23 @@ func _play_click_animation() -> void:
 	tween.tween_property(sprite, "scale", original_scale * 1.2, 0.1)
 	tween.tween_property(sprite, "scale", original_scale, 0.1)
 
-## Handle mouse enter for visual feedback
-func _on_mouse_entered() -> void:
+## Called by InputManager when mouse enters this object
+func _on_input_manager_hover_enter() -> void:
+	print("Mouse ENTERED cat farm at position: ", global_position)
 	# Remove fade and brighten when hovered (farm comes into focus)
 	if sprite:
+		print("  Current sprite modulate: ", sprite.modulate)
+		print("  Target modulate: ", Color(1.1, 1.1, 1.1, near_opacity))
 		var tween = create_tween()
 		tween.tween_property(sprite, "modulate", Color(1.1, 1.1, 1.1, near_opacity), 0.2)
 
-## Handle mouse exit
-func _on_mouse_exited() -> void:
+## Called by InputManager when mouse exits this object
+func _on_input_manager_hover_exit() -> void:
+	print("Mouse EXITED cat farm at position: ", global_position)
 	# Return to faded distant appearance
 	if sprite:
+		print("  Current sprite modulate: ", sprite.modulate)
+		print("  Target modulate: ", Color(1.0, 1.0, 1.0, distance_opacity))
 		var tween = create_tween()
 		tween.tween_property(sprite, "modulate", Color(1.0, 1.0, 1.0, distance_opacity), 0.2)
 
