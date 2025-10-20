@@ -1,0 +1,29 @@
+[gd_scene load_steps=4 format=3 uid="uid://bartender_scene"]
+
+[ext_resource type="Script" path="res://nodes/background/bartender/bartender.gd" id="1_script"]
+[ext_resource type="Texture2D" path="res://nodes/background/bartender/bar.png" id="2_background"]
+[ext_resource type="PackedScene" uid="uid://chat_ui" path="res://nodes/ui/chat/chat_ui.tscn" id="3_chat_ui"]
+
+[node name="Bartender" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_script")
+
+[node name="Background" type="TextureRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+texture = ExtResource("2_background")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="ChatUI" parent="." instance=ExtResource("3_chat_ui")]
+layout_mode = 1

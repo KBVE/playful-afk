@@ -1,8 +1,10 @@
-[gd_scene load_steps=4 format=3 uid="uid://main_gameplay_scene"]
+[gd_scene load_steps=6 format=3 uid="uid://main_gameplay_scene"]
 
 [ext_resource type="Script" path="res://gameplay/main/main.gd" id="1_script"]
 [ext_resource type="PackedScene" uid="uid://rolling_hills_bg" path="res://nodes/background/rolling_hills/rolling_hills_background.tscn" id="2_background"]
 [ext_resource type="PackedScene" uid="uid://sky_cloudbox" path="res://nodes/background/sky_cloudbox/sky_cloudbox.tscn" id="3_sky"]
+[ext_resource type="PackedScene" uid="uid://bartender_scene" path="res://nodes/background/bartender/bartender.tscn" id="4_bartender"]
+[ext_resource type="PackedScene" uid="uid://chat_ui" path="res://nodes/ui/chat/chat_ui.tscn" id="5_chat_ui"]
 
 [node name="Main" type="Node2D"]
 script = ExtResource("1_script")
@@ -16,6 +18,12 @@ offset_left = 0.0
 offset_top = -648.0
 offset_right = 1152.0
 offset_bottom = 0.0
+
+[node name="Bartender" parent="." instance=ExtResource("4_bartender")]
+offset_left = 0.0
+offset_top = 648.0
+offset_right = 1152.0
+offset_bottom = 1296.0
 
 [node name="GameView" type="Control" parent="."]
 layout_mode = 3

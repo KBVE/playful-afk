@@ -6,6 +6,8 @@ extends Node2D
 
 @onready var camera: Camera2D = $Camera2D
 @onready var sky_cloudbox: Control = $SkyCloudbox
+@onready var bartender: Control = $Bartender
+@onready var chat_ui: Control = $Bartender/ChatUI
 @onready var game_view: Control = $GameView
 @onready var pet_container: Control = $GameView/PetContainer
 @onready var background: Control = $GameView/RollingHillsBackground
@@ -14,6 +16,7 @@ extends Node2D
 # Camera positions
 var camera_ground_position: Vector2 = Vector2(576, 324)  # Center of ground view (1152x648)
 var camera_sky_position: Vector2 = Vector2(576, -324)  # Center of sky view (648 pixels up)
+var camera_bartender_position: Vector2 = Vector2(576, 972)  # Center of bartender view (648 pixels down)
 var camera_pan_duration: float = 1.0
 var is_camera_panning: bool = false
 
@@ -42,8 +45,19 @@ func _ready() -> void:
 	# Setup character pool and warriors
 	_setup_character_pool()
 
-	# Connect to event manager
+	# Connect to EventManager signals
 	EventManager.game_paused.connect(_on_game_paused)
+	EventManager.view_state_changed.connect(_on_view_state_changed)
+	EventManager.npc_dialogue_requested.connect(_on_npc_dialogue_requested)
+	EventManager.npc_dialogue_closed.connect(_on_npc_dialogue_closed)
+
+	# Register Bartender scene and ChatUI with EventManager for centralized visibility management
+	if bartender:
+		EventManager.register_bartender_scene(bartender)
+
+	if chat_ui:
+		EventManager.register_chat_ui(chat_ui)
+		chat_ui.dialogue_closed.connect(_on_chat_ui_closed)
 
 
 func _setup_pet() -> void:
@@ -98,6 +112,10 @@ func _setup_character_pool() -> void:
 		warrior.scale = Vector2(2, 2)  # Smaller than cat (cat is 4x, warrior is 2x)
 		warrior.set_physics_process(false)  # Disable physics/gravity (same as cat)
 		warrior.set_player_controlled(false)  # Enable autonomous behavior
+
+		# Connect warrior click signal to pan camera to bartender
+		warrior.warrior_clicked.connect(_on_warrior_clicked)
+
 		print("Warrior added to character pool at slot 0")
 
 	# Example: Add more warriors to pool (but keep them inactive)
@@ -184,30 +202,96 @@ func _update_background_scroll() -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Handle escape key to pause
+	# Handle escape key
 	if event.is_action_pressed("ui_cancel"):
-		EventManager.game_paused.emit(not is_paused)
+		# If not at ground view, return to ground instead of pausing
+		if EventManager.get_current_view() != EventManager.ViewState.GROUND:
+			EventManager.request_view_change(EventManager.ViewState.GROUND)
+		else:
+			# Normal pause at ground level
+			EventManager.game_paused.emit(not is_paused)
 
 
-## Pan camera to sky view (for cat farm interaction)
-func pan_camera_to_sky() -> void:
-	if is_camera_panning or not camera:
+## Handle warrior clicked - request dialogue via EventManager
+func _on_warrior_clicked() -> void:
+	print("Warrior clicked in main scene!")
+
+	# Get the warrior from the pool
+	var warrior = NPCManager.character_pool[0]["character"] if NPCManager.character_pool.size() > 0 else null
+
+	# Request NPC dialogue via EventManager
+	EventManager.request_npc_dialogue(warrior, "Warrior", "Hello traveler! What can I do for you?")
+
+
+## Handle NPC dialogue request from EventManager
+func _on_npc_dialogue_requested(npc: Node2D, npc_name: String, dialogue_text: String) -> void:
+	print("Main: NPC dialogue requested - ", npc_name)
+
+	if not npc or not chat_ui:
+		print("ERROR: npc or chat_ui is null! npc=", npc, " chat_ui=", chat_ui)
 		return
 
-	is_camera_panning = true
-	print("Panning camera to sky view")
+	# Get the NPC's AnimatedSprite2D for the portrait (will be duplicated in ChatUI)
+	var npc_sprite: AnimatedSprite2D = null
+	if npc.has_node("AnimatedSprite2D"):
+		npc_sprite = npc.get_node("AnimatedSprite2D")
+		print("Found AnimatedSprite2D: ", npc_sprite)
+	else:
+		print("ERROR: NPC does not have AnimatedSprite2D node!")
 
-	var tween = create_tween()
-	tween.tween_property(camera, "position", camera_sky_position, camera_pan_duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	# Prepare chat UI with NPC data (ChatUI will duplicate the sprite)
+	chat_ui.show_dialogue(npc_name, npc_sprite)
+	chat_ui.set_dialogue_text(dialogue_text)
 
-	await tween.finished
+	# Open modal via EventManager
+	EventManager.open_modal(chat_ui)
 
-	is_camera_panning = false
-	print("Camera reached sky view")
+	# Register with InputManager for input blocking
+	if InputManager:
+		InputManager.register_modal(chat_ui)
+
+	# Request view change to bartender (ChatUI will be shown after pan completes)
+	EventManager.request_view_change(EventManager.ViewState.BARTENDER)
 
 
-## Pan camera back to ground view
-func pan_camera_to_ground() -> void:
+## Handle ChatUI close button pressed
+func _on_chat_ui_closed() -> void:
+	print("ChatUI close button pressed")
+	# Notify EventManager that dialogue is closed
+	EventManager.close_npc_dialogue()
+
+
+## Handle NPC dialogue closed from EventManager
+func _on_npc_dialogue_closed() -> void:
+	print("Main: NPC dialogue closed event received")
+
+	# Close modal via EventManager
+	EventManager.close_modal(chat_ui)
+
+	# Unregister from InputManager
+	if InputManager and chat_ui:
+		InputManager.unregister_modal(chat_ui)
+
+	# Request view change back to ground
+	EventManager.request_view_change(EventManager.ViewState.GROUND)
+
+
+## Handle view state changes from EventManager
+func _on_view_state_changed(new_state: EventManager.ViewState, old_state: EventManager.ViewState) -> void:
+	print("Main: View state changed from ", EventManager.ViewState.keys()[old_state], " to ", EventManager.ViewState.keys()[new_state])
+
+	# Perform the camera pan based on new state
+	match new_state:
+		EventManager.ViewState.GROUND:
+			_pan_to_ground()
+		EventManager.ViewState.SKY:
+			_pan_to_sky()
+		EventManager.ViewState.BARTENDER:
+			_pan_to_bartender()
+
+
+## Internal camera pan functions (called by view state changes)
+func _pan_to_ground() -> void:
 	if is_camera_panning or not camera:
 		return
 
@@ -221,3 +305,38 @@ func pan_camera_to_ground() -> void:
 
 	is_camera_panning = false
 	print("Camera reached ground view")
+	EventManager.complete_view_transition(EventManager.ViewState.GROUND)
+
+
+func _pan_to_sky() -> void:
+	if is_camera_panning or not camera:
+		return
+
+	is_camera_panning = true
+	print("Panning camera to sky view")
+
+	var tween = create_tween()
+	tween.tween_property(camera, "position", camera_sky_position, camera_pan_duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+	await tween.finished
+
+	is_camera_panning = false
+	print("Camera reached sky view")
+	EventManager.complete_view_transition(EventManager.ViewState.SKY)
+
+
+func _pan_to_bartender() -> void:
+	if is_camera_panning or not camera:
+		return
+
+	is_camera_panning = true
+	print("Panning camera to bartender view")
+
+	var tween = create_tween()
+	tween.tween_property(camera, "position", camera_bartender_position, camera_pan_duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+
+	await tween.finished
+
+	is_camera_panning = false
+	print("Camera reached bartender view")
+	EventManager.complete_view_transition(EventManager.ViewState.BARTENDER)

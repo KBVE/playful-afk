@@ -1,4 +1,4 @@
-[gd_scene load_steps=4 format=3 uid="uid://modal_component"]
+[gd_scene load_steps=7 format=3 uid="uid://modal_component"]
 
 [ext_resource type="Script" path="res://nodes/ui/modal/modal.gd" id="1_script"]
 [ext_resource type="Texture2D" path="res://nodes/ui/panel/panel.png" id="2_panel_texture"]
@@ -105,9 +105,42 @@ text = "X"
 layout_mode = 2
 theme_override_constants/separation = 16
 
-[node name="ContentContainer" type="MarginContainer" parent="ModalContainer/Panel/VBoxContainer"]
+[node name="ContentHBox" type="HBoxContainer" parent="ModalContainer/Panel/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
+
+[node name="StructureSpritePanel" type="Panel" parent="ModalContainer/Panel/VBoxContainer/ContentHBox"]
+custom_minimum_size = Vector2(120, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="ModalContainer/Panel/VBoxContainer/ContentHBox/StructureSpritePanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="StructureNameLabel" type="Label" parent="ModalContainer/Panel/VBoxContainer/ContentHBox/StructureSpritePanel/VBoxContainer"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_fonts/font = ExtResource("3_font")
+theme_override_font_sizes/font_size = 16
+text = "Structure"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="StructureSpriteContainer" type="CenterContainer" parent="ModalContainer/Panel/VBoxContainer/ContentHBox/StructureSpritePanel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="ContentContainer" type="MarginContainer" parent="ModalContainer/Panel/VBoxContainer/ContentHBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+size_flags_stretch_ratio = 0.8
 theme_override_constants/margin_left = 8
 theme_override_constants/margin_top = 8
 theme_override_constants/margin_right = 8

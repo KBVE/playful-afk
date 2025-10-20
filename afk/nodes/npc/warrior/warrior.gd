@@ -4,6 +4,9 @@ class_name Warrior
 ## Warrior NPC
 ## Manages the warrior's animations, states, and behaviors
 
+## Emitted when the warrior is clicked
+signal warrior_clicked
+
 ## Warrior's current state
 @export_enum("Idle", "Walking", "Attacking") var current_state: String = "Idle":
 	set(value):
@@ -51,6 +54,14 @@ func _ready() -> void:
 	if state_timer:
 		state_timer.timeout.connect(_on_state_timer_timeout)
 		state_timer.start()
+
+	# Register with InputManager for click detection (like structures do)
+	# Wait a frame to ensure InputManager is ready
+	await get_tree().process_frame
+	if InputManager:
+		InputManager.register_interactive_object(self, 80.0)  # 80 pixel click radius
+		print("Warrior registered with InputManager")
+		# Note: InputManager will call _on_input_manager_* methods directly
 
 	# Initialize animation
 	_update_animation()
@@ -129,3 +140,28 @@ func set_player_controlled(controlled: bool) -> void:
 	# Always stop the state timer - the controller handles movement
 	if state_timer:
 		state_timer.stop()
+
+
+## Called by InputManager when this warrior is clicked
+func _on_input_manager_clicked() -> void:
+	print("========================================")
+	print("WARRIOR CLICKED!")
+	print("Position: ", global_position)
+	print("========================================")
+	warrior_clicked.emit()
+
+
+## Called by InputManager when mouse enters this warrior
+func _on_input_manager_hover_enter() -> void:
+	print("Mouse ENTERED warrior at position: ", global_position)
+	# Highlight warrior when hovered
+	if animated_sprite:
+		animated_sprite.modulate = Color(1.2, 1.2, 1.2, 1.0)
+
+
+## Called by InputManager when mouse exits this warrior
+func _on_input_manager_hover_exit() -> void:
+	print("Mouse EXITED warrior at position: ", global_position)
+	# Remove highlight
+	if animated_sprite:
+		animated_sprite.modulate = Color(1.0, 1.0, 1.0, 1.0)

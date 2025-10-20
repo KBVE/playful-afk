@@ -16,7 +16,9 @@ signal close_button_pressed
 @onready var panel: NinePatchRect = $ModalContainer/Panel
 @onready var title_label: Label = $ModalContainer/Panel/VBoxContainer/TitleBar/TitleLabel
 @onready var close_button: Button = $ModalContainer/Panel/VBoxContainer/TitleBar/CloseButton
-@onready var content_container: Control = $ModalContainer/Panel/VBoxContainer/ContentContainer
+@onready var content_container: Control = $ModalContainer/Panel/VBoxContainer/ContentHBox/ContentContainer
+@onready var structure_sprite_container: CenterContainer = $ModalContainer/Panel/VBoxContainer/ContentHBox/StructureSpritePanel/VBoxContainer/StructureSpriteContainer
+@onready var structure_name_label: Label = $ModalContainer/Panel/VBoxContainer/ContentHBox/StructureSpritePanel/VBoxContainer/StructureNameLabel
 
 ## Modal settings
 @export var modal_title: String = "Modal Title"
@@ -166,6 +168,24 @@ func clear_content() -> void:
 
 	for child in content_container.get_children():
 		child.queue_free()
+
+
+## Set the structure sprite (duplicates the sprite from the structure node)
+func set_structure_sprite(structure_name: String, sprite: Sprite2D) -> void:
+	# Set structure name
+	if structure_name_label:
+		structure_name_label.text = structure_name
+
+	# Clear previous sprite
+	if structure_sprite_container:
+		for child in structure_sprite_container.get_children():
+			child.queue_free()
+
+		# Duplicate and add the sprite
+		if sprite:
+			var sprite_copy = sprite.duplicate() as Sprite2D
+			structure_sprite_container.add_child(sprite_copy)
+			print("Modal: Structure sprite set for ", structure_name)
 
 
 ## Handle overlay clicks

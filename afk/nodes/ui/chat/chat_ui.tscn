@@ -1,0 +1,101 @@
+[gd_scene load_steps=5 format=3 uid="uid://chat_ui"]
+
+[ext_resource type="Script" path="res://nodes/ui/chat/chat_ui.gd" id="1_script"]
+[ext_resource type="FontFile" uid="uid://cy15kjeobttji" path="res://nodes/ui/fonts/alagard.ttf" id="2_font"]
+
+[sub_resource type="LabelSettings" id="LabelSettings_npc_name"]
+font = ExtResource("2_font")
+font_size = 24
+
+[sub_resource type="LabelSettings" id="LabelSettings_dialogue"]
+font = ExtResource("2_font")
+font_size = 20
+
+[node name="ChatUI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_script")
+
+[node name="CenterContainer" type="CenterContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Panel" type="Panel" parent="CenterContainer"]
+custom_minimum_size = Vector2(800, 400)
+layout_mode = 2
+
+[node name="HBoxContainer" type="HBoxContainer" parent="CenterContainer/Panel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="NPCPortraitPanel" type="Panel" parent="CenterContainer/Panel/HBoxContainer"]
+custom_minimum_size = Vector2(230, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.2
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="NPCNameLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
+layout_mode = 2
+text = "NPC Name"
+label_settings = SubResource("LabelSettings_npc_name")
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="NPCPortraitContainer" type="CenterContainer" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="DialoguePanel" type="Panel" parent="CenterContainer/Panel/HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_stretch_ratio = 0.8
+
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="DialogueText" type="RichTextLabel" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer"]
+layout_mode = 2
+size_flags_vertical = 3
+theme_override_fonts/normal_font = ExtResource("2_font")
+theme_override_font_sizes/normal_font_size = 18
+bbcode_enabled = true
+text = "Dialogue text will appear here..."
+fit_content = true
+scroll_active = false
+
+[node name="ButtonContainer" type="VBoxContainer" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer"]
+layout_mode = 2
+alignment = 2
+
+[node name="CloseButton" type="Button" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/ButtonContainer"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_font")
+theme_override_font_sizes/font_size = 16
+text = "Close"

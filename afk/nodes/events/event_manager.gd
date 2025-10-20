@@ -88,6 +88,33 @@ signal game_loaded(load_success)
 ## Emitted when game data is reset
 signal game_reset()
 
+# ===== View State Events =====
+## View states for camera navigation
+enum ViewState {
+	GROUND,    ## Main gameplay view at ground level
+	SKY,       ## Sky cloudbox view for structures/farms
+	BARTENDER  ## Bartender view for NPC dialogue
+}
+
+## Emitted when the view state changes. Parameters: (new_state: ViewState, old_state: ViewState)
+signal view_state_changed(new_state, old_state)
+
+## Emitted when a view transition completes
+signal view_transition_completed(view_state)
+
+# ===== Modal State Events =====
+## Emitted when a modal is opened. Parameters: (modal: Control)
+signal modal_opened(modal)
+
+## Emitted when a modal is closed. Parameters: (modal: Control)
+signal modal_closed(modal)
+
+## Emitted when NPC dialogue is requested. Parameters: (npc: Node2D, npc_name: String, dialogue_text: String)
+signal npc_dialogue_requested(npc, npc_name, dialogue_text)
+
+## Emitted when NPC dialogue is closed
+signal npc_dialogue_closed()
+
 # ===== Achievement & Quest Events =====
 ## Emitted when an achievement is unlocked. Parameters: (achievement_id: String)
 signal achievement_unlocked(achievement_id)
@@ -120,6 +147,19 @@ signal audio_settings_changed(setting, value)
 
 
 var transition_scene: CanvasLayer = null
+
+# ===== State Management =====
+## Current view state
+var current_view_state: ViewState = ViewState.GROUND
+
+## Current active modal (if any)
+var active_modal: Control = null
+
+## ChatUI reference (set by main scene)
+var chat_ui: Control = null
+
+## Bartender scene reference (set by main scene)
+var bartender_scene: Control = null
 
 
 func _ready() -> void:
@@ -199,3 +239,137 @@ func list_all_signals() -> Array:
 	for sig in signal_list:
 		signal_names.append(sig.name)
 	return signal_names
+
+
+# ===== View State Management =====
+
+## Register the ChatUI with EventManager
+func register_chat_ui(ui: Control) -> void:
+	chat_ui = ui
+	print("EventManager: ChatUI registered")
+
+
+## Register the Bartender scene with EventManager
+func register_bartender_scene(scene: Control) -> void:
+	bartender_scene = scene
+	# Start with bartender scene hidden
+	if bartender_scene:
+		bartender_scene.visible = false
+	print("EventManager: Bartender scene registered")
+
+
+## Request a view state change
+func request_view_change(new_state: ViewState) -> void:
+	if current_view_state == new_state:
+		print("EventManager: Already in view state ", ViewState.keys()[new_state])
+		return
+
+	var old_state = current_view_state
+	current_view_state = new_state
+
+	# Manage UI visibility based on view state
+	_manage_ui_visibility(new_state, old_state)
+
+	print("EventManager: View state changed from ", ViewState.keys()[old_state], " to ", ViewState.keys()[new_state])
+	view_state_changed.emit(new_state, old_state)
+
+
+## Manage UI visibility during view transitions
+func _manage_ui_visibility(new_state: ViewState, old_state: ViewState) -> void:
+	# Manage Bartender scene visibility
+	if bartender_scene:
+		if new_state == ViewState.BARTENDER:
+			# Show bartender scene when entering BARTENDER view
+			bartender_scene.visible = true
+			print("EventManager: Bartender scene shown")
+		elif old_state == ViewState.BARTENDER and new_state != ViewState.BARTENDER:
+			# Hide bartender scene when leaving BARTENDER view
+			bartender_scene.visible = false
+			print("EventManager: Bartender scene hidden")
+
+	# Manage ChatUI visibility
+	if not chat_ui:
+		return
+
+	# Hide ChatUI when leaving BARTENDER view
+	if old_state == ViewState.BARTENDER and new_state != ViewState.BARTENDER:
+		chat_ui.visible = false
+		print("EventManager: ChatUI hidden (leaving bartender view)")
+
+	# Hide ChatUI when entering BARTENDER view (will be shown after camera pan)
+	if new_state == ViewState.BARTENDER:
+		chat_ui.visible = false
+		print("EventManager: ChatUI hidden (entering bartender view, will show after pan)")
+
+
+## Get the current view state
+func get_current_view() -> ViewState:
+	return current_view_state
+
+
+## Notify that a view transition has completed
+func complete_view_transition(view_state: ViewState) -> void:
+	print("EventManager: View transition completed for ", ViewState.keys()[view_state])
+
+	# Show ChatUI when arriving at BARTENDER view
+	if view_state == ViewState.BARTENDER and chat_ui:
+		chat_ui.visible = true
+		print("EventManager: ChatUI shown (arrived at bartender view)")
+
+	view_transition_completed.emit(view_state)
+
+
+# ===== Modal State Management =====
+
+## Open a modal (registers it and emits signal)
+func open_modal(modal: Control) -> void:
+	if active_modal == modal:
+		print("EventManager: Modal already open")
+		return
+
+	if active_modal:
+		print("EventManager: Warning - Opening new modal while another is active")
+
+	active_modal = modal
+	print("EventManager: Modal opened - ", modal.name if modal else "null")
+	modal_opened.emit(modal)
+
+
+## Close the active modal
+func close_modal(modal: Control = null) -> void:
+	# If no modal specified, close the active one
+	var modal_to_close = modal if modal else active_modal
+
+	if not modal_to_close:
+		print("EventManager: No modal to close")
+		return
+
+	if active_modal == modal_to_close:
+		active_modal = null
+
+	print("EventManager: Modal closed - ", modal_to_close.name if modal_to_close else "null")
+	modal_closed.emit(modal_to_close)
+
+
+## Check if a modal is currently active
+func has_active_modal() -> bool:
+	return active_modal != null
+
+
+## Get the currently active modal
+func get_active_modal() -> Control:
+	return active_modal
+
+
+# ===== NPC Dialogue Management =====
+
+## Request NPC dialogue (emits signal that main scene will handle)
+func request_npc_dialogue(npc: Node2D, npc_name: String, dialogue_text: String) -> void:
+	print("EventManager: NPC dialogue requested - ", npc_name)
+	npc_dialogue_requested.emit(npc, npc_name, dialogue_text)
+
+
+## Close NPC dialogue
+func close_npc_dialogue() -> void:
+	print("EventManager: NPC dialogue closed")
+	npc_dialogue_closed.emit()

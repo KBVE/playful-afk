@@ -14,6 +14,9 @@ var is_modal_open: bool = false
 var current_structure: Node2D = null
 var is_transitioning: bool = false
 
+## Modal reference (created once and reused)
+var structure_modal: Modal = null
+
 ## Click debouncing
 var click_debounce_time: float = 0.5  # Seconds between allowed clicks
 var time_since_last_click: float = 0.0
@@ -53,6 +56,9 @@ var level_y_positions: Dictionary = {
 
 func _ready() -> void:
 	print("StructureManager initialized")
+
+	# Create and initialize the reusable modal (deferred to ensure tree is ready)
+	call_deferred("_setup_modal")
 
 
 func _process(delta: float) -> void:
@@ -103,8 +109,23 @@ func handle_structure_click(structure: Node2D, structure_name: String, structure
 	_open_structure_modal(structure_name, structure_description)
 
 
+## Setup the reusable modal (called once in _ready)
+func _setup_modal() -> void:
+	# Load and instantiate the modal
+	var modal_scene = load("res://nodes/ui/modal/modal.tscn")
+	structure_modal = modal_scene.instantiate() as Modal
+	get_tree().root.add_child(structure_modal)
+
+	# Connect modal close signal
+	structure_modal.modal_closed.connect(_on_modal_closed)
+
+	print("StructureManager: Modal setup complete")
+
+
 ## Open the modal for a structure
 func _open_structure_modal(structure_name: String, structure_description: String) -> void:
+	print("StructureManager: _open_structure_modal called for ", structure_name)
+
 	# Find the main scene to trigger camera pan
 	var main_scene = get_tree().root.get_node_or_null("Main")
 	if not main_scene:
@@ -113,23 +134,44 @@ func _open_structure_modal(structure_name: String, structure_description: String
 
 	# Mark as transitioning
 	is_transitioning = true
+	print("StructureManager: Requesting view change to SKY")
 
-	# Pan camera to sky
-	await main_scene.pan_camera_to_sky()
+	# Request view change to sky via EventManager
+	EventManager.request_view_change(EventManager.ViewState.SKY)
+
+	# Wait for view transition to complete
+	print("StructureManager: Waiting for view transition to complete...")
+	await EventManager.view_transition_completed
+	print("StructureManager: View transition completed!")
 
 	# Mark transition complete, modal opening
 	is_transitioning = false
 	is_modal_open = true
 
-	# Create and show modal
-	var modal = load("res://nodes/ui/modal/modal.tscn").instantiate()
-	get_tree().root.add_child(modal)
-	modal.set_title(structure_name)
+	# Ensure modal is ready
+	if not structure_modal:
+		push_error("StructureManager: Modal not initialized!")
+		return
+
+	print("StructureManager: Modal is ready, setting up content...")
+
+	# Clear previous content
+	structure_modal.clear_content()
+
+	# Set modal title
+	structure_modal.set_title(structure_name)
+
+	# Get the structure sprite and add it to the modal
+	if current_structure and current_structure.has_node("Sprite2D"):
+		var structure_sprite = current_structure.get_node("Sprite2D") as Sprite2D
+		structure_modal.set_structure_sprite(structure_name, structure_sprite)
+	else:
+		print("StructureManager: Warning - Structure has no Sprite2D node")
 
 	# Check if this is the Dragon Den - special content with dice
 	if structure_name == "Dragon Den":
 		var content = _create_dragon_den_content(structure_description)
-		modal.set_content(content)
+		structure_modal.set_content(content)
 	else:
 		# Standard content for other structures
 		var content_label = Label.new()
@@ -144,27 +186,27 @@ func _open_structure_modal(structure_name: String, structure_description: String
 		content_label.add_theme_color_override("font_outline_color", Color(0, 0, 0, 1))  # Black outline
 		content_label.add_theme_constant_override("outline_size", 4)  # Outline thickness
 
-		modal.set_content(content_label)
+		structure_modal.set_content(content_label)
 
-	# Connect modal close to camera pan back
-	modal.modal_closed.connect(_on_modal_closed.bind(main_scene))
-
-	modal.open()
+	# Open the reusable modal
+	structure_modal.open()
 	structure_modal_opened.emit(current_structure)
 	print("StructureManager: Modal opened for ", structure_name)
 
 
 ## Called when the modal is closed
-func _on_modal_closed(main_scene: Node) -> void:
+func _on_modal_closed() -> void:
 	print("StructureManager: Modal closed, panning camera back")
 
 	# Mark as transitioning
 	is_transitioning = true
 	is_modal_open = false
 
-	# Pan camera back to ground view
-	if main_scene and main_scene.has_method("pan_camera_to_ground"):
-		await main_scene.pan_camera_to_ground()
+	# Request view change back to ground via EventManager
+	EventManager.request_view_change(EventManager.ViewState.GROUND)
+
+	# Wait for view transition to complete
+	await EventManager.view_transition_completed
 
 	# Mark transition complete
 	is_transitioning = false

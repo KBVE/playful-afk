@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d3jarinxsxxgl"
-path="res://.godot/imported/Dice7.png-0b5abb0eda434f1b46d0f1d10d554055.ctex"
+uid="uid://365oi0ey6ker"
+path="res://.godot/imported/bar.png-310c15a5902cf27b1a2a04faa4879cc8.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://nodes/mechanics/dice/Dice7.png"
-dest_files=["res://.godot/imported/Dice7.png-0b5abb0eda434f1b46d0f1d10d554055.ctex"]
+source_file="res://nodes/background/bartender/bar.png"
+dest_files=["res://.godot/imported/bar.png-310c15a5902cf27b1a2a04faa4879cc8.ctex"]
 
 [params]
 

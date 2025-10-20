@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://d3jarinxsxxgl"
-path="res://.godot/imported/Dice7.png-0b5abb0eda434f1b46d0f1d10d554055.ctex"
+uid="uid://dxigkb522styj"
+path="res://.godot/imported/kingdom.jpg-9bdb5a2e50a92b53a550b6b583694b44.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://nodes/mechanics/dice/Dice7.png"
-dest_files=["res://.godot/imported/Dice7.png-0b5abb0eda434f1b46d0f1d10d554055.ctex"]
+source_file="res://nodes/background/kingdom/kingdom.jpg"
+dest_files=["res://.godot/imported/kingdom.jpg-9bdb5a2e50a92b53a550b6b583694b44.ctex"]
 
 [params]
 
