@@ -50,6 +50,7 @@ func _ready() -> void:
 	EventManager.view_state_changed.connect(_on_view_state_changed)
 	EventManager.npc_dialogue_requested.connect(_on_npc_dialogue_requested)
 	EventManager.npc_dialogue_closed.connect(_on_npc_dialogue_closed)
+	EventManager.escape_pressed.connect(_on_escape_pressed)
 
 	# Register Bartender scene and ChatUI with EventManager for centralized visibility management
 	if bartender:
@@ -201,15 +202,10 @@ func _update_background_scroll() -> void:
 	background.scroll_to(cat_offset)
 
 
-func _input(event: InputEvent) -> void:
-	# Handle escape key
-	if event.is_action_pressed("ui_cancel"):
-		# If not at ground view, return to ground instead of pausing
-		if EventManager.get_current_view() != EventManager.ViewState.GROUND:
-			EventManager.request_view_change(EventManager.ViewState.GROUND)
-		else:
-			# Normal pause at ground level
-			EventManager.game_paused.emit(not is_paused)
+## Handle ESC key when at ground view (for pause menu, etc.)
+func _on_escape_pressed() -> void:
+	print("Main: ESC pressed at ground view - toggling pause")
+	EventManager.game_paused.emit(not is_paused)
 
 
 ## Handle warrior clicked - request dialogue via EventManager

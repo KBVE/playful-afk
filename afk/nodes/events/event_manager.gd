@@ -115,6 +115,9 @@ signal npc_dialogue_requested(npc, npc_name, dialogue_text)
 ## Emitted when NPC dialogue is closed
 signal npc_dialogue_closed()
 
+## Emitted when ESC key is pressed (for centralized handling)
+signal escape_pressed()
+
 # ===== Achievement & Quest Events =====
 ## Emitted when an achievement is unlocked. Parameters: (achievement_id: String)
 signal achievement_unlocked(achievement_id)
@@ -380,3 +383,58 @@ func request_npc_dialogue(npc: Node2D, npc_name: String, dialogue_text: String) 
 func close_npc_dialogue() -> void:
 	print("EventManager: NPC dialogue closed")
 	npc_dialogue_closed.emit()
+
+
+# ===== ESC Key Handling =====
+
+## Handle ESC key press - determines context and takes appropriate action
+## Priority: NPC Dialogue > Modals > View Reset > Pause
+func handle_escape() -> void:
+	print("EventManager: ESC pressed - state: %s, modal: %s" % [
+		ViewState.keys()[current_view_state],
+		"yes" if has_active_modal() else "no"
+	])
+
+	# Handle based on current context (highest priority first)
+	if _is_in_npc_dialogue():
+		_handle_escape_from_dialogue()
+	elif has_active_modal():
+		_handle_escape_from_modal()
+	elif _is_away_from_ground():
+		_handle_escape_return_to_ground()
+	else:
+		_handle_escape_at_ground()
+
+
+## Check if player is currently in NPC dialogue
+func _is_in_npc_dialogue() -> bool:
+	return current_view_state == ViewState.BARTENDER
+
+
+## Check if player is away from ground view
+func _is_away_from_ground() -> bool:
+	return current_view_state != ViewState.GROUND
+
+
+## Handle ESC when in NPC dialogue - close dialogue and return to ground
+func _handle_escape_from_dialogue() -> void:
+	print("EventManager: ESC → Closing NPC dialogue")
+	close_npc_dialogue()
+
+
+## Handle ESC when a modal is open - close the modal
+func _handle_escape_from_modal() -> void:
+	print("EventManager: ESC → Closing modal")
+	close_modal()
+
+
+## Handle ESC when away from ground - reset view to ground
+func _handle_escape_return_to_ground() -> void:
+	print("EventManager: ESC → Returning to ground from %s" % ViewState.keys()[current_view_state])
+	request_view_change(ViewState.GROUND)
+
+
+## Handle ESC at ground level - emit signal for pause menu, etc.
+func _handle_escape_at_ground() -> void:
+	print("EventManager: ESC → Emitting escape_pressed signal (ground level)")
+	escape_pressed.emit()

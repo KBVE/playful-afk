@@ -221,10 +221,3 @@ func _on_close_button_hover_exit() -> void:
 	if close_button:
 		var tween = create_tween()
 		tween.tween_property(close_button, "scale", Vector2(1.0, 1.0), 0.1)
-
-
-## Handle escape key to close
-func _input(event: InputEvent) -> void:
-	if is_open and event.is_action_pressed("ui_cancel"):
-		close()
-		get_viewport().set_input_as_handled()

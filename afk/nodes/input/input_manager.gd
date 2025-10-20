@@ -71,14 +71,25 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Skip input handling if blocked by modals
+	# ESC key always gets priority - allows closing modals even when input is blocked
+	if event.is_action_pressed("ui_cancel"):
+		_forward_escape_to_event_manager()
+		return
+
+	# Block all other input when modals are active
 	if input_blocked:
 		return
 
-	# Handle mouse clicks
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
-			_handle_click(event.position)
+	# Handle mouse interactions
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		_handle_click(event.position)
+
+
+## Forward ESC key press to EventManager for centralized handling
+func _forward_escape_to_event_manager() -> void:
+	print("InputManager: ESC detected → forwarding to EventManager")
+	EventManager.handle_escape()
+	get_viewport().set_input_as_handled()
 
 
 ## Check which object (if any) is currently being hovered
