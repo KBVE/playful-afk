@@ -22,6 +22,7 @@ EventManager="*res://nodes/events/event_manager.gd"
 NPCManager="*res://nodes/npc/npc_manager.gd"
 InputManager="*res://nodes/input/input_manager.gd"
 StructureManager="*res://nodes/structures/structure_manager.gd"
+MechanicsManager="*res://nodes/mechanics/mechanics_manager.gd"
 
 [display]
 

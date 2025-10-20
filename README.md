@@ -72,3 +72,9 @@ https://szadiart.itch.io/bakcground-hill
 
 Free Sky Background
 https://free-game-assets.itch.io/free-sky-with-clouds-background-pixel-art-set
+
+Dice
+https://srspooky.itch.io/pixel-spritesheet-dice20d
+
+Pocker Cards
+https://ivoryred.itch.io/pixel-poker-cards

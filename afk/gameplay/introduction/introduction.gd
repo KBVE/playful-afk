@@ -33,7 +33,7 @@ func _ready() -> void:
 	# Connect button
 	if continue_button:
 		continue_button.pressed.connect(_on_continue_pressed)
-		continue_button.visible = false  # Hide until text is done
+		# Button is always visible, allowing player to skip text animation
 
 	# Setup text writer effect
 	if welcome_text:
@@ -54,6 +54,14 @@ func _process(delta: float) -> void:
 func _on_continue_pressed() -> void:
 	# Play button click sound
 	EventManager.sfx_play_requested.emit("button_click")
+
+	# If text is still writing, skip to the end
+	if is_writing:
+		is_writing = false
+		if welcome_text:
+			welcome_text.visible_characters = -1  # Show all text immediately
+		print("Text animation skipped")
+		return
 
 	print("Continue pressed - transitioning to main game...")
 
@@ -91,10 +99,4 @@ func _update_text_writer(delta: float) -> void:
 
 func _on_text_complete() -> void:
 	print("Text writing complete")
-	# Show the continue button
-	if continue_button:
-		continue_button.visible = true
-		# Animate button in
-		continue_button.modulate.a = 0.0
-		var tween = create_tween()
-		tween.tween_property(continue_button, "modulate:a", 1.0, 0.3)
+	# Text animation is done, button is already visible
