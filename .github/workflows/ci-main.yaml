@@ -30,6 +30,13 @@ jobs:
           mkdir -v -p builds/web
           cd afk
           godot -v --headless --export-release "Web" ../builds/web/index.html
+      - name: Inject Supabase into index.html
+        run: |
+          # Read the head_include.html content
+          HEAD_CONTENT=$(cat afk/head_include.html)
+          # Inject it right before </head> tag in index.html
+          sed -i "s|</head>|${HEAD_CONTENT}\n</head>|" builds/web/index.html
+          echo "Supabase code injected into index.html"
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
