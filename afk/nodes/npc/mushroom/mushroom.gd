@@ -32,29 +32,21 @@ func _init() -> void:
 
 
 func _on_ready_complete() -> void:
-	print("Mushroom initialized - Current state: %s" % current_state)
+	# Stop the state timer for aggressive monsters - they're controlled by NPCManager AI
+	if state_timer:
+		state_timer.stop()
 
 
 func _register_with_input_manager() -> void:
 	if InputManager:
 		InputManager.register_interactive_object(self, 20.0)  # 20 pixel click radius
-		print("Mushroom registered with InputManager")
 
 
-## Override random state change to make mushrooms more aggressive (walk more often)
+## Override random state change - disabled for aggressive monsters (controlled by NPCManager)
 func _random_state_change() -> void:
-	# 50% chance to idle, 50% chance to walk (mushrooms are more active)
-	var should_walk = (randi() % 10) >= 5  # 5 out of 10 numbers (5,6,7,8,9) = 50%
-	current_state = NPCManager.NPCState.WALKING if should_walk else NPCManager.NPCState.IDLE
-
-	# Set random direction if walking
-	if should_walk:
-		_move_direction = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
-	else:
-		_move_direction = Vector2.ZERO
-
-	# Randomize next state change time (shorter intervals for mushrooms)
-	state_timer.wait_time = randf_range(1.5, 4.0)
+	# AGGRESSIVE monsters are controlled by NPCManager's roaming AI
+	# This prevents conflicts with bounds-safe movement system
+	pass
 
 
 ## Override damage behavior - mushrooms don't flee, they fight back
@@ -66,10 +58,6 @@ func _on_take_damage(amount: float) -> void:
 
 ## Override click handler to emit mushroom-specific signal
 func _on_input_manager_clicked() -> void:
-	print("========================================")
-	print("MUSHROOM CLICKED!")
-	print("Position: ", global_position)
-	print("========================================")
 	mushroom_clicked.emit()
 
 

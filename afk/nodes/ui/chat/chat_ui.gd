@@ -124,7 +124,6 @@ func fade_in() -> void:
 	await tween.finished
 
 	is_animating = false
-	print("ChatUI: Faded in")
 
 
 ## Fade out the chat UI with animation
@@ -141,7 +140,6 @@ func fade_out() -> void:
 
 	visible = false
 	is_animating = false
-	print("ChatUI: Faded out")
 
 
 ## Hide the chat UI (with fade animation)
@@ -157,8 +155,6 @@ func hide_dialogue() -> void:
 	if current_npc_sprite and npc_portrait_container:
 		npc_portrait_container.remove_child(current_npc_sprite)
 		current_npc_sprite = null
-
-	print("ChatUI: Dialogue hidden")
 
 
 ## Update stats display labels from current_npc_stats
@@ -196,8 +192,6 @@ func _update_stats_display() -> void:
 	if defense_label:
 		defense_label.text = "Defense: %d" % current_npc_stats.defense
 
-	print("ChatUI: Updated stats display for '%s'" % current_npc_stats.npc_name)
-
 
 ## Clear stats display (show default values)
 func _clear_stats_display() -> void:
@@ -215,8 +209,6 @@ func _clear_stats_display() -> void:
 		attack_label.text = "Attack: --"
 	if defense_label:
 		defense_label.text = "Defense: --"
-
-	print("ChatUI: Cleared stats display")
 
 
 ## Set the dialogue text with typewriter effect
@@ -310,7 +302,6 @@ func clear_dialogue_options() -> void:
 
 ## Handle dialogue option button pressed
 func _on_dialogue_option_pressed(option_index: int) -> void:
-	print("ChatUI: Dialogue option ", option_index, " selected")
 	dialogue_option_selected.emit(option_index)
 
 
@@ -330,7 +321,6 @@ func _on_x_button_hover_exit() -> void:
 
 ## Handle close button pressed (both X button and regular close button)
 func _on_close_button_pressed() -> void:
-	print("ChatUI: Close button pressed")
 	# Hide with fade animation first, then emit signal
 	await hide_dialogue()
 	dialogue_closed.emit()

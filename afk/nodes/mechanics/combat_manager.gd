@@ -173,8 +173,6 @@ func _execute_melee_attack(attacker: Node2D, target: Node2D, npc_type: String) -
 	var damage = calculate_damage(attacker, target)
 	apply_damage(attacker, target, damage)
 
-	print("CombatManager: %s melee attacked %s for %d damage" % [_get_npc_name(attacker), _get_npc_name(target), damage])
-
 	# Wait for rest of animation to complete (0.5s total - 0.3s already waited = 0.2s remaining)
 	await get_tree().create_timer(0.2).timeout
 
@@ -287,7 +285,6 @@ func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: Stri
 	# CRITICAL: Only RANGED combat type NPCs can fire projectiles
 	var attacker_combat_type = _get_npc_combat_type(attacker)
 	if attacker_combat_type != NPCManager.CombatType.RANGED:
-		print("CombatManager: ERROR - %s is not a RANGED combat type, cannot fire projectiles!" % _get_npc_name(attacker))
 		return false
 
 	# Get NPC type
@@ -356,9 +353,6 @@ func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: Stri
 			attacker.current_state = "Idle"
 
 	combat_started.emit(attacker, target)
-
-	print("CombatManager: %s ranged attacked %s" % [_get_npc_name(attacker), _get_npc_name(target)])
-
 	return true
 
 
@@ -396,9 +390,6 @@ func apply_damage(attacker: Node2D, target: Node2D, damage: float) -> void:
 	if target.has_method("take_damage"):
 		target.take_damage(damage)
 		damage_dealt.emit(attacker, target, damage)
-
-		print("CombatManager: %s dealt %.1f damage to %s" % [_get_npc_name(attacker), damage, _get_npc_name(target)])
-
 		# Update HURT state based on target's health
 		_update_hurt_state(target)
 
@@ -491,7 +482,6 @@ func end_combat(attacker: Node2D) -> void:
 		var target = active_combatants[attacker]["target"]
 		active_combatants.erase(attacker)
 		combat_ended.emit(attacker, target)
-		print("CombatManager: Combat ended for %s" % _get_npc_name(attacker))
 
 
 ## Get current target for attacker
@@ -524,8 +514,6 @@ func has_state(attacker: Node2D, state_flag: int) -> bool:
 ## Called when target is killed
 func _on_target_killed(attacker: Node2D, target: Node2D) -> void:
 	target_killed.emit(attacker, target)
-
-	print("CombatManager: %s killed %s!" % [_get_npc_name(attacker), _get_npc_name(target)])
 
 	# End combat for attacker
 	end_combat(attacker)
@@ -609,7 +597,6 @@ func _update_hurt_state(npc: Node2D) -> void:
 		# Add HURT flag to combat state if in active_combatants
 		if active_combatants.has(npc):
 			active_combatants[npc]["state_flags"] |= NPCManager.NPCState.HURT
-		print("CombatManager: %s is now HURT (low health - defensive behavior activated)" % _get_npc_name(npc))
 	else:
 		# Remove HURT flag if health recovered
 		if active_combatants.has(npc):

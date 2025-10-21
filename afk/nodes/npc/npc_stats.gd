@@ -146,6 +146,16 @@ func set_emotion(new_emotion: Emotion) -> void:
 	emotion = new_emotion
 
 
+## Reset core stats to max values (for object pooling)
+## Does NOT reset level, attack, defense, or other permanent stats
+func reset_to_full() -> void:
+	hp = max_hp
+	mana = max_mana
+	energy = max_energy
+	hunger = 100.0
+	emotion = Emotion.NEUTRAL
+
+
 ## ===== DICTIONARY CONVERSION =====
 
 ## Convert stats to Dictionary (for saving/serialization)

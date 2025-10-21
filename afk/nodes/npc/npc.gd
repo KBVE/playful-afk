@@ -158,7 +158,6 @@ func take_damage(amount: float) -> void:
 
 	var previous_state = current_state
 	stats.hp -= amount
-	print("NPC took %d damage! HP: %d/%d" % [amount, stats.hp, stats.max_hp])
 
 	# Emit damage signal for NPCManager
 	damage_taken.emit(amount, stats.hp, stats.max_hp)
@@ -167,7 +166,6 @@ func take_damage(amount: float) -> void:
 	if stats.hp <= 0:
 		current_state = NPCManager.NPCState.DEAD
 		npc_died.emit()
-		print("NPC has died!")
 		return
 
 	# Play hurt animation

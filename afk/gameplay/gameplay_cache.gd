@@ -16,11 +16,8 @@ var _viewport_rect_dirty: bool = true
 func _ready() -> void:
 	# Connect to viewport size changes
 	get_tree().root.size_changed.connect(_on_viewport_size_changed)
-
 	# Initialize cache
 	_refresh_viewport_cache()
-
-	print("GameplayCache: Initialized")
 
 
 ## Get cached viewport rect (auto-refreshes if dirty)
@@ -87,7 +84,6 @@ func _on_viewport_size_changed() -> void:
 	_viewport_rect_dirty = true
 	_refresh_viewport_cache()
 	viewport_resized.emit(_viewport_rect.size)
-	print("GameplayCache: Viewport resized to %s" % _viewport_rect.size)
 
 
 ## Force cache refresh (use if viewport changes outside of size_changed signal)

@@ -74,8 +74,6 @@ func fire(target: Vector2, fire_speed: float = 300.0, from_attacker: Node2D = nu
 	# Enable processing
 	process_mode = Node.PROCESS_MODE_INHERIT
 
-	print("Arrow fired from %s to %s at speed %d" % [global_position, target, speed])
-
 
 ## Check if arrow is outside viewport bounds
 func _is_off_screen() -> bool:
@@ -104,13 +102,10 @@ func _return_to_pool() -> void:
 	# Return to ProjectileManager
 	if ProjectileManager:
 		ProjectileManager.return_projectile(self, PROJECTILE_TYPE)
-		print("Arrow returned to pool")
 
 
 ## Handle collision (to be called externally or via Area2D signal)
 func on_hit(target: Node2D) -> void:
-	print("Arrow hit: %s" % target.name)
-
 	# Use CombatManager to apply damage with proper attack/defense calculation
 	if CombatManager and attacker:
 		var calculated_damage = CombatManager.calculate_damage(attacker, target)

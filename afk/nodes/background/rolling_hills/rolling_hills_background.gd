@@ -289,6 +289,12 @@ func get_safe_waypoint(start_pos: Vector2, target_pos: Vector2) -> Vector2:
 func is_in_safe_rectangle(pos: Vector2) -> bool:
 	return safe_rectangle.has_point(pos)
 
+## Get a random position within the safe rectangle
+func get_random_safe_position() -> Vector2:
+	var random_x = randf_range(safe_rectangle.position.x, safe_rectangle.position.x + safe_rectangle.size.x)
+	var random_y = randf_range(safe_rectangle.position.y, safe_rectangle.position.y + safe_rectangle.size.y)
+	return Vector2(random_x, random_y)
+
 func is_position_in_walkable_area(pos: Vector2) -> bool:
 	match walkable_check_mode:
 		WalkableCheckMode.RECTANGLE:

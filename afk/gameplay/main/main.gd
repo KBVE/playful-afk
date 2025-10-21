@@ -450,20 +450,12 @@ func _on_monster_spawn_timer_timeout() -> void:
 				monster.chicken_clicked.connect(func(): _on_npc_clicked(monster))
 
 		active_monsters.append(monster)
-		print("Spawned %s from %s edge at %s (%d/%d active)" % [
-			monster_type,
-			"left" if spawn_from_left else "right",
-			spawn_pos,
-			active_monsters.size(),
-			MAX_ACTIVE_MONSTERS
-		])
 
 
 ## Handle monster death - remove from active list
 func _on_monster_died(monster: Node2D) -> void:
 	if monster in active_monsters:
 		active_monsters.erase(monster)
-		print("Monster died - %d/%d active monsters remaining" % [active_monsters.size(), MAX_ACTIVE_MONSTERS])
 
 
 ## Handle NPC clicked - request dialogue via EventManager

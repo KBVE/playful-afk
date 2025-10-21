@@ -28,7 +28,6 @@ func _ready() -> void:
 		dice.dice_roll_started.connect(_on_dice_roll_started)
 		dice.dice_roll_finished.connect(_on_dice_roll_finished)
 
-	print("MechanicsManager initialized with dice")
 
 
 ## Get a dice instance for use in UI
@@ -71,19 +70,16 @@ func is_dice_rolling() -> bool:
 ## Dice signal callbacks
 func _on_dice_rolled(result: int) -> void:
 	dice_rolled.emit(result)
-	print("MechanicsManager: Dice rolled - result: ", result)
 
 
 func _on_dice_roll_started() -> void:
 	is_mechanic_active = true
 	active_mechanic = "dice"
-	print("MechanicsManager: Dice roll started")
 
 
 func _on_dice_roll_finished(result: int) -> void:
 	is_mechanic_active = false
 	active_mechanic = ""
-	print("MechanicsManager: Dice roll finished - result: ", result)
 
 
 ## Future mechanics can be added here

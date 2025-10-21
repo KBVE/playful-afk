@@ -123,11 +123,8 @@ const NPC_REGISTRY: Dictionary = {
 # Loaded NPC scenes cache
 var _npc_scenes: Dictionary = {}
 
-# NPC Singleton References (for globally accessible NPCs like cat/warrior)
-var warrior: Warrior = null
-
 # UI Sprite Cache - Pre-cloned sprites for UI display (performance optimization)
-# Automatically populated from NPC_REGISTRY + cat
+# Automatically populated from NPC_REGISTRY + cat singleton
 var ui_sprite_cache: Dictionary = {}
 
 ## ===== DUAL POOL SYSTEM =====
@@ -190,10 +187,6 @@ func _ready() -> void:
 
 	# Initialize the cat (virtual pet)
 	_initialize_cat()
-
-	# NOTE: Singleton warrior deprecated - now using generic pool system
-	# _initialize_warrior()
-
 	# Initialize character pool (empty slots)
 	# Initialize dual pool system
 	_initialize_persistent_pool()
@@ -215,8 +208,6 @@ func _ready() -> void:
 	# Connect to save/load events
 	EventManager.game_saved.connect(_on_game_saved)
 	EventManager.game_loaded.connect(_on_game_loaded)
-
-	print("NPCManager initialized - Cat, Warrior, Character Pool, AI System, and UI Sprite Cache ready")
 
 
 ## ===== NPC REGISTRY HELPER FUNCTIONS =====
@@ -271,8 +262,6 @@ func _initialize_cat() -> void:
 		if npc_save_data.has("cat"):
 			_load_cat_data(npc_save_data["cat"])
 
-		print("Cat virtual pet instantiated and ready")
-
 
 ## Save cat data to dictionary
 func save_cat_data() -> Dictionary:
@@ -320,70 +309,10 @@ func reset_cat() -> void:
 		cat = null
 
 	_initialize_cat()
-	print("Cat has been reset to default state")
-
 
 ## Initialize the warrior NPC
-func _initialize_warrior() -> void:
-	if warrior == null:
-		warrior = create_npc("warrior") as Warrior
-		if warrior:
-			add_child(warrior)
-
-			# Load saved data if available
-			if npc_save_data.has("warrior"):
-				_load_warrior_data(npc_save_data["warrior"])
-
-			print("Warrior NPC instantiated and ready")
-		else:
-			push_error("NPCManager: Failed to create warrior NPC")
-
-
-## Save warrior data to dictionary
-func save_warrior_data() -> Dictionary:
-	if warrior == null:
-		return {}
-
-	return {
-		"health": warrior.health,
-		"strength": warrior.strength,
-		"defense": warrior.defense,
-		"level": warrior.level,
-		"current_state": warrior.current_state,
-		"position": {
-			"x": warrior.position.x,
-			"y": warrior.position.y
-		}
-	}
-
-
-## Load warrior data from dictionary
-func _load_warrior_data(data: Dictionary) -> void:
-	if warrior == null:
-		return
-
-	warrior.health = data.get("health", 100.0)
-	warrior.strength = data.get("strength", 50.0)
-	warrior.defense = data.get("defense", 50.0)
-	warrior.level = data.get("level", 1)
-	warrior.current_state = data.get("current_state", "Idle")
-
-	# Restore position if available
-	if data.has("position"):
-		var pos = data["position"]
-		warrior.position = Vector2(pos.get("x", 0), pos.get("y", 0))
-
-	print("Warrior data loaded successfully")
-
-
-## Reset warrior to default state
-func reset_warrior() -> void:
-	if warrior:
-		warrior.queue_free()
-		warrior = null
-
-	_initialize_warrior()
-	print("Warrior has been reset to default state")
+# NOTE: Warrior singleton removed - warriors are now managed through the generic pool system
+# All warrior save/load is handled by the pool save system
 
 
 
@@ -392,7 +321,7 @@ func reset_warrior() -> void:
 func _on_game_saved(success: bool) -> void:
 	if success:
 		npc_save_data["cat"] = save_cat_data()
-		npc_save_data["warrior"] = save_warrior_data()
+		# Warrior save removed - now handled by pool system
 		print("NPC data saved")
 
 
@@ -401,16 +330,15 @@ func _on_game_loaded(success: bool) -> void:
 	if success:
 		if npc_save_data.has("cat"):
 			_load_cat_data(npc_save_data["cat"])
-		if npc_save_data.has("warrior"):
-			_load_warrior_data(npc_save_data["warrior"])
+		# Warrior load removed - now handled by pool system
 		print("NPC data loaded")
 
 
 ## Get all NPC data for saving to file
 func get_save_data() -> Dictionary:
 	return {
-		"cat": save_cat_data(),
-		"warrior": save_warrior_data()
+		"cat": save_cat_data()
+		# Warrior save removed - now handled by pool system
 	}
 
 
@@ -421,8 +349,7 @@ func load_save_data(data: Dictionary) -> void:
 	if npc_save_data.has("cat"):
 		_load_cat_data(npc_save_data["cat"])
 
-	if npc_save_data.has("warrior"):
-		_load_warrior_data(npc_save_data["warrior"])
+	# Warrior load removed - now handled by pool system
 
 
 ## Set the Layer4Objects container reference (called from main scene)
@@ -529,13 +456,11 @@ func play_release_effect(position: Vector2, on_midpoint: Callable) -> void:
 
 		# Play effect at position
 		effect.play_at(position)
-		print("NPCManager: Playing release effect at %s" % position)
 
 
 ## Register NPC for AI control
 ## Y position is now dynamically queried from background heightmap based on X
 func register_npc_ai(npc: Node2D, npc_type: String) -> void:
-	print("NPCManager: register_npc_ai called for %s" % npc_type)
 
 	if not NPC_REGISTRY.has(npc_type):
 		push_error("NPCManager: Cannot register AI for unknown NPC type: %s" % npc_type)
@@ -582,16 +507,11 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 			if not signal_source.state_changed.is_connected(_on_npc_state_changed):
 				signal_source.state_changed.connect(_on_npc_state_changed.bind(npc))
 
-		print("NPCManager: Connected signals for %s" % npc_type)
-
-	print("NPCManager: Registered AI for %s (%s)" % [npc_type, npc.name])
-
 
 ## Unregister NPC from AI control
 func unregister_npc_ai(npc: Node2D) -> void:
 	if _npc_ai_states.has(npc):
 		_npc_ai_states.erase(npc)
-		print("NPCManager: Unregistered AI for NPC: %s" % npc.name)
 
 
 ## AI timer callback - update all NPC AI states
@@ -721,25 +641,27 @@ func _update_npc_ai(npc: Node2D) -> void:
 					var retreat_distance = CombatManager.get_optimal_kiting_range(npc)
 					var retreat_pos = npc.global_position + (retreat_direction * retreat_distance)
 
-					# Clamp retreat position to walkable bounds (use cached background reference for performance)
-					if background_reference and background_reference.has_method("is_position_in_walkable_area"):
-						# If retreat position is out of bounds, try to find a valid position
-						if not background_reference.is_position_in_walkable_area(retreat_pos):
+					# Clamp retreat position to safe rectangle bounds
+					if background_reference and background_reference.has_method("is_in_safe_rectangle"):
+						# If retreat position is out of safe bounds, try to find a valid position
+						if not background_reference.is_in_safe_rectangle(retreat_pos):
 							# Try moving parallel to the enemy instead of directly away
 							var parallel_right = Vector2(-retreat_direction.y, retreat_direction.x)
 							var parallel_left = Vector2(retreat_direction.y, -retreat_direction.x)
 
 							# Try right parallel
 							var alt_pos1 = npc.global_position + (parallel_right * retreat_distance * 0.5)
-							if background_reference.is_position_in_walkable_area(alt_pos1):
+							if background_reference.is_in_safe_rectangle(alt_pos1):
 								retreat_pos = alt_pos1
 							# Try left parallel
-							elif background_reference.is_position_in_walkable_area(npc.global_position + (parallel_left * retreat_distance * 0.5)):
+							elif background_reference.is_in_safe_rectangle(npc.global_position + (parallel_left * retreat_distance * 0.5)):
 								retreat_pos = npc.global_position + (parallel_left * retreat_distance * 0.5)
-							# Last resort: just stay at current position
+							# Last resort: move toward nearest safe rectangle edge
 							else:
-								retreat_pos = npc.global_position
-								print("Archer KITING: Trapped, cannot retreat further!")
+								if background_reference.has_method("get_random_safe_position"):
+									retreat_pos = background_reference.get_random_safe_position()
+								else:
+									retreat_pos = npc.global_position
 
 					# Only retreat if not already retreating or target moved
 					var should_retreat = false
@@ -757,7 +679,6 @@ func _update_npc_ai(npc: Node2D) -> void:
 						ai_state["combat_target"] = target
 						ai_state["last_retreat_pos"] = retreat_pos
 						ai_state["time_until_next_change"] = 1.0
-						print("Archer KITING: Retreating from enemy!")
 					return
 
 				# In good range - ATTACK!
@@ -801,33 +722,33 @@ func _update_npc_ai(npc: Node2D) -> void:
 		elif CombatManager.is_in_combat(npc):
 			CombatManager.end_combat(npc)
 
-	# AGGRESSIVE MONSTER BEHAVIOR - Move toward middle when no enemies
+	# AGGRESSIVE MONSTER BEHAVIOR - Move toward safe bounds when no enemies
 	# Check if this is an aggressive (non-PASSIVE) monster
 	if npc is Monster and not npc.is_passive():
 		# Check if already has combat target (handled above)
 		if not ai_state.get("combat_target"):
-			# Move toward screen center (use cached viewport for performance)
-			var screen_center_x = _get_viewport_center_x()
-			var current_x = npc.global_position.x
-			var distance_to_center = abs(current_x - screen_center_x)
+			var movement_target = _get_movement_target(npc)
+			var is_moving = movement_target.has_method("is_moving") and movement_target.is_moving()
 
-			# If more than 100px from center, move toward it
-			if distance_to_center > 100.0:
-				var movement_target = _get_movement_target(npc)
-				var is_moving = movement_target.has_method("is_moving") and movement_target.is_moving()
+			# Check if monster is outside safe rectangle or hasn't picked a roam target yet
+			var needs_new_target = false
+			if background_reference and background_reference.has_method("is_in_safe_rectangle"):
+				if not background_reference.is_in_safe_rectangle(npc.global_position):
+					needs_new_target = true
+				elif not ai_state.has("roam_target"):
+					needs_new_target = true
+				elif not is_moving:
+					# Reached target, pick a new one
+					needs_new_target = true
 
-				# Only issue new movement if not already moving toward center
-				if not is_moving or ai_state.get("moving_to_center") != true:
-					if movement_target.has_method("move_to_position"):
-						# Move to center X, keep current Y (monsters stay on walkable area)
-						movement_target.move_to_position(screen_center_x)
-						ai_state["moving_to_center"] = true
-						ai_state["time_until_next_change"] = 3.0
-						print("Aggressive monster moving toward center (current: %.0f, target: %.0f)" % [current_x, screen_center_x])
-						return
-			else:
-				# Close to center - clear the flag
-				ai_state["moving_to_center"] = false
+			# Pick a random position in safe rectangle and move there
+			if needs_new_target and background_reference and background_reference.has_method("get_random_safe_position"):
+				var safe_pos = background_reference.get_random_safe_position()
+				if movement_target.has_method("move_to_position"):
+					movement_target.move_to_position(safe_pos.x)
+					_ai_tween_y_position(npc, safe_pos.y, ai_state)
+					ai_state["roam_target"] = safe_pos
+					ai_state["time_until_next_change"] = 5.0
 
 	# Check if NPC reached waypoint and needs to continue to final target
 	if ai_state.get("has_waypoint", false) and ai_state.get("current_state") == NPCState.WALKING:
@@ -983,7 +904,7 @@ func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 
 	if movement_target.has_method("stop_auto_movement"):
 		movement_target.stop_auto_movement()
-		print("NPCManager AI: %s idling" % ai_state["npc_type"])
+		# print("NPCManager AI: %s idling" % ai_state["npc_type"])
 
 
 ## AI: Smoothly tween Y position with natural curve
@@ -1012,7 +933,7 @@ func _ai_tween_y_position(npc: Node2D, target_y: float, ai_state: Dictionary) ->
 func set_npc_player_controlled(npc: Node2D, controlled: bool) -> void:
 	if _npc_ai_states.has(npc):
 		_npc_ai_states[npc]["is_player_controlled"] = controlled
-		print("NPCManager: NPC %s player_controlled = %s" % [npc.name, controlled])
+		# print("NPCManager: NPC %s player_controlled = %s" % [npc.name, controlled])
 
 
 ## Get AI state for debugging
@@ -1028,7 +949,7 @@ func _on_controller_movement_started(target_position: float, npc: Node2D) -> voi
 		return
 
 	var ai_state = _npc_ai_states[npc]
-	print("NPCManager AI: Received movement_started from %s controller (target: %s)" % [ai_state["npc_type"], target_position])
+	# print("NPCManager AI: Received movement_started from %s controller (target: %s)" % [ai_state["npc_type"], target_position])
 
 	# AI system is aware controller has started executing the movement command
 	# Could use this to track state, cancel other actions, etc.
@@ -1040,7 +961,7 @@ func _on_controller_movement_completed(final_position: float, npc: Node2D) -> vo
 		return
 
 	var ai_state = _npc_ai_states[npc]
-	print("NPCManager AI: Received movement_completed from %s controller (final: %s)" % [ai_state["npc_type"], final_position])
+	# print("NPCManager AI: Received movement_completed from %s controller (final: %s)" % [ai_state["npc_type"], final_position])
 
 	# Movement completed - update NPC state to Idle
 	if "current_state" in npc:
@@ -1056,7 +977,7 @@ func _on_controller_movement_interrupted(npc: Node2D) -> void:
 		return
 
 	var ai_state = _npc_ai_states[npc]
-	print("NPCManager AI: Received movement_interrupted from %s controller" % ai_state["npc_type"])
+	# print("NPCManager AI: Received movement_interrupted from %s controller" % ai_state["npc_type"])
 
 	# Movement was stopped - update NPC state to Idle
 	if "current_state" in npc:
@@ -1072,7 +993,7 @@ func _on_npc_state_changed(old_state: int, new_state: int, npc: Node2D) -> void:
 		return
 
 	var ai_state = _npc_ai_states[npc]
-	print("NPCManager AI: %s state changed from %d to %d" % [ai_state["npc_type"], old_state, new_state])
+	# print("NPCManager AI: %s state changed from %d to %d" % [ai_state["npc_type"], old_state, new_state])
 
 	# Track the state change in AI system
 	ai_state["current_state"] = new_state
@@ -1362,7 +1283,6 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 	_update_character_z_index(npc)
 
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
-	print("NPCManager: Registering %s AI..." % npc_type)
 	register_npc_ai(npc, npc_type)
 
 	# Connect to death signal for release animation (if monster)
@@ -1370,9 +1290,7 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 		# Check if already connected to avoid duplicate connections
 		if not npc.monster_died.is_connected(_on_npc_died):
 			npc.monster_died.connect(_on_npc_died.bind(npc))
-			print("NPCManager: Connected to monster death signal for %s" % npc_type)
 
-	print("NPCManager: Spawned generic %s '%s' (ULID: %s)" % [npc_type, fresh_stats.npc_name, ULID.to_str(fresh_stats.ulid)])
 
 	return npc
 
@@ -1382,12 +1300,10 @@ func _on_npc_died(npc: Node2D) -> void:
 	if not is_instance_valid(npc):
 		return
 
-	print("NPCManager: NPC died at position %s" % npc.global_position)
 
 	# Play release effect at NPC's position
 	# On midpoint (frame 5), return NPC to pool
 	play_release_effect(npc.global_position, func():
-		print("NPCManager: Release effect midpoint - returning NPC to pool")
 		return_generic_npc(npc)
 	)
 
@@ -1401,11 +1317,16 @@ func return_generic_npc(npc: Node2D) -> void:
 			npc.visible = false
 			npc.position = Vector2.ZERO
 
-			# Remove stats from database (generic NPCs don't persist stats)
+			# Reset stats to full (keeps level/attack/defense but resets HP/mana/energy/hunger)
 			if "stats" in npc and npc.stats:
+				npc.stats.reset_to_full()
 				var ulid_key = ULID.to_hex(npc.stats.ulid)
 				stats_database.erase(ulid_key)
 				npc.stats = null
+
+			# Reset NPC state flags
+			if "current_state" in npc:
+				npc.current_state = NPCState.IDLE
 
 			# Clear AI state
 			if _npc_ai_states.has(npc):
@@ -1477,18 +1398,10 @@ func _initialize_ui_sprite_cache() -> void:
 			ui_sprite_cache["cat"] = cat_ui_sprite
 			print("NPCManager: Cat UI sprite cached")
 
-	# Create warrior UI sprite (singleton instance)
-	if warrior and warrior.has_node("AnimatedSprite2D"):
-		var warrior_sprite = warrior.get_node("AnimatedSprite2D") as AnimatedSprite2D
-		if warrior_sprite:
-			var warrior_ui_sprite = warrior_sprite.duplicate() as AnimatedSprite2D
-			ui_sprite_cache["warrior"] = warrior_ui_sprite
-			print("NPCManager: Warrior UI sprite cached")
-
 	# Create UI sprites for all registered NPCs (data-driven)
 	for npc_type in NPC_REGISTRY:
-		# Skip warrior since it's already cached as singleton
-		if npc_type == "warrior":
+		# Skip cat since it's already cached as singleton
+		if npc_type == "cat":
 			continue
 
 		await _cache_npc_ui_sprite(npc_type)

@@ -104,7 +104,11 @@ func _process(delta: float) -> void:
 
 
 func _update_movement(delta: float) -> void:
-	# Simple movement for monsters
+	# Skip movement for aggressive monsters - they're controlled by NPCManager's roaming AI
+	if not is_passive():
+		return
+
+	# Simple movement for passive monsters only
 	if current_state == NPCManager.NPCState.WALKING:
 		# Calculate potential new position
 		var new_position = position + (_move_direction * walk_speed * delta)
@@ -185,7 +189,6 @@ func take_damage(amount: float) -> void:
 	# Reduce HP through stats system if available
 	if stats:
 		stats.hp -= amount
-		print("%s took %d damage! HP: %d/%d" % [get_class(), amount, stats.hp, stats.max_hp])
 
 		# Emit damage signal for NPCManager
 		damage_taken.emit(amount, stats.hp, stats.max_hp)
@@ -194,7 +197,6 @@ func take_damage(amount: float) -> void:
 		if stats.hp <= 0:
 			current_state = NPCManager.NPCState.DEAD
 			monster_died.emit()
-			print("%s has died!" % get_class())
 			return
 
 	# Add DAMAGED state with bitwise OR (allows coexisting with ATTACKING)
@@ -216,7 +218,6 @@ func _on_animation_finished() -> void:
 	if _is_hurt and animated_sprite and animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt"):
 		_is_hurt = false
 		current_state &= ~NPCManager.NPCState.DAMAGED
-		print("%s hurt animation finished - removed DAMAGED state" % get_class())
 
 
 ## Check if this monster is passive (doesn't deal damage to others)
