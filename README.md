@@ -69,6 +69,74 @@ Military training grounds where your forces hone their skills. Positioned on ele
 - **Benefits**: Military training, soldier recruitment, defense
 - **Special**: Spawns at game start
 
+### NPCs
+
+The game features various NPCs that inhabit your kingdom. All NPCs are managed through the data-driven NPC Registry system located in `/afk/nodes/npc/npc_manager.gd`, making it easy to add new characters.
+
+#### Cat (Virtual Pet)
+
+Your divine companion on the journey to godhood! The Cat is your primary character and the heart of your kingdom. Manage its hunger, happiness, and health while watching it grow in level and experience. The Cat can walk around, be clicked to view its stats, and is central to your kingdom's story.
+
+- **Type**: Virtual Pet
+- **Location**: Ground level, follows player interaction
+- **Stats**: Hunger, Happiness, Health, Level, Experience
+- **Features**: Interactive, state-based animations (idle, walking, sitting, eating, sleeping, playing)
+- **Special**: Primary character, scalable (4x size)
+
+#### Warrior
+
+A brave melee fighter protecting your kingdom! The Warrior patrols the grounds with sword ready, demonstrating combat prowess through various animations. Click to interact and engage in dialogue. Part of the NPC character pool system.
+
+- **Type**: Melee NPC
+- **Category**: Melee
+- **Location**: Character pool (Layer4), autonomous movement
+- **Stats**: Health, Strength, Defense, Level
+- **Animations**: Idle, Walking (run), Attack
+- **Features**: Click-to-dialogue, autonomous patrol, hover highlighting
+- **Pool Slot**: 0 (active by default)
+- **Scale**: 2x
+
+#### Archer
+
+A skilled ranged combatant who keeps watch over your realm! The Archer moves gracefully with bow in hand, ready to defend from afar. Features comprehensive animation states including hurt and death sequences. Click to interact and start a conversation.
+
+- **Type**: Ranged NPC
+- **Category**: Ranged
+- **Location**: Character pool (Layer4), autonomous movement
+- **Stats**: Health, Agility, Attack Range, Level
+- **Animations**: Idle, Walk, Attack, Hurt, Dead
+- **Features**: Click-to-dialogue, autonomous patrol, hover highlighting
+- **Pool Slot**: 1 (active by default)
+- **Scale**: 2x
+
+#### Adding New NPCs
+
+Thanks to the NPC Registry system, adding new NPCs is straightforward:
+
+1. Create NPC files in `/afk/nodes/npc/[npc_name]/`
+   - `[npc_name].gd` - Main NPC class
+   - `[npc_name]_controller.gd` - Animation/movement controller
+   - `[npc_name].tscn` - Scene file
+   - Animation sprite sheets
+
+2. Register in `/afk/nodes/npc/npc_manager.gd`:
+```gdscript
+const NPC_REGISTRY: Dictionary = {
+    "your_npc": {
+        "scene": "res://nodes/npc/your_npc/your_npc.tscn",
+        "class_name": "YourNPC",
+        "category": "melee/ranged/magic"
+    }
+}
+```
+
+3. Spawn using the unified API:
+```gdscript
+NPCManager.add_npc_to_pool("your_npc", slot_index, position, activate, movement_bounds)
+```
+
+For detailed instructions, see [`/docs/adding-new-npcs.md`](/docs/adding-new-npcs.md)
+
 
 
 
@@ -98,3 +166,6 @@ https://ivoryred.itch.io/pixel-poker-cards
 
 Kobold Warrior
 https://xzany.itch.io/kobold-warrior-2d-pixel-art
+
+Gandalf Hardcore The Archer
+https://gandalfhardcore.itch.io/pixel-art-archer-character

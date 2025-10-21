@@ -109,7 +109,8 @@ func _setup_character_pool() -> void:
 	# Define movement bounds relative to Layer4 (warrior moves within layer bounds)
 	var movement_bounds = Vector2(100.0, viewport_size.x - 100.0)
 
-	var warrior = NPCManager.add_warrior_to_pool(0, warrior_position, true, movement_bounds)
+	# Add warrior to slot 0
+	var warrior = NPCManager.add_npc_to_pool("warrior", 0, warrior_position, true, movement_bounds)
 	if warrior:
 		warrior.scale = Vector2(2, 2)  # Smaller than cat (cat is 4x, warrior is 2x)
 		warrior.set_physics_process(false)  # Disable physics/gravity (same as cat)
@@ -120,9 +121,22 @@ func _setup_character_pool() -> void:
 
 		print("Warrior added to character pool at slot 0")
 
-	# Example: Add more warriors to pool (but keep them inactive)
-	# NPCManager.add_warrior_to_pool(1, Vector2(400, viewport_size.y - 150), false, movement_bounds)
-	# NPCManager.add_warrior_to_pool(2, Vector2(600, viewport_size.y - 150), false, movement_bounds)
+	# Add archer to slot 1
+	var archer_position = Vector2(400, viewport_size.y - 150)
+	var archer = NPCManager.add_npc_to_pool("archer", 1, archer_position, true, movement_bounds)
+	if archer:
+		archer.scale = Vector2(2, 2)  # Same scale as warrior
+		archer.set_physics_process(false)  # Disable physics/gravity
+		archer.set_player_controlled(false)  # Enable autonomous behavior
+
+		# Connect archer click signal to pan camera to bartender
+		archer.archer_clicked.connect(_on_archer_clicked)
+
+		print("Archer added to character pool at slot 1")
+
+	# Example: Add more NPCs to pool (but keep them inactive)
+	# NPCManager.add_npc_to_pool("warrior", 2, Vector2(600, viewport_size.y - 150), false, movement_bounds)
+	# NPCManager.add_npc_to_pool("archer", 3, Vector2(800, viewport_size.y - 150), false, movement_bounds)
 
 	print("Character pool setup complete - %d active characters" % NPCManager.get_active_pool_count())
 
@@ -218,6 +232,17 @@ func _on_warrior_clicked() -> void:
 
 	# Request NPC dialogue via EventManager
 	EventManager.request_npc_dialogue(warrior, "Warrior", "Hello traveler! What can I do for you?")
+
+
+## Handle archer clicked - request dialogue via EventManager
+func _on_archer_clicked() -> void:
+	print("Archer clicked in main scene!")
+
+	# Get the archer from the pool
+	var archer = NPCManager.character_pool[1]["character"] if NPCManager.character_pool.size() > 1 else null
+
+	# Request NPC dialogue via EventManager
+	EventManager.request_npc_dialogue(archer, "Archer", "Greetings! Ready to take aim at adventure?")
 
 
 ## Handle NPC dialogue request from EventManager

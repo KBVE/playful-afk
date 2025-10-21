@@ -32,11 +32,27 @@ jobs:
           godot -v --headless --export-release "Web" ../builds/web/index.html
       - name: Inject Supabase into index.html
         run: |
-          # Read the head_include.html content
-          HEAD_CONTENT=$(cat afk/head_include.html)
-          # Inject it right before </head> tag in index.html
-          sed -i "s|</head>|${HEAD_CONTENT}\n</head>|" builds/web/index.html
-          echo "Supabase code injected into index.html"
+          # Create the injection content
+          cat > /tmp/supabase_inject.html << 'INJECT_EOF'
+          <script>
+          INJECT_EOF
+          cat afk/supabase.min.js >> /tmp/supabase_inject.html
+          cat >> /tmp/supabase_inject.html << 'INJECT_EOF'
+          </script>
+          <script>
+          INJECT_EOF
+          cat afk/supabase-config.js >> /tmp/supabase_inject.html
+          cat >> /tmp/supabase_inject.html << 'INJECT_EOF'
+          </script>
+          INJECT_EOF
+
+          # Use perl for more reliable multi-line replacement
+          perl -i -pe 'BEGIN{undef $/;} s|</body>|`cat /tmp/supabase_inject.html`\n</body>|smg' builds/web/index.html
+
+          echo "Supabase scripts injected into index.html"
+
+          # Verify injection
+          grep -q "createClient" builds/web/index.html && echo "✓ Supabase client found in index.html" || echo "✗ Supabase injection may have failed"
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
