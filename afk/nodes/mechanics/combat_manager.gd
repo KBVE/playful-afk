@@ -11,7 +11,7 @@ signal damage_dealt(attacker: Node2D, target: Node2D, damage: float)
 signal target_killed(attacker: Node2D, target: Node2D)
 
 ## Combat configuration
-const WARRIOR_MELEE_RANGE: float = 50.0  # Warriors need to be close (~3px visual distance)
+const WARRIOR_MELEE_RANGE: float = 60.0  # Warriors can attack from close range (accounts for sprite size)
 const ARCHER_MIN_RANGE: float = 80.0   # Archers stay at least this far (15-20px visual)
 const ARCHER_MAX_RANGE: float = 300.0  # Archers can shoot from this far
 const ARCHER_OPTIMAL_RANGE: float = 100.0  # Archers prefer this distance
@@ -87,17 +87,30 @@ func can_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Check proximity based on NPC type
 	var distance = attacker.global_position.distance_to(target.global_position)
 	if distance > required_range:
+		print("DEBUG: %s too far from %s (%.1f > %.1f)" % [npc_type, _get_npc_type(target), distance, required_range])
 		return false
 
 	# MUST be facing target for melee (strict requirement)
 	if not is_facing_target(attacker, target):
+		var flip_status = "unknown"
+		if "animated_sprite" in attacker and attacker.animated_sprite:
+			flip_status = "flip_h=%s" % attacker.animated_sprite.flip_h
+		print("DEBUG: %s NOT facing %s (%s)" % [npc_type, _get_npc_type(target), flip_status])
 		return false
 
+	print("DEBUG: %s CAN melee attack %s! (distance=%.1f)" % [npc_type, _get_npc_type(target), distance])
 	return true
 
 
 ## Check if attacker is facing target
 func is_facing_target(attacker: Node2D, target: Node2D) -> bool:
+	var distance = attacker.global_position.distance_to(target.global_position)
+
+	# If attacker is VERY close or on top of target, consider them facing
+	# (dot product becomes unreliable at very close range)
+	if distance < 20.0:
+		return true
+
 	var to_target = (target.global_position - attacker.global_position).normalized()
 
 	# Determine attacker's facing direction
@@ -115,6 +128,10 @@ func is_facing_target(attacker: Node2D, target: Node2D) -> bool:
 	# Calculate dot product (1.0 = same direction, -1.0 = opposite)
 	var dot = facing_dir.dot(to_target)
 
+	# DEBUG: Show facing calculation
+	var attacker_name = _get_npc_type(attacker)
+	print("DEBUG FACING: %s facing_dir=%s, to_target=%s, dot=%.2f (threshold=%.2f)" % [attacker_name, facing_dir, to_target, dot, FACING_THRESHOLD])
+
 	return dot >= FACING_THRESHOLD
 
 
@@ -126,6 +143,9 @@ func start_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Get NPC type
 	var npc_type = _get_npc_type(attacker)
 
+	# NOTE: Sprite flip to face target happens in NPCManager BEFORE can_melee_attack check
+	# This ensures proper facing for both the check and the attack animation
+
 	# Create or update combat state
 	active_combatants[attacker] = {
 		"target": target,
@@ -134,6 +154,12 @@ func start_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 		"cooldown_timer": ATTACK_COOLDOWN,
 		"state_flags": NPCManager.NPCState.COMBAT | NPCManager.NPCState.ATTACKING
 	}
+
+	# Set the NPC's current_state to ATTACKING to trigger animation
+	# Use bitwise OR to add ATTACKING flag while preserving other flags
+	if "current_state" in attacker:
+		attacker.current_state |= NPCManager.NPCState.ATTACKING
+		print("DEBUG: Set %s current_state to ATTACKING (state now: %d)" % [npc_type, attacker.current_state])
 
 	combat_started.emit(attacker, target)
 
@@ -167,21 +193,29 @@ func _execute_melee_attack(attacker: Node2D, target: Node2D, npc_type: String) -
 	if not is_instance_valid(attacker):
 		return
 
-	# Mark attack as complete (remove ATTACKING flag)
+	# Mark attack as complete (remove ATTACKING flag from combat state)
 	if active_combatants.has(attacker):
 		var state_flags = active_combatants[attacker]["state_flags"]
 		active_combatants[attacker]["state_flags"] = state_flags & ~NPCManager.NPCState.ATTACKING
 
-	# Update NPC animation state after attack completes
-	# Check if NPC should be walking or idle based on controller movement state
+	# Remove ATTACKING flag from NPC's current_state
 	if "current_state" in attacker:
+		attacker.current_state &= ~NPCManager.NPCState.ATTACKING
+
+		# Now set appropriate state based on controller
 		if "controller" in attacker and attacker.controller:
 			if attacker.controller.is_auto_moving:
-				attacker.current_state = "Walking"
+				attacker.current_state |= NPCManager.NPCState.WALKING
+				print("DEBUG: Attack complete, %s returning to WALKING (state: %d)" % [_get_npc_type(attacker), attacker.current_state])
 			else:
-				attacker.current_state = "Idle"
+				# Remove WALKING flag too if not moving
+				attacker.current_state &= ~NPCManager.NPCState.WALKING
+				# Idle is state 0, so just removing flags is enough
+				print("DEBUG: Attack complete, %s returning to IDLE (state: %d)" % [_get_npc_type(attacker), attacker.current_state])
 		else:
-			attacker.current_state = "Idle"
+			# Remove WALKING flag and return to idle
+			attacker.current_state &= ~NPCManager.NPCState.WALKING
+			print("DEBUG: Attack complete, %s returning to IDLE (no controller, state: %d)" % [_get_npc_type(attacker), attacker.current_state])
 
 
 ## ===== RANGED COMBAT =====
@@ -274,6 +308,13 @@ func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: Stri
 	# Get NPC type
 	var npc_type = _get_npc_type(attacker)
 
+	# IMPORTANT: Flip archer sprite to face target BEFORE attack animation starts
+	# This ensures the bow offset and arrow direction are correct
+	if "animated_sprite" in attacker and attacker.animated_sprite:
+		var to_target = target.global_position - attacker.global_position
+		# Flip sprite if target is to the left
+		attacker.animated_sprite.flip_h = to_target.x < 0
+
 	# Create or update combat state
 	active_combatants[attacker] = {
 		"target": target,
@@ -357,6 +398,12 @@ func calculate_damage(attacker: Node2D, target: Node2D) -> float:
 
 	# Minimum damage is 1 (can't deal 0 or negative damage)
 	final_damage = max(1.0, final_damage)
+
+	print("DEBUG DAMAGE: %s (attack=%.1f) -> %s (defense=%.1f) = %.1f damage" % [
+		_get_npc_type(attacker), base_damage,
+		_get_npc_type(target), defense,
+		final_damage
+	])
 
 	return final_damage
 

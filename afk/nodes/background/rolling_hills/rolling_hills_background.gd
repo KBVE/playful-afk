@@ -7,7 +7,7 @@ class_name RollingHillsBackground
 @export var scroll_speed_layer1: float = 0.15
 @export var scroll_speed_layer2: float = 0.35
 @export var scroll_speed_layer3: float = 0.6
-@export var scroll_speed_layer4: float = 0.9
+@export var scroll_speed_layer4: float = 1.0  # NPCs and foreground objects - no parallax (moves with camera)
 
 @onready var layer1: TextureRect = $Layer1
 @onready var layer2: TextureRect = $Layer2

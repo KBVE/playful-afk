@@ -41,11 +41,11 @@ func _process(delta: float) -> void:
 	if not is_active:
 		return
 
-	# Move arrow
+	# Move arrow (velocity is already in global space)
 	position += velocity * delta
 
-	# Check if arrow has traveled max distance
-	var distance_traveled = start_position.distance_to(position)
+	# Check if arrow has traveled max distance (use global_position for parallax compatibility)
+	var distance_traveled = start_position.distance_to(global_position)
 	if distance_traveled >= max_distance:
 		_return_to_pool()
 		return
@@ -60,12 +60,12 @@ func _process(delta: float) -> void:
 func fire(target: Vector2, fire_speed: float = 300.0, from_attacker: Node2D = null) -> void:
 	is_active = true
 	target_position = target
-	start_position = position
+	start_position = global_position  # Use global_position for parallax compatibility
 	speed = fire_speed
 	attacker = from_attacker
 
-	# Calculate velocity
-	var direction = (target_position - position).normalized()
+	# Calculate velocity using global coordinates (parallax-safe)
+	var direction = (target_position - global_position).normalized()
 	velocity = direction * speed
 
 	# Rotate arrow to face direction of travel
@@ -74,7 +74,7 @@ func fire(target: Vector2, fire_speed: float = 300.0, from_attacker: Node2D = nu
 	# Enable processing
 	process_mode = Node.PROCESS_MODE_INHERIT
 
-	print("Arrow fired from %s to %s at speed %d" % [position, target, speed])
+	print("Arrow fired from %s to %s at speed %d" % [global_position, target, speed])
 
 
 ## Check if arrow is outside viewport bounds

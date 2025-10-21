@@ -168,8 +168,8 @@ func _ready() -> void:
 	# Initialize the cat (virtual pet)
 	_initialize_cat()
 
-	# Initialize the warrior NPC
-	_initialize_warrior()
+	# NOTE: Singleton warrior deprecated - now using generic pool system
+	# _initialize_warrior()
 
 	# Initialize character pool (empty slots)
 	# Initialize dual pool system
@@ -454,6 +454,8 @@ func _initialize_emoji_manager() -> void:
 ## Register NPC for AI control
 ## Y position is now dynamically queried from background heightmap based on X
 func register_npc_ai(npc: Node2D, npc_type: String) -> void:
+	print("NPCManager: register_npc_ai called for %s" % npc_type)
+
 	if not NPC_REGISTRY.has(npc_type):
 		push_error("NPCManager: Cannot register AI for unknown NPC type: %s" % npc_type)
 		return
@@ -551,6 +553,13 @@ func _update_npc_ai(npc: Node2D) -> void:
 			# MELEE COMBAT (Warriors, Knights, etc.)
 			if combat_type == NPCManager.CombatType.MELEE:
 				var movement_target = _get_movement_target(npc)
+				var distance_to_target = npc.global_position.distance_to(target.global_position)
+
+				# IMPORTANT: Flip sprite to face target BEFORE checking can_melee_attack
+				# The facing check happens inside can_melee_attack, so we need to face first
+				if "animated_sprite" in npc and npc.animated_sprite:
+					var to_target = target.global_position - npc.global_position
+					npc.animated_sprite.flip_h = to_target.x < 0
 
 				if CombatManager.can_melee_attack(npc, target):
 					# In range and facing - ATTACK!
@@ -564,7 +573,18 @@ func _update_npc_ai(npc: Node2D) -> void:
 
 					# Execute combat logic (damage calculation, state tracking)
 					CombatManager.start_melee_attack(npc, target)
+					ai_state["combat_target"] = target
 					ai_state["time_until_next_change"] = 2.0
+					return
+				# Check if warrior is in combat range but on cooldown - STAY IN POSITION
+				elif distance_to_target <= CombatManager.WARRIOR_MELEE_RANGE:
+					# Warrior is close enough to attack but on cooldown
+					# Stop movement and wait for cooldown
+					if movement_target.has_method("stop_auto_movement"):
+						movement_target.stop_auto_movement()
+					ai_state["combat_target"] = target
+					ai_state["time_until_next_change"] = 0.5  # Check again soon
+					print("DEBUG: Warrior in range, waiting for cooldown")
 					return
 				else:
 					# Not in range - move towards enemy
@@ -1208,6 +1228,7 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 	_update_character_z_index(npc)
 
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
+	print("NPCManager: Registering %s AI..." % npc_type)
 	register_npc_ai(npc, npc_type)
 
 	# Register Emoji
