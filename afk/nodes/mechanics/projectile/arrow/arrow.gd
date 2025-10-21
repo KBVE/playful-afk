@@ -16,8 +16,12 @@ var target_position: Vector2 = Vector2.ZERO
 var start_position: Vector2 = Vector2.ZERO
 var is_active: bool = false
 
+# Combat tracking
+var attacker: Node2D = null  # Who fired this arrow
+
 # References
 @onready var sprite: Sprite2D = $Sprite2D
+@onready var hitbox: Area2D = $HitBox
 
 # Projectile type (for returning to pool)
 const PROJECTILE_TYPE: String = "arrow"
@@ -27,6 +31,10 @@ func _ready() -> void:
 	# Arrow starts inactive
 	is_active = false
 	process_mode = Node.PROCESS_MODE_DISABLED
+
+	# Connect hitbox signal
+	if hitbox:
+		hitbox.body_entered.connect(_on_body_entered)
 
 
 func _process(delta: float) -> void:
@@ -47,11 +55,12 @@ func _process(delta: float) -> void:
 
 
 ## Fire the arrow towards a target
-func fire(target: Vector2, fire_speed: float = 300.0) -> void:
+func fire(target: Vector2, fire_speed: float = 300.0, from_attacker: Node2D = null) -> void:
 	is_active = true
 	target_position = target
 	start_position = position
 	speed = fire_speed
+	attacker = from_attacker
 
 	# Calculate velocity
 	var direction = (target_position - position).normalized()
@@ -82,12 +91,16 @@ func _return_to_pool() -> void:
 func on_hit(target: Node2D) -> void:
 	print("Arrow hit: %s" % target.name)
 
-	# Apply damage if target has a method to take damage
-	if target.has_method("take_damage"):
+	# Use CombatManager to apply damage with proper attack/defense calculation
+	if CombatManager and attacker:
+		var calculated_damage = CombatManager.calculate_damage(attacker, target)
+		CombatManager.apply_damage(attacker, target, calculated_damage)
+	elif target.has_method("take_damage"):
+		# Fallback to basic damage if CombatManager not available
 		target.take_damage(damage)
 
-	# Return to pool
-	_return_to_pool()
+	# Return to pool (deferred to avoid physics callback issues)
+	call_deferred("_return_to_pool")
 
 
 ## Reset arrow state (called by pool manager)
@@ -97,4 +110,19 @@ func reset() -> void:
 	position = Vector2.ZERO
 	rotation = 0.0
 	visible = false
+	attacker = null
 	process_mode = Node.PROCESS_MODE_DISABLED
+
+
+## Called when arrow's hitbox collides with a body
+func _on_body_entered(body: Node2D) -> void:
+	if not is_active:
+		return
+
+	# Don't hit the attacker who fired the arrow
+	if body == attacker:
+		return
+
+	# Check if body can take damage
+	if body.has_method("take_damage"):
+		on_hit(body)

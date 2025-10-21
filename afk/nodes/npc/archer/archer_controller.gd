@@ -218,9 +218,17 @@ func move_to_position(target_x: float) -> void:
 	var direction = 1 if target_x > archer.position.x else -1
 	move_direction = Vector2(direction, 0)
 
-	# Start accelerating (setter will update animation to walking)
+	# Start accelerating
 	movement_state = MovementState.ACCELERATING
 	current_speed = 0.0
+
+	# Update archer's state to trigger walking animation
+	# Don't change state if currently attacking (let attack animation finish)
+	if "current_state" in archer:
+		if CombatManager and CombatManager.has_state(archer, CombatManager.NPCState.ATTACKING):
+			print("Archer movement queued - waiting for attack to finish")
+			return  # Don't interrupt attack animation
+		archer.current_state = "Walking"
 
 	# Emit signal to AI System
 	movement_started.emit(target_x)
@@ -299,7 +307,12 @@ func _handle_movement_deceleration(delta: float) -> void:
 		if abs(target_position_x - archer.position.x) < 1.0:
 			is_auto_moving = false
 			movement_state = MovementState.IDLE
-			movement_completed.emit(archer.position.x)  # Signal AI System - AI will update current_state
+
+			# Update archer's state to trigger idle animation
+			if "current_state" in archer:
+				archer.current_state = "Idle"
+
+			movement_completed.emit(archer.position.x)  # Signal AI System
 			print("Archer reached target position")
 		return
 
@@ -314,7 +327,12 @@ func _handle_movement_deceleration(delta: float) -> void:
 	if current_speed <= 0.0:
 		is_auto_moving = false
 		movement_state = MovementState.IDLE
-		movement_interrupted.emit()  # Signal AI System - AI will update current_state
+
+		# Update archer's state to trigger idle animation
+		if "current_state" in archer:
+			archer.current_state = "Idle"
+
+		movement_interrupted.emit()  # Signal AI System
 		print("Archer stopped before reaching target")
 
 

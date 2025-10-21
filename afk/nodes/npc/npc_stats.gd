@@ -49,6 +49,16 @@ enum Emotion {
 		if hunger <= 0.0:
 			_on_starving()
 
+## Attack - Physical attack power
+@export var attack: float = 10.0:
+	set(value):
+		attack = clampf(value, 0.0, 1000.0)
+
+## Defense - Physical defense/damage reduction
+@export var defense: float = 5.0:
+	set(value):
+		defense = clampf(value, 0.0, 1000.0)
+
 ## Emotion - Current emotional state
 @export var emotion: Emotion = Emotion.NEUTRAL
 
@@ -69,6 +79,8 @@ func _init(
 	initial_mana: float = 100.0,
 	initial_energy: float = 100.0,
 	initial_hunger: float = 100.0,
+	initial_attack: float = 10.0,
+	initial_defense: float = 5.0,
 	initial_emotion: Emotion = Emotion.NEUTRAL,
 	type: String = "",
 	name: String = ""
@@ -81,6 +93,8 @@ func _init(
 	mana = initial_mana
 	energy = initial_energy
 	hunger = initial_hunger
+	attack = initial_attack
+	defense = initial_defense
 	emotion = initial_emotion
 
 	# Generate unique ULID for this NPC instance
@@ -147,6 +161,8 @@ func to_dict() -> Dictionary:
 		"energy": energy,
 		"max_energy": max_energy,
 		"hunger": hunger,
+		"attack": attack,
+		"defense": defense,
 		"emotion": emotion
 	}
 
@@ -175,6 +191,10 @@ func from_dict(data: Dictionary) -> void:
 		energy = data["energy"]
 	if data.has("hunger"):
 		hunger = data["hunger"]
+	if data.has("attack"):
+		attack = data["attack"]
+	if data.has("defense"):
+		defense = data["defense"]
 	if data.has("emotion"):
 		emotion = data["emotion"]
 
@@ -252,5 +272,7 @@ func print_stats() -> void:
 	print("  Mana: %d/%d (%.0f%%)" % [mana, max_mana, get_mana_percent() * 100])
 	print("  Energy: %d/%d (%.0f%%)" % [energy, max_energy, get_energy_percent() * 100])
 	print("  Hunger: %d/100 (%.0f%%)" % [hunger, get_hunger_percent() * 100])
+	print("  Attack: %d" % attack)
+	print("  Defense: %d" % defense)
 	print("  Emotion: %s" % get_emotion_string())
 	print("  Alive: %s" % is_alive())

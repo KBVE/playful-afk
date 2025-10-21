@@ -20,6 +20,8 @@ signal dialogue_closed
 @onready var energy_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/EnergyLabel
 @onready var hunger_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/HungerLabel
 @onready var emotion_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/EmotionLabel
+@onready var attack_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/AttackLabel
+@onready var defense_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/DefenseLabel
 
 @onready var dialogue_panel: Panel = $CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel
 @onready var dialogue_text: RichTextLabel = $CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/MarginContainer/DialogueText
@@ -177,6 +179,14 @@ func _update_stats_display() -> void:
 		var emotion_str = current_npc_stats.get_emotion_string()
 		emotion_label.text = "Emotion: %s" % emotion_str
 
+	# Update Attack
+	if attack_label:
+		attack_label.text = "Attack: %d" % current_npc_stats.attack
+
+	# Update Defense
+	if defense_label:
+		defense_label.text = "Defense: %d" % current_npc_stats.defense
+
 	print("ChatUI: Updated stats display for '%s'" % current_npc_stats.npc_name)
 
 
@@ -192,6 +202,10 @@ func _clear_stats_display() -> void:
 		hunger_label.text = "Hunger: --/--"
 	if emotion_label:
 		emotion_label.text = "Emotion: --"
+	if attack_label:
+		attack_label.text = "Attack: --"
+	if defense_label:
+		defense_label.text = "Defense: --"
 
 	print("ChatUI: Cleared stats display")
 

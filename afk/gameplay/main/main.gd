@@ -107,8 +107,8 @@ func _setup_character_pool() -> void:
 	var spawn_x_min = 50.0
 	var spawn_x_max = viewport_size.x - 50.0
 
-	# Spawn 6 warriors spread across the full screen width
-	var num_warriors = 6
+	# Spawn 2 warriors spread across the full screen width
+	var num_warriors = 2
 	for i in range(num_warriors):
 		# Try to find a valid spawn position inside the walkable polygon
 		var spawn_pos = Vector2.ZERO
@@ -147,8 +147,8 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for warrior %d" % i)
 
-	# Spawn 6 archers spread across the full screen width
-	var num_archers = 6
+	# Spawn 2 archers spread across the full screen width
+	var num_archers = 2
 	for i in range(num_archers):
 		# Try to find a valid spawn position inside the walkable polygon
 		var spawn_pos = Vector2.ZERO
@@ -187,6 +187,38 @@ func _setup_character_pool() -> void:
 				archer.archer_clicked.connect(func(): _on_npc_clicked(archer))
 		else:
 			push_warning("Could not find valid spawn position for archer %d" % i)
+
+	# Spawn 1 chicken for combat testing
+	var chicken_spawn_pos = Vector2.ZERO
+	var chicken_is_valid = false
+	var chicken_attempts = 0
+
+	while chicken_attempts < 20 and not chicken_is_valid:
+		# Spawn in center of screen
+		var x_pos = viewport_size.x / 2 + randf_range(-100.0, 100.0)
+		var y_bounds = background.get_walkable_y_bounds(x_pos)
+		var random_y = randf_range(y_bounds.x, y_bounds.y)
+
+		chicken_spawn_pos = Vector2(x_pos, random_y)
+
+		# Check if position is inside walkable area
+		if background.has_method("is_position_in_walkable_area"):
+			chicken_is_valid = background.is_position_in_walkable_area(chicken_spawn_pos)
+		else:
+			chicken_is_valid = true
+
+		chicken_attempts += 1
+
+	if chicken_is_valid:
+		var chicken = NPCManager.get_generic_npc("chicken", chicken_spawn_pos)
+		if chicken:
+			chicken.scale = Vector2(4, 4)  # Make chicken bigger for visibility
+			chicken.set_physics_process(false)
+			if chicken.has_signal("chicken_clicked"):
+				chicken.chicken_clicked.connect(func(): _on_npc_clicked(chicken))
+		print("Spawned chicken at %s for combat testing!" % chicken_spawn_pos)
+	else:
+		push_warning("Could not find valid spawn position for chicken")
 
 
 func _start_cat_movement() -> void:

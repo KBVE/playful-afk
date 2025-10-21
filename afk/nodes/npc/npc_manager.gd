@@ -4,6 +4,15 @@ extends Node
 ## Provides centralized access to all NPCs in the game, especially the virtual pet
 ## Access via: NPCManager.cat anywhere in your code
 
+## ===== MONSTER TYPE SYSTEM =====
+## Defines the type and behavior of monsters/enemies
+
+enum MonsterType {
+	ANIMAL,    # Animal creatures (chicken, rabbit, etc.)
+	DEMON,     # Demonic/evil creatures
+	PASSIVE    # Doesn't attack/do damage (can be combined with other types)
+}
+
 # Virtual Pet Reference
 var cat: Cat = null
 var cat_scene: PackedScene = preload("res://nodes/npc/cat/cat.tscn")
@@ -35,6 +44,19 @@ const NPC_REGISTRY: Dictionary = {
 			"state_change_min": 3.0,
 			"state_change_max": 8.0,
 			"movement_speed": 0.8   # Slightly slower movement
+		}
+	},
+	"chicken": {
+		"scene": "res://nodes/npc/chicken/chicken.tscn",
+		"class_name": "Chicken",
+		"category": "monster",
+		"monster_types": [MonsterType.ANIMAL, MonsterType.PASSIVE],
+		"ai_profile": {
+			"idle_weight": 70,      # Chickens prefer to stay idle
+			"walk_weight": 30,
+			"state_change_min": 2.0,  # Faster state changes
+			"state_change_max": 5.0,
+			"movement_speed": 0.6   # Slower movement (it's a chicken!)
 		}
 	}
 	# Future NPCs: Add here! Example:
@@ -86,6 +108,9 @@ var foreground_container: Node2D = null
 ## Background reference for heightmap queries
 var background_reference: Control = null
 
+# Emoji Manager for chat bubbles
+var emoji_manager: EmojiManager = null
+
 ## ===== NPC AI SYSTEM =====
 ## Centralized AI controller for all pooled NPCs
 
@@ -102,9 +127,6 @@ const Z_INDEX_UPDATE_INTERVAL: float = 0.1  # Update z-index every 100ms
 
 # Save/Load data
 var npc_save_data: Dictionary = {}
-
-# Emoji Manager for chat bubbles
-var emoji_manager: EmojiManager = null
 
 
 func _ready() -> void:
@@ -128,14 +150,17 @@ func _ready() -> void:
 	# Initialize AI system
 	_initialize_ai_system()
 
-	# Initialize Emoji Manager
+	# Initialize Emoji
+	_initialize_emoji_manager()
+
+	# Initialize Emoji Manager for chat bubbles
 	_initialize_emoji_manager()
 
 	# Connect to save/load events
 	EventManager.game_saved.connect(_on_game_saved)
 	EventManager.game_loaded.connect(_on_game_loaded)
 
-	print("NPCManager initialized - Cat, Warrior, Character Pool, AI System, Emoji Manager, and UI Sprite Cache ready")
+	print("NPCManager initialized - Cat, Warrior, Character Pool, AI System, and UI Sprite Cache ready")
 
 
 ## ===== NPC REGISTRY HELPER FUNCTIONS =====
@@ -459,6 +484,120 @@ func _update_npc_ai(npc: Node2D) -> void:
 	if ai_state["is_player_controlled"]:
 		return
 
+	# Get NPC type
+	var npc_type = ai_state.get("npc_type", "")
+
+	# COMBAT BEHAVIOR - Check for nearby enemies first (highest priority)
+	if CombatManager:
+		# Don't do anything if currently attacking (animation playing)
+		if CombatManager.has_state(npc, CombatManager.NPCState.ATTACKING):
+			return
+
+		# Find nearest enemy
+		var target = CombatManager.find_nearest_target(npc, 300.0)
+
+		if target:
+			# WARRIOR MELEE COMBAT
+			if npc_type == "warrior":
+				if CombatManager.can_melee_attack(npc, target):
+					# In range and facing - ATTACK!
+					# Set NPC to attacking state (triggers attack animation via controller)
+					if "current_state" in npc:
+						npc.current_state = "Attacking"
+
+					# Execute combat logic (damage calculation, state tracking)
+					CombatManager.start_melee_attack(npc, target)
+					ai_state["time_until_next_change"] = 2.0
+					return
+				else:
+					# Not in range - move towards enemy
+					# Only issue new movement command if:
+					# 1. No combat target set yet, OR
+					# 2. Target has moved significantly (>20px), OR
+					# 3. NPC is idle (not currently moving)
+					var should_move = false
+					var last_target = ai_state.get("combat_target")
+
+					if last_target == null or last_target != target:
+						should_move = true  # New target
+					elif "current_state" in npc and npc.current_state == "Idle":
+						should_move = true  # NPC stopped moving
+					elif last_target.global_position.distance_to(target.global_position) > 20.0:
+						should_move = true  # Target moved significantly
+
+					if should_move and "controller" in npc and npc.controller:
+						npc.controller.move_to_position(target.global_position.x)
+						_ai_tween_y_position(npc, target.global_position.y, ai_state)
+						ai_state["combat_target"] = target
+						ai_state["last_combat_target_pos"] = target.global_position
+						ai_state["time_until_next_change"] = 2.0
+					return
+
+			# ARCHER RANGED COMBAT + KITING
+			elif npc_type == "archer":
+				var distance_to_target = npc.global_position.distance_to(target.global_position)
+
+				# Too close! RETREAT (kiting behavior)
+				if CombatManager.should_archer_retreat(npc, target):
+					# Calculate retreat direction (away from enemy)
+					var retreat_direction = (npc.global_position - target.global_position).normalized()
+					var retreat_distance = CombatManager.ARCHER_OPTIMAL_RANGE
+					var retreat_pos = npc.global_position + (retreat_direction * retreat_distance)
+
+					# Only retreat if not already retreating or target moved
+					var should_retreat = false
+					var last_retreat_pos = ai_state.get("last_retreat_pos", Vector2.ZERO)
+
+					if "current_state" not in npc or npc.current_state != "Walking":
+						should_retreat = true  # Not currently moving
+					elif retreat_pos.distance_to(last_retreat_pos) > 20.0:
+						should_retreat = true  # Retreat position changed significantly
+
+					if should_retreat and "controller" in npc and npc.controller:
+						npc.controller.move_to_position(retreat_pos.x)
+						_ai_tween_y_position(npc, retreat_pos.y, ai_state)
+						ai_state["combat_target"] = target
+						ai_state["last_retreat_pos"] = retreat_pos
+						ai_state["time_until_next_change"] = 1.0
+						print("Archer KITING: Retreating from enemy!")
+					return
+
+				# In good range - ATTACK!
+				elif CombatManager.can_ranged_attack(npc, target):
+					# Set NPC to attacking state (triggers attack animation via controller)
+					if "current_state" in npc:
+						npc.current_state = "Attacking"
+
+					# Execute combat logic (projectile firing, state tracking)
+					CombatManager.start_ranged_attack(npc, target, "arrow")
+					ai_state["time_until_next_change"] = 2.0
+					return
+
+				# Too far - move closer
+				elif distance_to_target > CombatManager.ARCHER_MAX_RANGE:
+					# Only move if not already pursuing or target moved significantly
+					var should_pursue = false
+					var last_target = ai_state.get("combat_target")
+
+					if last_target == null or last_target != target:
+						should_pursue = true  # New target
+					elif "current_state" in npc and npc.current_state == "Idle":
+						should_pursue = true  # Stopped moving
+					elif last_target.global_position.distance_to(target.global_position) > 20.0:
+						should_pursue = true  # Target moved significantly
+
+					if should_pursue and "controller" in npc and npc.controller:
+						npc.controller.move_to_position(target.global_position.x)
+						_ai_tween_y_position(npc, target.global_position.y, ai_state)
+						ai_state["combat_target"] = target
+						ai_state["last_combat_target_pos"] = target.global_position
+						ai_state["time_until_next_change"] = 2.0
+					return
+
+		# No enemies nearby - exit combat mode and return to wandering
+		elif CombatManager.is_in_combat(npc):
+			CombatManager.end_combat(npc)
+
 	# Check if NPC reached waypoint and needs to continue to final target
 	if ai_state.get("has_waypoint", false) and ai_state.get("current_state") == "Walking":
 		var waypoint = ai_state.get("waypoint", Vector2.ZERO)
@@ -720,6 +859,49 @@ func _update_all_characters_z_index() -> void:
 		cat.z_index = max_z_index + 1
 
 
+## ===== STATS CREATION =====
+
+## Create stats for a specific NPC type with configured values
+func _create_stats_for_type(npc_type: String) -> NPCStats:
+	match npc_type:
+		"warrior":
+			return NPCStats.new(
+				100.0,  # HP
+				50.0,   # Mana
+				100.0,  # Energy
+				100.0,  # Hunger
+				15.0,   # Attack
+				10.0,   # Defense
+				NPCStats.Emotion.NEUTRAL,
+				npc_type
+			)
+		"archer":
+			return NPCStats.new(
+				80.0,   # HP (less than warrior)
+				75.0,   # Mana (more than warrior)
+				100.0,  # Energy
+				100.0,  # Hunger
+				12.0,   # Attack (ranged)
+				5.0,    # Defense (low)
+				NPCStats.Emotion.NEUTRAL,
+				npc_type
+			)
+		"chicken":
+			return NPCStats.new(
+				1000.0, # HP (high for testing!)
+				0.0,    # Mana (chickens don't use mana)
+				50.0,   # Energy
+				100.0,  # Hunger
+				0.0,    # Attack (passive - can't attack)
+				2.0,    # Defense (very low)
+				NPCStats.Emotion.NEUTRAL,
+				npc_type
+			)
+		_:
+			# Default stats for unknown NPCs
+			return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
+
+
 ## ===== DUAL POOL MANAGEMENT =====
 
 ## Initialize the persistent pool with empty slots
@@ -851,9 +1033,10 @@ func add_persistent_npc(
 		if activate:
 			register_npc_ai(npc, npc_type)
 
-		# Register with Emoji Manager if active
+		# Register Emoji
 		if activate and emoji_manager:
 			emoji_manager.register_entity(npc, npc_type, slot_index)
+
 
 	print("NPCManager: Added persistent NPC '%s' (%s) to slot %d (ULID: %s)" % [
 		npc_name, npc_type, slot_index, npc_stats.ulid
@@ -896,8 +1079,8 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 
 	var npc = slot["character"]
 
-	# Generate FRESH stats for this spawn with random name
-	var fresh_stats = NPCStats.new(100.0, 100.0, 100.0, 100.0, NPCStats.Emotion.NEUTRAL, npc_type)
+	# Generate FRESH stats for this spawn with random name (configured per NPC type)
+	var fresh_stats = _create_stats_for_type(npc_type)
 
 	# Store in database (use hex string as key for dictionary compatibility)
 	var ulid_key = ULID.to_hex(fresh_stats.ulid)
@@ -917,10 +1100,9 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
 	register_npc_ai(npc, npc_type)
 
-	# Register with Emoji Manager for chat bubble intros
+	# Register Emoji
 	if emoji_manager:
 		emoji_manager.register_entity(npc, npc_type, slot_index)
-
 	print("NPCManager: Spawned generic %s '%s' (ULID: %s)" % [npc_type, fresh_stats.npc_name, ULID.to_str(fresh_stats.ulid)])
 
 	return npc
@@ -944,8 +1126,8 @@ func return_generic_npc(npc: Node2D) -> void:
 			# Clear AI state
 			if _npc_ai_states.has(npc):
 				_npc_ai_states.erase(npc)
-
-			# Unregister from Emoji Manager
+			
+			# Clear emji
 			if emoji_manager:
 				emoji_manager.unregister_entity(npc)
 
@@ -1076,18 +1258,27 @@ func get_npc_type(npc: Node2D) -> String:
 	if npc is Cat:
 		return "cat"
 
-	# Check against registry using class name
-	var npc_class_name = npc.get_class()
+	# Check against registry using script's class_name
+	# First try to get the script's global class name (from class_name declaration)
+	var script = npc.get_script()
+	if script:
+		var script_class_name = script.get_global_name()
+		if script_class_name != "":
+			for npc_type in NPC_REGISTRY:
+				var registry_class = NPC_REGISTRY[npc_type]["class_name"]
+				if script_class_name == registry_class:
+					return npc_type
+
+	# Fallback: Check using 'is' operator (works with class_name declarations)
 	for npc_type in NPC_REGISTRY:
 		var registry_class = NPC_REGISTRY[npc_type]["class_name"]
-		if npc_class_name == registry_class:
+		# Use type checking - if the NPC is an instance of the registered class
+		if registry_class == "Warrior" and npc is Warrior:
+			return npc_type
+		elif registry_class == "Archer" and npc is Archer:
+			return npc_type
+		elif registry_class == "Chicken" and npc is Chicken:
 			return npc_type
 
-	# Legacy fallback for backwards compatibility
-	if npc is Warrior:
-		return "warrior"
-	elif npc is Archer:
-		return "archer"
-
-	push_warning("NPCManager: Unknown NPC type for %s" % npc)
+	push_warning("NPCManager: Unknown NPC type for %s (class: %s)" % [npc, npc.get_class()])
 	return ""
