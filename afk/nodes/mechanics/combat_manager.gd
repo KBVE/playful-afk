@@ -126,6 +126,13 @@ func start_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Get NPC type
 	var npc_type = _get_npc_type(attacker)
 
+	# IMPORTANT: Flip attacker sprite to face target BEFORE attack animation starts
+	# This ensures the attack animation faces the correct direction
+	if "animated_sprite" in attacker and attacker.animated_sprite:
+		var to_target = target.global_position - attacker.global_position
+		# Flip sprite if target is to the left
+		attacker.animated_sprite.flip_h = to_target.x < 0
+
 	# Create or update combat state
 	active_combatants[attacker] = {
 		"target": target,
@@ -273,6 +280,13 @@ func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: Stri
 
 	# Get NPC type
 	var npc_type = _get_npc_type(attacker)
+
+	# IMPORTANT: Flip archer sprite to face target BEFORE attack animation starts
+	# This ensures the bow offset and arrow direction are correct
+	if "animated_sprite" in attacker and attacker.animated_sprite:
+		var to_target = target.global_position - attacker.global_position
+		# Flip sprite if target is to the left
+		attacker.animated_sprite.flip_h = to_target.x < 0
 
 	# Create or update combat state
 	active_combatants[attacker] = {
