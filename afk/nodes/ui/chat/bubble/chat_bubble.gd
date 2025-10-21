@@ -4,6 +4,9 @@ class_name ChatBubble
 ## Floating chat bubble that appears above NPCs
 ## Displays emojis based on NPC index with randomized timing
 
+## Signals
+signal bubble_hidden  # Emitted when bubble finishes hiding (for pool management)
+
 ## Configuration
 @export var bubble_offset: Vector2 = Vector2(0, -60)  # Offset from parent position
 @export var fade_duration: float = 0.3
@@ -65,6 +68,9 @@ func hide_bubble() -> void:
 	await tween.finished
 
 	visible = false
+
+	# Emit signal for pool management
+	bubble_hidden.emit()
 
 
 ## Called when display timer expires

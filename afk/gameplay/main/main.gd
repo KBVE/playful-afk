@@ -34,6 +34,12 @@ var cat_is_hovered: bool = false
 var cat_normal_scale: Vector2 = Vector2(1.5, 1.5)
 var cat_hover_scale: Vector2 = Vector2(3, 3)
 
+# Monster spawning system
+var monster_spawn_timer: Timer = null
+const MONSTER_SPAWN_INTERVAL: float = 8.0  # Spawn every 8 seconds
+const MAX_ACTIVE_MONSTERS: int = 6  # Maximum monsters at once
+var active_monsters: Array[Node2D] = []
+
 
 func _ready() -> void:
 	print("Main gameplay scene loaded")
@@ -65,6 +71,9 @@ func _ready() -> void:
 		# Register ChatUI as a persistent UI element (won't be destroyed, just shown/hidden)
 		EventManager.register_ui(EventManager.UIType.CHAT_UI, chat_ui)
 		chat_ui.dialogue_closed.connect(_on_chat_ui_closed)
+
+	# Setup monster spawning system
+	_setup_monster_spawner()
 
 
 func _setup_pet() -> void:
@@ -125,8 +134,8 @@ func _setup_character_pool() -> void:
 	var spawn_x_min = 50.0
 	var spawn_x_max = viewport_size.x - 50.0
 
-	# Spawn 2 warriors spread across the full screen width
-	var num_warriors = 2
+	# Spawn 6 warriors spread across the full screen width
+	var num_warriors = 6
 	for i in range(num_warriors):
 		# Try to find a valid spawn position inside the walkable polygon
 		var spawn_pos = Vector2.ZERO
@@ -165,8 +174,8 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for warrior %d" % i)
 
-	# Spawn 2 archers spread across the full screen width
-	var num_archers = 2
+	# Spawn 6 archers spread across the full screen width
+	var num_archers = 6
 	for i in range(num_archers):
 		# Try to find a valid spawn position inside the walkable polygon
 		var spawn_pos = Vector2.ZERO
@@ -237,6 +246,44 @@ func _setup_character_pool() -> void:
 		print("Spawned chicken at %s for combat testing!" % chicken_spawn_pos)
 	else:
 		push_warning("Could not find valid spawn position for chicken")
+
+	# Spawn 3 initial mushrooms
+	for m in range(3):
+		var mushroom_spawn_pos = Vector2.ZERO
+		var mushroom_is_valid = false
+		var mushroom_attempts = 0
+
+		while mushroom_attempts < 20 and not mushroom_is_valid:
+			# Spawn spread across the screen
+			var x_pos = viewport_size.x * (0.3 + (m * 0.2)) + randf_range(-50.0, 50.0)
+			var y_bounds = background.get_walkable_y_bounds(x_pos)
+			var random_y = randf_range(y_bounds.x, y_bounds.y)
+
+			mushroom_spawn_pos = Vector2(x_pos, random_y)
+
+			# Check if position is inside walkable area
+			if background.has_method("is_position_in_walkable_area"):
+				mushroom_is_valid = background.is_position_in_walkable_area(mushroom_spawn_pos)
+			else:
+				mushroom_is_valid = true
+
+			mushroom_attempts += 1
+
+		if mushroom_is_valid:
+			var mushroom = NPCManager.get_generic_npc("mushroom", mushroom_spawn_pos)
+			if mushroom:
+				mushroom.scale = Vector2(1, 1)
+				mushroom.set_physics_process(false)
+				if mushroom.has_signal("mushroom_died"):
+					if not mushroom.mushroom_died.is_connected(_on_monster_died):
+						mushroom.mushroom_died.connect(_on_monster_died.bind(mushroom))
+				if mushroom.has_signal("mushroom_clicked"):
+					if not mushroom.mushroom_clicked.is_connected(_on_npc_clicked):
+						mushroom.mushroom_clicked.connect(func(): _on_npc_clicked(mushroom))
+				active_monsters.append(mushroom)
+			print("Spawned mushroom #%d at %s" % [m + 1, mushroom_spawn_pos])
+		else:
+			push_warning("Could not find valid spawn position for mushroom %d" % m)
 
 
 func _start_cat_movement() -> void:
@@ -348,6 +395,83 @@ func _update_cat_scale() -> void:
 func _on_escape_pressed() -> void:
 	print("Main: ESC pressed at ground view - toggling pause")
 	EventManager.game_paused.emit(not is_paused)
+
+
+## Setup monster spawning system
+func _setup_monster_spawner() -> void:
+	monster_spawn_timer = Timer.new()
+	monster_spawn_timer.wait_time = MONSTER_SPAWN_INTERVAL
+	monster_spawn_timer.one_shot = false
+	monster_spawn_timer.timeout.connect(_on_monster_spawn_timer_timeout)
+	add_child(monster_spawn_timer)
+	monster_spawn_timer.start()
+	print("Monster spawner initialized - spawning every %0.1fs" % MONSTER_SPAWN_INTERVAL)
+
+
+## Called when monster spawn timer times out
+func _on_monster_spawn_timer_timeout() -> void:
+	# Don't spawn if at max capacity
+	if active_monsters.size() >= MAX_ACTIVE_MONSTERS:
+		print("Max monsters reached (%d/%d) - skipping spawn" % [active_monsters.size(), MAX_ACTIVE_MONSTERS])
+		return
+
+	# Cycle through monster types: mushroom, chicken
+	var monster_types = ["mushroom", "chicken"]
+	var monster_type = monster_types[randi() % monster_types.size()]
+
+	# Randomly choose left or right edge
+	var viewport_size = get_viewport_rect().size
+	var spawn_from_left = randf() > 0.5
+	var spawn_x = 50.0 if spawn_from_left else viewport_size.x - 50.0
+
+	# Get Y bounds for this X position
+	var y_bounds = background.get_walkable_y_bounds(spawn_x)
+	var spawn_y = randf_range(y_bounds.x, y_bounds.y)
+	var spawn_pos = Vector2(spawn_x, spawn_y)
+
+	# Validate position
+	if background.has_method("is_position_in_walkable_area"):
+		if not background.is_position_in_walkable_area(spawn_pos):
+			print("Invalid spawn position, trying again next cycle")
+			return
+
+	# Spawn the monster
+	var monster = NPCManager.get_generic_npc(monster_type, spawn_pos)
+	if monster:
+		monster.scale = Vector2(1, 1)
+		monster.set_physics_process(false)
+
+		# Connect death signal (check not already connected)
+		if monster.has_signal("monster_died"):
+			if not monster.monster_died.is_connected(_on_monster_died):
+				monster.monster_died.connect(_on_monster_died.bind(monster))
+		if monster.has_signal("chicken_died"):
+			if not monster.chicken_died.is_connected(_on_monster_died):
+				monster.chicken_died.connect(_on_monster_died.bind(monster))
+
+		# Connect click signal (check not already connected)
+		if monster.has_signal("mushroom_clicked"):
+			if not monster.mushroom_clicked.is_connected(_on_npc_clicked):
+				monster.mushroom_clicked.connect(func(): _on_npc_clicked(monster))
+		elif monster.has_signal("chicken_clicked"):
+			if not monster.chicken_clicked.is_connected(_on_npc_clicked):
+				monster.chicken_clicked.connect(func(): _on_npc_clicked(monster))
+
+		active_monsters.append(monster)
+		print("Spawned %s from %s edge at %s (%d/%d active)" % [
+			monster_type,
+			"left" if spawn_from_left else "right",
+			spawn_pos,
+			active_monsters.size(),
+			MAX_ACTIVE_MONSTERS
+		])
+
+
+## Handle monster death - remove from active list
+func _on_monster_died(monster: Node2D) -> void:
+	if monster in active_monsters:
+		active_monsters.erase(monster)
+		print("Monster died - %d/%d active monsters remaining" % [active_monsters.size(), MAX_ACTIVE_MONSTERS])
 
 
 ## Handle NPC clicked - request dialogue via EventManager

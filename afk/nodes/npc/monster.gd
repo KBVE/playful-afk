@@ -71,6 +71,10 @@ func _ready() -> void:
 		state_timer.timeout.connect(_on_state_timer_timeout)
 		state_timer.start()
 
+	# Connect to animation finished signal for DAMAGED state cleanup
+	if animated_sprite:
+		animated_sprite.animation_finished.connect(_on_animation_finished)
+
 	# Register with InputManager for click detection
 	await get_tree().process_frame
 	if InputManager:
@@ -130,8 +134,24 @@ func _update_animation() -> void:
 	if not animated_sprite or not animated_sprite.sprite_frames:
 		return
 
-	# Get animation name from state mapping
-	var animation_name = state_to_animation.get(current_state, "idle")
+	# Priority-based animation selection (highest priority first)
+	var animation_name = "idle"
+
+	# Priority 1: DEAD (highest)
+	if current_state & NPCManager.NPCState.DEAD:
+		animation_name = state_to_animation.get(NPCManager.NPCState.DEAD, "dead")
+	# Priority 2: DAMAGED (show hurt flash even while attacking)
+	elif current_state & NPCManager.NPCState.DAMAGED:
+		animation_name = state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt")
+	# Priority 3: ATTACKING
+	elif current_state & NPCManager.NPCState.ATTACKING:
+		animation_name = state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking")
+	# Priority 4: WALKING
+	elif current_state & NPCManager.NPCState.WALKING:
+		animation_name = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
+	# Priority 5: IDLE (lowest)
+	elif current_state & NPCManager.NPCState.IDLE:
+		animation_name = state_to_animation.get(NPCManager.NPCState.IDLE, "idle")
 
 	# Play animation if it exists
 	if animated_sprite.sprite_frames.has_animation(animation_name):
@@ -177,22 +197,26 @@ func take_damage(amount: float) -> void:
 			print("%s has died!" % get_class())
 			return
 
-	# Show hurt animation
+	# Add DAMAGED state with bitwise OR (allows coexisting with ATTACKING)
 	_is_hurt = true
-	current_state = NPCManager.NPCState.DAMAGED
+	current_state |= NPCManager.NPCState.DAMAGED
 
 	# Call subclass-specific hurt behavior
 	_on_take_damage(amount)
-
-	# Return to idle after hurt animation
-	await get_tree().create_timer(0.5).timeout
-	_is_hurt = false
-	current_state = NPCManager.NPCState.IDLE
 
 
 ## Override this in subclasses for custom damage behavior (e.g., fleeing)
 func _on_take_damage(amount: float) -> void:
 	pass
+
+
+## Called when animation finishes - clean up DAMAGED state if hurt animation finished
+func _on_animation_finished() -> void:
+	# If hurt animation just finished, remove DAMAGED state
+	if _is_hurt and animated_sprite and animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt"):
+		_is_hurt = false
+		current_state &= ~NPCManager.NPCState.DAMAGED
+		print("%s hurt animation finished - removed DAMAGED state" % get_class())
 
 
 ## Check if this monster is passive (doesn't deal damage to others)

@@ -40,9 +40,10 @@ enum NPCState {
 
 ## Monster Type enum - additional categorization for monsters
 enum MonsterType {
-	ANIMAL,    # Animal creatures (chicken, rabbit, etc.)
-	DEMON,     # Demonic/evil creatures
-	PASSIVE    # Doesn't attack/do damage (can be combined with other types)
+	ANIMAL,      # Animal creatures (chicken, rabbit, etc.)
+	DEMON,       # Demonic/evil creatures
+	PASSIVE,     # Doesn't attack/do damage (can be combined with other types)
+	AGGRESSIVE   # Actively seeks combat and attacks
 }
 
 # Virtual Pet Reference
@@ -90,6 +91,19 @@ const NPC_REGISTRY: Dictionary = {
 			"state_change_max": 5.0,
 			"movement_speed": 0.6   # Slower movement (it's a chicken!)
 		}
+	},
+	"mushroom": {
+		"scene": "res://nodes/npc/mushroom/mushroom.tscn",
+		"class_name": "Mushroom",
+		"category": "monster",
+		"monster_types": [MonsterType.AGGRESSIVE],
+		"ai_profile": {
+			"idle_weight": 50,      # Mushrooms are more active
+			"walk_weight": 50,
+			"state_change_min": 1.5,  # Quick state changes
+			"state_change_max": 4.0,
+			"movement_speed": 0.7   # Medium speed
+		}
 	}
 	# Future NPCs: Add here! Example:
 	# "mage": {
@@ -127,7 +141,8 @@ var persistent_pool: Array[Dictionary] = []  # Each entry: {character, ulid, is_
 ## GENERIC POOL - Temporary NPCs with fresh stats each spawn (enemies, random NPCs)
 ## Pool recycles character instances, new stats generated per spawn
 ## Example: "Goblin", "Bandit", "Wolf"
-const MAX_GENERIC_POOL_SIZE: int = 16
+## Current allocation: 6 warriors + 6 archers + 6 monsters = 18 total
+const MAX_GENERIC_POOL_SIZE: int = 20
 var generic_pool: Array[Dictionary] = []  # Each entry: {character, is_active, npc_type, ...}
 
 ## STATS DATABASE - All NPC stats indexed by ULID
@@ -142,6 +157,14 @@ var background_reference: Control = null
 
 # Emoji Manager for chat bubbles
 var emoji_manager: EmojiManager = null
+
+## ===== RELEASE EFFECT POOL =====
+## Pool of release effects for death animations
+
+# Release effect pool
+const RELEASE_POOL_SIZE: int = 4
+var release_effect_pool: Array[Node2D] = []
+var release_effect_scene: PackedScene = preload("res://nodes/npc/common/release.tscn")
 
 ## ===== NPC AI SYSTEM =====
 ## Centralized AI controller for all pooled NPCs
@@ -182,11 +205,12 @@ func _ready() -> void:
 	# Initialize AI system
 	_initialize_ai_system()
 
-	# Initialize Emoji
-	_initialize_emoji_manager()
-
 	# Initialize Emoji Manager for chat bubbles
 	_initialize_emoji_manager()
+
+	# Initialize Release Effect Pool for death animations
+	# (Called after foreground_container is potentially set)
+	# NOTE: Pool will be empty until set_layer4_container is called
 
 	# Connect to save/load events
 	EventManager.game_saved.connect(_on_game_saved)
@@ -410,6 +434,9 @@ func set_layer4_container(container: Node2D) -> void:
 		if slot["character"] and not slot["character"].get_parent():
 			foreground_container.add_child(slot["character"])
 
+	# Initialize release effect pool now that we have foreground_container
+	_initialize_release_effect_pool()
+
 
 ## Set the background reference for heightmap queries (called from main scene)
 func set_background_reference(background: Control) -> void:
@@ -451,6 +478,60 @@ func _initialize_emoji_manager() -> void:
 	print("NPCManager: Emoji Manager initialized for chat bubbles")
 
 
+## Initialize Release Effect Pool for death animations
+func _initialize_release_effect_pool() -> void:
+	# Pre-allocate release effect pool
+	for i in range(RELEASE_POOL_SIZE):
+		var effect = release_effect_scene.instantiate()
+		effect.visible = false
+
+		# Add to foreground container if available, otherwise add to NPCManager
+		if foreground_container:
+			foreground_container.add_child(effect)
+		else:
+			add_child(effect)
+
+		release_effect_pool.append(effect)
+
+	print("NPCManager: Release Effect Pool initialized with %d effects" % RELEASE_POOL_SIZE)
+
+
+## Get available release effect from pool (or create new if all busy)
+func _get_release_effect() -> Node2D:
+	# Find first inactive effect (check if valid first)
+	for effect in release_effect_pool:
+		if is_instance_valid(effect) and not effect.visible:
+			return effect
+
+	# Clean up any freed nodes from pool
+	release_effect_pool = release_effect_pool.filter(func(effect): return is_instance_valid(effect))
+
+	# All busy - create a new one and add to pool
+	print("NPCManager: All release effects busy, creating new one")
+	var new_effect = release_effect_scene.instantiate()
+
+	if foreground_container:
+		foreground_container.add_child(new_effect)
+	else:
+		add_child(new_effect)
+
+	release_effect_pool.append(new_effect)
+	return new_effect
+
+
+## Play release effect at position when NPC dies
+func play_release_effect(position: Vector2, on_midpoint: Callable) -> void:
+	var effect = _get_release_effect()
+	if effect:
+		# Connect to midpoint signal (one-shot)
+		if effect.has_signal("midpoint_reached"):
+			effect.midpoint_reached.connect(on_midpoint, CONNECT_ONE_SHOT)
+
+		# Play effect at position
+		effect.play_at(position)
+		print("NPCManager: Playing release effect at %s" % position)
+
+
 ## Register NPC for AI control
 ## Y position is now dynamically queried from background heightmap based on X
 func register_npc_ai(npc: Node2D, npc_type: String) -> void:
@@ -485,17 +566,21 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 		signal_source = npc
 
 	if signal_source:
-		# Connect movement signals if they exist
+		# Connect movement signals if they exist (check not already connected)
 		if signal_source.has_signal("movement_started"):
-			signal_source.movement_started.connect(_on_controller_movement_started.bind(npc))
+			if not signal_source.movement_started.is_connected(_on_controller_movement_started):
+				signal_source.movement_started.connect(_on_controller_movement_started.bind(npc))
 		if signal_source.has_signal("movement_completed"):
-			signal_source.movement_completed.connect(_on_controller_movement_completed.bind(npc))
+			if not signal_source.movement_completed.is_connected(_on_controller_movement_completed):
+				signal_source.movement_completed.connect(_on_controller_movement_completed.bind(npc))
 		if signal_source.has_signal("movement_interrupted"):
-			signal_source.movement_interrupted.connect(_on_controller_movement_interrupted.bind(npc))
+			if not signal_source.movement_interrupted.is_connected(_on_controller_movement_interrupted):
+				signal_source.movement_interrupted.connect(_on_controller_movement_interrupted.bind(npc))
 
-		# Connect state change signal for tracking
+		# Connect state change signal for tracking (check not already connected)
 		if signal_source.has_signal("state_changed"):
-			signal_source.state_changed.connect(_on_npc_state_changed.bind(npc))
+			if not signal_source.state_changed.is_connected(_on_npc_state_changed):
+				signal_source.state_changed.connect(_on_npc_state_changed.bind(npc))
 
 		print("NPCManager: Connected signals for %s" % npc_type)
 
@@ -517,6 +602,14 @@ func _on_ai_timer_timeout() -> void:
 			continue
 
 		_update_npc_ai(npc)
+
+
+## Get cached viewport center X position (uses GameplayCache singleton)
+func _get_viewport_center_x() -> float:
+	if GameplayCache:
+		return GameplayCache.get_viewport_center_x()
+	# Fallback if GameplayCache not loaded yet
+	return get_tree().root.get_viewport_rect().size.x / 2.0
 
 
 ## Get movement target (controller or direct NPC)
@@ -700,9 +793,37 @@ func _update_npc_ai(npc: Node2D) -> void:
 						ai_state["time_until_next_change"] = 2.0
 					return
 
-		# No enemies nearby - exit combat mode and return to wandering
+		# No enemies nearby - exit combat mode
 		elif CombatManager.is_in_combat(npc):
 			CombatManager.end_combat(npc)
+
+	# AGGRESSIVE MONSTER BEHAVIOR - Move toward middle when no enemies
+	# Check if this is an aggressive (non-PASSIVE) monster
+	if npc is Monster and not npc.is_passive():
+		# Check if already has combat target (handled above)
+		if not ai_state.get("combat_target"):
+			# Move toward screen center (use cached viewport for performance)
+			var screen_center_x = _get_viewport_center_x()
+			var current_x = npc.global_position.x
+			var distance_to_center = abs(current_x - screen_center_x)
+
+			# If more than 100px from center, move toward it
+			if distance_to_center > 100.0:
+				var movement_target = _get_movement_target(npc)
+				var is_moving = movement_target.has_method("is_moving") and movement_target.is_moving()
+
+				# Only issue new movement if not already moving toward center
+				if not is_moving or ai_state.get("moving_to_center") != true:
+					if movement_target.has_method("move_to_position"):
+						# Move to center X, keep current Y (monsters stay on walkable area)
+						movement_target.move_to_position(screen_center_x)
+						ai_state["moving_to_center"] = true
+						ai_state["time_until_next_change"] = 3.0
+						print("Aggressive monster moving toward center (current: %.0f, target: %.0f)" % [current_x, screen_center_x])
+						return
+			else:
+				# Close to center - clear the flag
+				ai_state["moving_to_center"] = false
 
 	# Check if NPC reached waypoint and needs to continue to final target
 	if ai_state.get("has_waypoint", false) and ai_state.get("current_state") == NPCState.WALKING:
@@ -952,7 +1073,9 @@ func _on_npc_state_changed(old_state: int, new_state: int, npc: Node2D) -> void:
 	# Track the state change in AI system
 	ai_state["current_state"] = new_state
 
-	# Could use this to react to state changes (e.g., NPC died, NPC hurt, etc.)
+	# Try to show state-based emoji (10% chance)
+	if emoji_manager:
+		emoji_manager.try_show_state_emoji(npc, old_state, new_state)
 
 
 ## ===== Z-INDEX / DEPTH SORTING SYSTEM =====
@@ -1024,6 +1147,17 @@ func _create_stats_for_type(npc_type: String) -> NPCStats:
 				100.0,  # Hunger
 				0.0,    # Attack (passive - can't attack)
 				2.0,    # Defense (very low)
+				NPCStats.Emotion.NEUTRAL,
+				npc_type
+			)
+		"mushroom":
+			return NPCStats.new(
+				120.0,  # HP (high - needs to survive against multiple enemies)
+				0.0,    # Mana (mushrooms don't use mana)
+				75.0,   # Energy
+				100.0,  # Hunger
+				8.0,    # Attack (melee damage)
+				8.0,    # Defense (medium)
 				NPCStats.Emotion.NEUTRAL,
 				npc_type
 			)
@@ -1163,10 +1297,6 @@ func add_persistent_npc(
 		if activate:
 			register_npc_ai(npc, npc_type)
 
-		# Register Emoji
-		if activate and emoji_manager:
-			emoji_manager.register_entity(npc, npc_type, slot_index)
-
 
 	print("NPCManager: Added persistent NPC '%s' (%s) to slot %d (ULID: %s)" % [
 		npc_name, npc_type, slot_index, npc_stats.ulid
@@ -1231,12 +1361,31 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 	print("NPCManager: Registering %s AI..." % npc_type)
 	register_npc_ai(npc, npc_type)
 
-	# Register Emoji
-	if emoji_manager:
-		emoji_manager.register_entity(npc, npc_type, slot_index)
+	# Connect to death signal for release animation (if monster)
+	if npc.has_signal("monster_died"):
+		# Check if already connected to avoid duplicate connections
+		if not npc.monster_died.is_connected(_on_npc_died):
+			npc.monster_died.connect(_on_npc_died.bind(npc))
+			print("NPCManager: Connected to monster death signal for %s" % npc_type)
+
 	print("NPCManager: Spawned generic %s '%s' (ULID: %s)" % [npc_type, fresh_stats.npc_name, ULID.to_str(fresh_stats.ulid)])
 
 	return npc
+
+
+## Handle NPC death - play release animation and return to pool
+func _on_npc_died(npc: Node2D) -> void:
+	if not is_instance_valid(npc):
+		return
+
+	print("NPCManager: NPC died at position %s" % npc.global_position)
+
+	# Play release effect at NPC's position
+	# On midpoint (frame 5), return NPC to pool
+	play_release_effect(npc.global_position, func():
+		print("NPCManager: Release effect midpoint - returning NPC to pool")
+		return_generic_npc(npc)
+	)
 
 
 ## Return generic NPC to pool
@@ -1257,10 +1406,6 @@ func return_generic_npc(npc: Node2D) -> void:
 			# Clear AI state
 			if _npc_ai_states.has(npc):
 				_npc_ai_states.erase(npc)
-			
-			# Clear emji
-			if emoji_manager:
-				emoji_manager.unregister_entity(npc)
 
 			print("NPCManager: Returned generic NPC to pool")
 			return

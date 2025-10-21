@@ -169,3 +169,9 @@ https://xzany.itch.io/kobold-warrior-2d-pixel-art
 
 Gandalf Hardcore The Archer
 https://gandalfhardcore.itch.io/pixel-art-archer-character
+
+Forest Monster Mushroom
+https://monopixelart.itch.io/forest-monsters-pixel-art/
+
+Monsters Fantasy
+https://luizmelo.itch.io/monsters-creatures-fantasy
