@@ -43,16 +43,13 @@ var active_monsters: Array[Node2D] = []
 
 func _ready() -> void:
 	print("Main gameplay scene loaded")
-	print("DEBUG: About to wait for process frame...")
 
 	# Wait a frame to ensure NPCManager is ready
 	await get_tree().process_frame
 
-	print("DEBUG: Process frame done, setting up pet...")
 	# Setup the pet
 	_setup_pet()
 
-	print("DEBUG: Pet setup done, setting up character pool...")
 	# Setup character pool and warriors
 	_setup_character_pool()
 
@@ -108,11 +105,6 @@ func _setup_pet() -> void:
 
 
 func _setup_character_pool() -> void:
-	print("DEBUG: _setup_character_pool() called!")
-	# DEBUG: Check what background we actually have
-	print("DEBUG: background = %s, type = %s" % [background, background.get_class() if background else "null"])
-	if background:
-		print("DEBUG: background has layer4_objects? %s" % ("layer4_objects" in background))
 
 	# Set Layer4Objects container in NPCManager (scrolls with Layer4 at 0.9 speed)
 	if background and background.layer4_objects:

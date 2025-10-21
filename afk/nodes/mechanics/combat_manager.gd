@@ -87,18 +87,12 @@ func can_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Check proximity based on NPC type
 	var distance = attacker.global_position.distance_to(target.global_position)
 	if distance > required_range:
-		print("DEBUG: %s too far from %s (%.1f > %.1f)" % [npc_type, _get_npc_type(target), distance, required_range])
 		return false
 
 	# MUST be facing target for melee (strict requirement)
 	if not is_facing_target(attacker, target):
-		var flip_status = "unknown"
-		if "animated_sprite" in attacker and attacker.animated_sprite:
-			flip_status = "flip_h=%s" % attacker.animated_sprite.flip_h
-		print("DEBUG: %s NOT facing %s (%s)" % [npc_type, _get_npc_type(target), flip_status])
 		return false
 
-	print("DEBUG: %s CAN melee attack %s! (distance=%.1f)" % [npc_type, _get_npc_type(target), distance])
 	return true
 
 
@@ -128,10 +122,6 @@ func is_facing_target(attacker: Node2D, target: Node2D) -> bool:
 	# Calculate dot product (1.0 = same direction, -1.0 = opposite)
 	var dot = facing_dir.dot(to_target)
 
-	# DEBUG: Show facing calculation
-	var attacker_name = _get_npc_type(attacker)
-	print("DEBUG FACING: %s facing_dir=%s, to_target=%s, dot=%.2f (threshold=%.2f)" % [attacker_name, facing_dir, to_target, dot, FACING_THRESHOLD])
-
 	return dot >= FACING_THRESHOLD
 
 
@@ -159,7 +149,6 @@ func start_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Use bitwise OR to add ATTACKING flag while preserving other flags
 	if "current_state" in attacker:
 		attacker.current_state |= NPCManager.NPCState.ATTACKING
-		print("DEBUG: Set %s current_state to ATTACKING (state now: %d)" % [npc_type, attacker.current_state])
 
 	combat_started.emit(attacker, target)
 
@@ -206,16 +195,12 @@ func _execute_melee_attack(attacker: Node2D, target: Node2D, npc_type: String) -
 		if "controller" in attacker and attacker.controller:
 			if attacker.controller.is_auto_moving:
 				attacker.current_state |= NPCManager.NPCState.WALKING
-				print("DEBUG: Attack complete, %s returning to WALKING (state: %d)" % [_get_npc_type(attacker), attacker.current_state])
 			else:
 				# Remove WALKING flag too if not moving
 				attacker.current_state &= ~NPCManager.NPCState.WALKING
-				# Idle is state 0, so just removing flags is enough
-				print("DEBUG: Attack complete, %s returning to IDLE (state: %d)" % [_get_npc_type(attacker), attacker.current_state])
 		else:
 			# Remove WALKING flag and return to idle
 			attacker.current_state &= ~NPCManager.NPCState.WALKING
-			print("DEBUG: Attack complete, %s returning to IDLE (no controller, state: %d)" % [_get_npc_type(attacker), attacker.current_state])
 
 
 ## ===== RANGED COMBAT =====
@@ -398,12 +383,6 @@ func calculate_damage(attacker: Node2D, target: Node2D) -> float:
 
 	# Minimum damage is 1 (can't deal 0 or negative damage)
 	final_damage = max(1.0, final_damage)
-
-	print("DEBUG DAMAGE: %s (attack=%.1f) -> %s (defense=%.1f) = %.1f damage" % [
-		_get_npc_type(attacker), base_damage,
-		_get_npc_type(target), defense,
-		final_damage
-	])
 
 	return final_damage
 
