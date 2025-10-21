@@ -4,9 +4,41 @@ extends Node
 ## Provides centralized access to all NPCs in the game, especially the virtual pet
 ## Access via: NPCManager.cat anywhere in your code
 
-## ===== MONSTER TYPE SYSTEM =====
-## Defines the type and behavior of monsters/enemies
+## ===== NPC TYPE SYSTEMS =====
+## Core enums that define NPC behavior and combat
 
+## Faction enum - determines who can attack whom
+enum Faction {
+	ALLY,      # Player's allies (warriors, archers, cat, etc.) - don't attack each other
+	MONSTER,   # Hostile creatures (chickens, etc.) - attack allies
+	NEUTRAL    # Neutral NPCs that don't participate in combat
+}
+
+## Combat Type enum - determines how an NPC fights
+enum CombatType {
+	NONE,      # Non-combatant (cat, passive NPCs)
+	MELEE,     # Close-range physical attacks (warriors, knights)
+	RANGED,    # Long-range projectile attacks (archers, crossbowmen)
+	MAGIC      # Spell-based attacks (mages, wizards)
+}
+
+## NPC State enum (using bitwise flags for easy combinations)
+## Can combine states: e.g., WALKING | COMBAT | PURSUING | HURT
+## NOTE: Some states are behavioral (COMBAT, PURSUING), others are visual (ATTACKING, DAMAGED, DEAD)
+enum NPCState {
+	IDLE = 1 << 0,        # 1:   Idle (not moving, not attacking)
+	WALKING = 1 << 1,     # 2:   Walking/moving
+	ATTACKING = 1 << 2,   # 4:   Currently attacking (animation playing)
+	WANDERING = 1 << 3,   # 8:   Normal wandering/idle behavior (no combat)
+	COMBAT = 1 << 4,      # 16:  Engaged in combat
+	RETREATING = 1 << 5,  # 32:  Retreating from enemy (archer kiting)
+	PURSUING = 1 << 6,    # 64:  Moving towards enemy
+	HURT = 1 << 7,        # 128: Low health - triggers defensive behavior (not the same as DAMAGED animation)
+	DAMAGED = 1 << 8,     # 256: Taking damage - plays hurt/damage animation
+	DEAD = 1 << 9         # 512: Dead - plays death animation
+}
+
+## Monster Type enum - additional categorization for monsters
 enum MonsterType {
 	ANIMAL,    # Animal creatures (chicken, rabbit, etc.)
 	DEMON,     # Demonic/evil creatures
@@ -432,7 +464,7 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 	_npc_ai_states[npc] = {
 		"npc_type": npc_type,
 		"ai_profile": ai_profile,
-		"current_state": "Idle",
+		"current_state": NPCState.IDLE,  # Use enum instead of string
 		"time_until_next_change": randf_range(
 			ai_profile.get("state_change_min", 3.0),
 			ai_profile.get("state_change_max", 8.0)
@@ -442,19 +474,28 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 		"movement_bounds_x": Vector2(50.0, 1100.0)  # Full screen width (with margins)
 	}
 
-	# Connect to controller signals for bidirectional communication
+	# Connect to movement signals for bidirectional communication
+	# Try controller first (warrior), then direct NPC signals (archer)
+	var signal_source = null
 	if "controller" in npc and npc.controller:
-		var controller = npc.controller
+		signal_source = npc.controller
+	else:
+		signal_source = npc
 
-		# Connect movement signals
-		if controller.has_signal("movement_started"):
-			controller.movement_started.connect(_on_controller_movement_started.bind(npc))
-		if controller.has_signal("movement_completed"):
-			controller.movement_completed.connect(_on_controller_movement_completed.bind(npc))
-		if controller.has_signal("movement_interrupted"):
-			controller.movement_interrupted.connect(_on_controller_movement_interrupted.bind(npc))
+	if signal_source:
+		# Connect movement signals if they exist
+		if signal_source.has_signal("movement_started"):
+			signal_source.movement_started.connect(_on_controller_movement_started.bind(npc))
+		if signal_source.has_signal("movement_completed"):
+			signal_source.movement_completed.connect(_on_controller_movement_completed.bind(npc))
+		if signal_source.has_signal("movement_interrupted"):
+			signal_source.movement_interrupted.connect(_on_controller_movement_interrupted.bind(npc))
 
-		print("NPCManager: Connected controller signals for %s" % npc_type)
+		# Connect state change signal for tracking
+		if signal_source.has_signal("state_changed"):
+			signal_source.state_changed.connect(_on_npc_state_changed.bind(npc))
+
+		print("NPCManager: Connected signals for %s" % npc_type)
 
 	print("NPCManager: Registered AI for %s (%s)" % [npc_type, npc.name])
 
@@ -476,6 +517,13 @@ func _on_ai_timer_timeout() -> void:
 		_update_npc_ai(npc)
 
 
+## Get movement target (controller or direct NPC)
+func _get_movement_target(npc: Node2D) -> Node2D:
+	if "controller" in npc and npc.controller:
+		return npc.controller
+	return npc
+
+
 ## Update AI for a single NPC
 func _update_npc_ai(npc: Node2D) -> void:
 	var ai_state = _npc_ai_states[npc]
@@ -484,26 +532,35 @@ func _update_npc_ai(npc: Node2D) -> void:
 	if ai_state["is_player_controlled"]:
 		return
 
-	# Get NPC type
-	var npc_type = ai_state.get("npc_type", "")
+	# Get NPC type (unused but kept for future debugging)
+	var _npc_type = ai_state.get("npc_type", "")
 
 	# COMBAT BEHAVIOR - Check for nearby enemies first (highest priority)
 	if CombatManager:
 		# Don't do anything if currently attacking (animation playing)
-		if CombatManager.has_state(npc, CombatManager.NPCState.ATTACKING):
+		if CombatManager.has_state(npc, NPCManager.NPCState.ATTACKING):
 			return
 
 		# Find nearest enemy
 		var target = CombatManager.find_nearest_target(npc, 300.0)
 
 		if target:
-			# WARRIOR MELEE COMBAT
-			if npc_type == "warrior":
+			# Get NPC's combat type directly from property (use enum instead of string comparison for performance)
+			var combat_type = npc.combat_type if "combat_type" in npc else CombatType.NONE
+
+			# MELEE COMBAT (Warriors, Knights, etc.)
+			if combat_type == NPCManager.CombatType.MELEE:
+				var movement_target = _get_movement_target(npc)
+
 				if CombatManager.can_melee_attack(npc, target):
 					# In range and facing - ATTACK!
-					# Set NPC to attacking state (triggers attack animation via controller)
+					# Stop warrior movement before attacking (warrior must stand still to swing)
+					if movement_target.has_method("stop_auto_movement"):
+						movement_target.stop_auto_movement()
+
+					# Set NPC to attacking state (triggers attack animation)
 					if "current_state" in npc:
-						npc.current_state = "Attacking"
+						npc.current_state = NPCState.ATTACKING  # Use enum
 
 					# Execute combat logic (damage calculation, state tracking)
 					CombatManager.start_melee_attack(npc, target)
@@ -517,44 +574,68 @@ func _update_npc_ai(npc: Node2D) -> void:
 					# 3. NPC is idle (not currently moving)
 					var should_move = false
 					var last_target = ai_state.get("combat_target")
+					var is_moving = movement_target.has_method("is_moving") and movement_target.is_moving()
 
 					if last_target == null or last_target != target:
 						should_move = true  # New target
-					elif "current_state" in npc and npc.current_state == "Idle":
+					elif not is_moving:
 						should_move = true  # NPC stopped moving
 					elif last_target.global_position.distance_to(target.global_position) > 20.0:
 						should_move = true  # Target moved significantly
 
-					if should_move and "controller" in npc and npc.controller:
-						npc.controller.move_to_position(target.global_position.x)
+					if should_move and movement_target.has_method("move_to_position"):
+						movement_target.move_to_position(target.global_position.x)
 						_ai_tween_y_position(npc, target.global_position.y, ai_state)
 						ai_state["combat_target"] = target
 						ai_state["last_combat_target_pos"] = target.global_position
 						ai_state["time_until_next_change"] = 2.0
 					return
 
-			# ARCHER RANGED COMBAT + KITING
-			elif npc_type == "archer":
+			# RANGED COMBAT + KITING (Archers, Crossbowmen, etc.)
+			elif combat_type == NPCManager.CombatType.RANGED:
+				var movement_target = _get_movement_target(npc)
 				var distance_to_target = npc.global_position.distance_to(target.global_position)
 
 				# Too close! RETREAT (kiting behavior)
 				if CombatManager.should_archer_retreat(npc, target):
 					# Calculate retreat direction (away from enemy)
 					var retreat_direction = (npc.global_position - target.global_position).normalized()
-					var retreat_distance = CombatManager.ARCHER_OPTIMAL_RANGE
+					# Use health-based kiting range (extends range when hurt)
+					var retreat_distance = CombatManager.get_optimal_kiting_range(npc)
 					var retreat_pos = npc.global_position + (retreat_direction * retreat_distance)
+
+					# Clamp retreat position to walkable bounds (use cached background reference for performance)
+					if background_reference and background_reference.has_method("is_position_in_walkable_area"):
+						# If retreat position is out of bounds, try to find a valid position
+						if not background_reference.is_position_in_walkable_area(retreat_pos):
+							# Try moving parallel to the enemy instead of directly away
+							var parallel_right = Vector2(-retreat_direction.y, retreat_direction.x)
+							var parallel_left = Vector2(retreat_direction.y, -retreat_direction.x)
+
+							# Try right parallel
+							var alt_pos1 = npc.global_position + (parallel_right * retreat_distance * 0.5)
+							if background_reference.is_position_in_walkable_area(alt_pos1):
+								retreat_pos = alt_pos1
+							# Try left parallel
+							elif background_reference.is_position_in_walkable_area(npc.global_position + (parallel_left * retreat_distance * 0.5)):
+								retreat_pos = npc.global_position + (parallel_left * retreat_distance * 0.5)
+							# Last resort: just stay at current position
+							else:
+								retreat_pos = npc.global_position
+								print("Archer KITING: Trapped, cannot retreat further!")
 
 					# Only retreat if not already retreating or target moved
 					var should_retreat = false
 					var last_retreat_pos = ai_state.get("last_retreat_pos", Vector2.ZERO)
+					var is_moving = movement_target.has_method("is_moving") and movement_target.is_moving()
 
-					if "current_state" not in npc or npc.current_state != "Walking":
+					if not is_moving:
 						should_retreat = true  # Not currently moving
 					elif retreat_pos.distance_to(last_retreat_pos) > 20.0:
 						should_retreat = true  # Retreat position changed significantly
 
-					if should_retreat and "controller" in npc and npc.controller:
-						npc.controller.move_to_position(retreat_pos.x)
+					if should_retreat and movement_target.has_method("move_to_position"):
+						movement_target.move_to_position(retreat_pos.x)
 						_ai_tween_y_position(npc, retreat_pos.y, ai_state)
 						ai_state["combat_target"] = target
 						ai_state["last_retreat_pos"] = retreat_pos
@@ -564,9 +645,13 @@ func _update_npc_ai(npc: Node2D) -> void:
 
 				# In good range - ATTACK!
 				elif CombatManager.can_ranged_attack(npc, target):
-					# Set NPC to attacking state (triggers attack animation via controller)
+					# Stop archer movement before attacking (archer must stand still to shoot)
+					if movement_target.has_method("stop_auto_movement"):
+						movement_target.stop_auto_movement()
+
+					# Set NPC to attacking state (triggers attack animation)
 					if "current_state" in npc:
-						npc.current_state = "Attacking"
+						npc.current_state = NPCState.ATTACKING  # Use enum
 
 					# Execute combat logic (projectile firing, state tracking)
 					CombatManager.start_ranged_attack(npc, target, "arrow")
@@ -578,16 +663,17 @@ func _update_npc_ai(npc: Node2D) -> void:
 					# Only move if not already pursuing or target moved significantly
 					var should_pursue = false
 					var last_target = ai_state.get("combat_target")
+					var is_pursuing = movement_target.has_method("is_moving") and movement_target.is_moving()
 
 					if last_target == null or last_target != target:
 						should_pursue = true  # New target
-					elif "current_state" in npc and npc.current_state == "Idle":
+					elif not is_pursuing:
 						should_pursue = true  # Stopped moving
 					elif last_target.global_position.distance_to(target.global_position) > 20.0:
 						should_pursue = true  # Target moved significantly
 
-					if should_pursue and "controller" in npc and npc.controller:
-						npc.controller.move_to_position(target.global_position.x)
+					if should_pursue and movement_target.has_method("move_to_position"):
+						movement_target.move_to_position(target.global_position.x)
 						_ai_tween_y_position(npc, target.global_position.y, ai_state)
 						ai_state["combat_target"] = target
 						ai_state["last_combat_target_pos"] = target.global_position
@@ -599,7 +685,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 			CombatManager.end_combat(npc)
 
 	# Check if NPC reached waypoint and needs to continue to final target
-	if ai_state.get("has_waypoint", false) and ai_state.get("current_state") == "Walking":
+	if ai_state.get("has_waypoint", false) and ai_state.get("current_state") == NPCState.WALKING:
 		var waypoint = ai_state.get("waypoint", Vector2.ZERO)
 		var distance_to_waypoint = npc.position.distance_to(waypoint)
 
@@ -608,9 +694,12 @@ func _update_npc_ai(npc: Node2D) -> void:
 			var final_target = ai_state.get("final_target", Vector2.ZERO)
 			ai_state["has_waypoint"] = false  # Clear waypoint
 
-			# Move to final target
-			if "controller" in npc and npc.controller:
-				npc.controller.move_to_position(final_target.x)
+			# Move to final target (controller or direct)
+			var has_controller = "controller" in npc and npc.controller
+			var movement_target = npc.controller if has_controller else npc
+
+			if movement_target.has_method("move_to_position"):
+				movement_target.move_to_position(final_target.x)
 				_ai_tween_y_position(npc, final_target.y, ai_state)
 				print("NPCManager AI: %s reached waypoint, continuing to final target (%.0f, %.0f)" % [ai_state["npc_type"], final_target.x, final_target.y])
 
@@ -634,9 +723,9 @@ func _ai_change_state(npc: Node2D, ai_state: Dictionary) -> void:
 	var total_weight = idle_weight + walk_weight
 	var random_value = randf() * total_weight
 
-	var new_state = "Idle"
+	var new_state = NPCState.IDLE  # Use enum
 	if random_value > idle_weight:
-		new_state = "Walking"
+		new_state = NPCState.WALKING  # Use enum
 
 	# Update AI state
 	ai_state["current_state"] = new_state
@@ -648,7 +737,7 @@ func _ai_change_state(npc: Node2D, ai_state: Dictionary) -> void:
 	)
 
 	# Apply state to NPC via controller or directly
-	if new_state == "Walking":
+	if new_state == NPCState.WALKING:
 		_ai_start_walking(npc, ai_state)
 	else:
 		_ai_start_idle(npc, ai_state)
@@ -661,11 +750,16 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
-		npc.current_state = "Walking"
+		npc.current_state = NPCState.WALKING  # Use enum
 
-	# Controller executes the movement behavior
-	if "controller" in npc and npc.controller:
-		if npc.controller.has_method("move_to_position"):
+	# Check if NPC has controller or direct movement
+	var has_controller = "controller" in npc and npc.controller
+	var has_move_to_position = npc.has_method("move_to_position")
+
+	# Execute movement behavior (controller or direct)
+	if has_controller or has_move_to_position:
+		var movement_target = npc.controller if has_controller else npc
+		if movement_target.has_method("move_to_position"):
 			# Try to find a safe target position (max 10 attempts)
 			var target_pos = Vector2.ZERO
 			var is_safe = false
@@ -721,13 +815,13 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 				ai_state["final_target"] = target_pos
 
 				# Move to waypoint first
-				npc.controller.move_to_position(waypoint_pos.x)
+				movement_target.move_to_position(waypoint_pos.x)
 				_ai_tween_y_position(npc, waypoint_pos.y, ai_state)
 				print("NPCManager AI: %s moving to waypoint (%.0f, %.0f) then to target (%.0f, %.0f)" % [ai_state["npc_type"], waypoint_pos.x, waypoint_pos.y, target_pos.x, target_pos.y])
 			else:
 				# Direct movement (no waypoint needed)
 				ai_state["has_waypoint"] = false
-				npc.controller.move_to_position(target_pos.x)
+				movement_target.move_to_position(target_pos.x)
 				_ai_tween_y_position(npc, target_pos.y, ai_state)
 				print("NPCManager AI: %s walking directly to (%.0f, %.0f)" % [ai_state["npc_type"], target_pos.x, target_pos.y])
 
@@ -736,13 +830,15 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
-		npc.current_state = "Idle"
+		npc.current_state = NPCState.IDLE  # Use enum
 
-	# Controller stops movement
-	if "controller" in npc and npc.controller:
-		if npc.controller.has_method("stop_auto_movement"):
-			npc.controller.stop_auto_movement()
-			print("NPCManager AI: %s idling" % ai_state["npc_type"])
+	# Stop movement (controller or direct)
+	var has_controller = "controller" in npc and npc.controller
+	var movement_target = npc.controller if has_controller else npc
+
+	if movement_target.has_method("stop_auto_movement"):
+		movement_target.stop_auto_movement()
+		print("NPCManager AI: %s idling" % ai_state["npc_type"])
 
 
 ## AI: Smoothly tween Y position with natural curve
@@ -803,8 +899,8 @@ func _on_controller_movement_completed(final_position: float, npc: Node2D) -> vo
 
 	# Movement completed - update NPC state to Idle
 	if "current_state" in npc:
-		npc.current_state = "Idle"
-	ai_state["current_state"] = "Idle"
+		npc.current_state = NPCState.IDLE  # Use enum
+	ai_state["current_state"] = NPCState.IDLE  # Use enum
 
 	# This enables reactive behavior (e.g., could immediately start combat if enemy nearby)
 
@@ -819,10 +915,24 @@ func _on_controller_movement_interrupted(npc: Node2D) -> void:
 
 	# Movement was stopped - update NPC state to Idle
 	if "current_state" in npc:
-		npc.current_state = "Idle"
-	ai_state["current_state"] = "Idle"
+		npc.current_state = NPCState.IDLE  # Use enum
+	ai_state["current_state"] = NPCState.IDLE  # Use enum
 
 	# AI could react by choosing a different target - timer will handle next decision
+
+
+## NPC signals when state changes (bidirectional communication)
+func _on_npc_state_changed(old_state: int, new_state: int, npc: Node2D) -> void:
+	if not _npc_ai_states.has(npc):
+		return
+
+	var ai_state = _npc_ai_states[npc]
+	print("NPCManager AI: %s state changed from %d to %d" % [ai_state["npc_type"], old_state, new_state])
+
+	# Track the state change in AI system
+	ai_state["current_state"] = new_state
+
+	# Could use this to react to state changes (e.g., NPC died, NPC hurt, etc.)
 
 
 ## ===== Z-INDEX / DEPTH SORTING SYSTEM =====

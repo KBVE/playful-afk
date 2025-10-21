@@ -33,6 +33,7 @@ signal dialogue_closed
 var current_npc_name: String = ""
 var current_npc_sprite: AnimatedSprite2D = null
 var current_npc_stats: NPCStats = null
+var current_npc: Node2D = null  # Reference to the NPC for state checking
 
 ## Animation properties
 var animation_duration: float = 0.3  # Duration for fade in/out
@@ -60,6 +61,7 @@ func _ready() -> void:
 ## Uses cached UI sprite from NPCManager for better performance
 func show_dialogue(npc_name: String, npc: Node2D = null) -> void:
 	current_npc_name = npc_name
+	current_npc = npc  # Store NPC reference for state checking
 
 	# Extract NPC stats if available
 	current_npc_stats = null
@@ -143,6 +145,7 @@ func hide_dialogue() -> void:
 
 	current_npc_name = ""
 	current_npc_stats = null
+	current_npc = null  # Clear NPC reference
 
 	# Remove cached sprite from UI (but don't free it - it's cached in NPCManager)
 	if current_npc_sprite and npc_portrait_container:
@@ -215,8 +218,43 @@ func set_dialogue_text(text: String) -> void:
 	if not dialogue_text:
 		return
 
+	# Add state-based message if NPC has a current_state
+	var full_text = text
+	if current_npc and "current_state" in current_npc:
+		var state_message = _get_state_message(current_npc.current_state)
+		if not state_message.is_empty():
+			full_text = text + "\n\n" + state_message
+
 	# Start typewriter effect
-	_typewriter_effect(text)
+	_typewriter_effect(full_text)
+
+
+## Get state-based message from NPCState enum
+func _get_state_message(state: int) -> String:
+	# Map NPCState enum to descriptive messages
+	match state:
+		NPCManager.NPCState.IDLE:
+			return "[i](Currently idle)[/i]"
+		NPCManager.NPCState.WALKING:
+			return "[i](Currently walking around)[/i]"
+		NPCManager.NPCState.ATTACKING:
+			return "[i](Currently attacking!)[/i]"
+		NPCManager.NPCState.WANDERING:
+			return "[i](Currently wandering)[/i]"
+		NPCManager.NPCState.COMBAT:
+			return "[i](Currently in combat!)[/i]"
+		NPCManager.NPCState.RETREATING:
+			return "[i](Currently retreating from danger)[/i]"
+		NPCManager.NPCState.PURSUING:
+			return "[i](Currently pursuing a target)[/i]"
+		NPCManager.NPCState.HURT:
+			return "[i](Currently hurt and recovering)[/i]"
+		NPCManager.NPCState.DAMAGED:
+			return "[i](Just took damage!)[/i]"
+		NPCManager.NPCState.DEAD:
+			return "[i](Deceased)[/i]"
+		_:
+			return "[i](Unknown state: %d)[/i]" % state
 
 
 ## Typewriter effect for dialogue text

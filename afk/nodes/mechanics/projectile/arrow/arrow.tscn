@@ -1,11 +1,11 @@
-[gd_scene load_steps=4 format=3 uid="uid://arrow_projectile"]
+[gd_scene load_steps=4 format=3 uid="uid://c2niyyila2p7u"]
 
-[ext_resource type="Script" path="res://nodes/mechanics/projectile/arrow/arrow.gd" id="1_arrow"]
+[ext_resource type="Script" uid="uid://c8b6lwy4c2ou8" path="res://nodes/mechanics/projectile/arrow/arrow.gd" id="1_arrow"]
 [ext_resource type="Texture2D" uid="uid://cr50ip5yi8ysv" path="res://nodes/mechanics/projectile/arrow/arrow.png" id="2_arrow_texture"]
 
 [sub_resource type="CapsuleShape2D" id="CapsuleShape2D_arrow"]
 radius = 3.0
-height = 16.0
+height = 7.999993
 
 [node name="Arrow" type="Node2D"]
 script = ExtResource("1_arrow")
@@ -19,5 +19,6 @@ collision_mask = 2
 monitorable = false
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="HitBox"]
+position = Vector2(11, 0)
 rotation = 1.5708
 shape = SubResource("CapsuleShape2D_arrow")

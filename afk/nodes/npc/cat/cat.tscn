@@ -458,6 +458,8 @@ animations = [{
 [sub_resource type="CircleShape2D" id="CircleShape2D_a1xyb"]
 
 [node name="Cat" type="CharacterBody2D"]
+collision_layer = 1
+collision_mask = 3
 script = ExtResource("1_cat")
 
 [node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]

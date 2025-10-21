@@ -50,8 +50,10 @@ func _process(delta: float) -> void:
 		_return_to_pool()
 		return
 
-	# Optionally check if arrow is off-screen
-	# (Add screen bounds check here if needed)
+	# Check if arrow is off-screen (viewport bounds check)
+	if _is_off_screen():
+		_return_to_pool()
+		return
 
 
 ## Fire the arrow towards a target
@@ -73,6 +75,24 @@ func fire(target: Vector2, fire_speed: float = 300.0, from_attacker: Node2D = nu
 	process_mode = Node.PROCESS_MODE_INHERIT
 
 	print("Arrow fired from %s to %s at speed %d" % [position, target, speed])
+
+
+## Check if arrow is outside viewport bounds
+func _is_off_screen() -> bool:
+	var viewport = get_viewport()
+	if not viewport:
+		return false
+
+	var viewport_rect = viewport.get_visible_rect()
+	var screen_position = global_position
+
+	# Add margin to allow arrow to travel slightly off-screen before returning
+	var margin = 100.0
+
+	return (screen_position.x < -margin or
+			screen_position.x > viewport_rect.size.x + margin or
+			screen_position.y < -margin or
+			screen_position.y > viewport_rect.size.y + margin)
 
 
 ## Return arrow to pool

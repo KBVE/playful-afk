@@ -15,20 +15,15 @@ const WARRIOR_MELEE_RANGE: float = 50.0  # Warriors need to be close (~3px visua
 const ARCHER_MIN_RANGE: float = 80.0   # Archers stay at least this far (15-20px visual)
 const ARCHER_MAX_RANGE: float = 300.0  # Archers can shoot from this far
 const ARCHER_OPTIMAL_RANGE: float = 100.0  # Archers prefer this distance
+const ARCHER_HURT_RANGE: float = 150.0  # When hurt, archers keep extra distance
 const FACING_THRESHOLD: float = 0.85  # Dot product threshold for "facing" (stricter, ~30 degrees)
 const ATTACK_COOLDOWN: float = 1.5  # Seconds between attacks
 
-## NPC State enum (using bitwise flags for easy combinations)
-## Can combine states: e.g., WALKING | COMBAT | PURSUING
-enum NPCState {
-	IDLE = 1 << 0,        # 1:   Idle (not moving, not attacking)
-	WALKING = 1 << 1,     # 2:   Walking/moving
-	ATTACKING = 1 << 2,   # 4:   Currently attacking (animation playing)
-	WANDERING = 1 << 3,   # 8:   Normal wandering/idle behavior (no combat)
-	COMBAT = 1 << 4,      # 16:  Engaged in combat
-	RETREATING = 1 << 5,  # 32:  Retreating from enemy (archer kiting)
-	PURSUING = 1 << 6     # 64:  Moving towards enemy
-}
+## Health thresholds for state changes
+const HURT_HEALTH_THRESHOLD: float = 0.3  # Below 30% HP triggers HURT state
+
+## NOTE: Enums (Faction, CombatType, NPCState) are defined in NPCManager
+## Access them via NPCManager.Faction, NPCManager.CombatType, NPCManager.NPCState
 
 ## Active combat tracking
 var active_combatants: Dictionary = {}  # Key: attacker Node2D, Value: combat state
@@ -82,7 +77,7 @@ func can_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Check if currently attacking (can't attack while animation playing)
 	if active_combatants.has(attacker):
 		var state_flags = active_combatants[attacker].get("state_flags", 0)
-		if state_flags & NPCState.ATTACKING:
+		if state_flags & NPCManager.NPCState.ATTACKING:
 			return false
 
 	# Get NPC type for range checking
@@ -137,24 +132,56 @@ func start_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 		"type": "melee",
 		"npc_type": npc_type,
 		"cooldown_timer": ATTACK_COOLDOWN,
-		"state_flags": NPCState.COMBAT | NPCState.ATTACKING
+		"state_flags": NPCManager.NPCState.COMBAT | NPCManager.NPCState.ATTACKING
 	}
 
-	# Calculate and apply damage
-	# Note: NPCManager/Controller handles attack animation - we just handle damage logic
+	combat_started.emit(attacker, target)
+
+	# Execute the melee attack with proper timing
+	_execute_melee_attack(attacker, target, npc_type)
+
+	return true
+
+
+## Execute melee attack with animation timing (async)
+func _execute_melee_attack(attacker: Node2D, target: Node2D, npc_type: String) -> void:
+	# Delay damage until attack animation reaches the impact frame
+	# Warrior attack animation: 5 frames at 10fps = 0.5s total
+	# Apply damage at frame 3 (0.3 seconds) when slash connects
+	await get_tree().create_timer(0.3).timeout
+
+	# Check if attacker and target are still valid
+	if not is_instance_valid(attacker) or not is_instance_valid(target):
+		return
+
+	# Calculate and apply damage at the moment of impact
 	var damage = calculate_damage(attacker, target)
 	apply_damage(attacker, target, damage)
+
+	print("CombatManager: %s melee attacked %s for %d damage" % [_get_npc_name(attacker), _get_npc_name(target), damage])
+
+	# Wait for rest of animation to complete (0.5s total - 0.3s already waited = 0.2s remaining)
+	await get_tree().create_timer(0.2).timeout
+
+	# Check if attacker is still valid
+	if not is_instance_valid(attacker):
+		return
 
 	# Mark attack as complete (remove ATTACKING flag)
 	if active_combatants.has(attacker):
 		var state_flags = active_combatants[attacker]["state_flags"]
-		active_combatants[attacker]["state_flags"] = state_flags & ~NPCState.ATTACKING
+		active_combatants[attacker]["state_flags"] = state_flags & ~NPCManager.NPCState.ATTACKING
 
-	combat_started.emit(attacker, target)
-
-	print("CombatManager: %s melee attacked %s" % [_get_npc_name(attacker), _get_npc_name(target)])
-
-	return true
+	# Update NPC animation state after attack completes
+	# Check if NPC should be walking or idle based on controller movement state
+	if "current_state" in attacker:
+		if "controller" in attacker and attacker.controller:
+			if attacker.controller.is_auto_moving:
+				attacker.current_state = "Walking"
+			else:
+				attacker.current_state = "Idle"
+		else:
+			attacker.current_state = "Idle"
 
 
 ## ===== RANGED COMBAT =====
@@ -182,7 +209,7 @@ func can_ranged_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Check if currently attacking (can't attack while animation playing)
 	if active_combatants.has(attacker):
 		var state_flags = active_combatants[attacker].get("state_flags", 0)
-		if state_flags & NPCState.ATTACKING:
+		if state_flags & NPCManager.NPCState.ATTACKING:
 			return false
 
 	# Check distance (must be in range but not too close)
@@ -195,6 +222,10 @@ func can_ranged_attack(attacker: Node2D, target: Node2D) -> bool:
 	if distance > ARCHER_MAX_RANGE:
 		return false  # Too far - need to pursue
 
+	# MUST be facing target to shoot (just like warriors)
+	if not is_facing_target(attacker, target):
+		return false
+
 	return true
 
 
@@ -204,12 +235,40 @@ func should_archer_retreat(attacker: Node2D, target: Node2D) -> bool:
 		return false
 
 	var distance = attacker.global_position.distance_to(target.global_position)
+
+	# If hurt (low health), use extended retreat distance
+	if is_hurt(attacker):
+		return distance < ARCHER_HURT_RANGE
+
+	# Normal retreat distance
 	return distance < ARCHER_MIN_RANGE
+
+
+## Check if NPC is hurt (low health - below 30%)
+func is_hurt(npc: Node2D) -> bool:
+	if not npc or not "stats" in npc or not npc.stats:
+		return false
+
+	var health_percent = npc.stats.hp / npc.stats.max_hp
+	return health_percent <= HURT_HEALTH_THRESHOLD
+
+
+## Get optimal kiting range based on NPC health state
+func get_optimal_kiting_range(npc: Node2D) -> float:
+	if is_hurt(npc):
+		return ARCHER_HURT_RANGE  # Hurt archers keep extra distance
+	return ARCHER_OPTIMAL_RANGE  # Normal kiting range
 
 
 ## Start ranged attack (called by NPCManager after it handles movement)
 func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: String = "arrow") -> bool:
 	if not can_ranged_attack(attacker, target):
+		return false
+
+	# CRITICAL: Only RANGED combat type NPCs can fire projectiles
+	var attacker_combat_type = _get_npc_combat_type(attacker)
+	if attacker_combat_type != NPCManager.CombatType.RANGED:
+		print("CombatManager: ERROR - %s is not a RANGED combat type, cannot fire projectiles!" % _get_npc_name(attacker))
 		return false
 
 	# Get NPC type
@@ -221,27 +280,54 @@ func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: Stri
 		"type": "ranged",
 		"npc_type": npc_type,
 		"cooldown_timer": ATTACK_COOLDOWN,
-		"state_flags": NPCState.COMBAT | NPCState.ATTACKING
+		"state_flags": NPCManager.NPCState.COMBAT | NPCManager.NPCState.ATTACKING
 	}
+
+	# Delay arrow firing until attack animation reaches the release point
+	# Archer attack animation: 11 frames at 10fps = 1.1s total
+	# Fire arrow at frame 7 (0.7 seconds) when bow is fully drawn
+	await get_tree().create_timer(0.7).timeout
+
+	# Check if attacker and target are still valid
+	if not is_instance_valid(attacker) or not is_instance_valid(target):
+		return false
 
 	# Fire projectile (handled by ProjectileManager)
 	# Note: NPCManager/Controller handles attack animation - we just handle projectile logic
 	if ProjectileManager:
 		var projectile = ProjectileManager.get_projectile(projectile_type)
 		if projectile:
-			# Set projectile position and make visible
-			projectile.position = attacker.global_position
+			# Calculate bow position offset based on archer's facing direction
+			var bow_offset = _calculate_bow_offset(attacker, target)
+			var spawn_position = attacker.global_position + bow_offset
+
+			# Set projectile position (use global_position to handle parallax layers correctly)
+			projectile.global_position = spawn_position
 			projectile.visible = true
 
-			# Pass attacker reference for damage calculation
+			# Pass attacker reference for damage calculation (use global positions for parallax compatibility)
 			if projectile.has_method("fire"):
 				projectile.fire(target.global_position, 300.0, attacker)
 			# Note: Damage is applied when projectile hits (in arrow.gd's on_hit)
 
-	# Mark attack as complete (projectile fired)
+	# Wait for animation to complete (1.1s total - 0.7s already waited = 0.4s remaining)
+	await get_tree().create_timer(0.4).timeout
+
+	# Mark attack as complete (animation finished)
 	if active_combatants.has(attacker):
 		var state_flags = active_combatants[attacker]["state_flags"]
-		active_combatants[attacker]["state_flags"] = state_flags & ~NPCState.ATTACKING
+		active_combatants[attacker]["state_flags"] = state_flags & ~NPCManager.NPCState.ATTACKING
+
+	# Update NPC animation state after attack completes
+	# Check if NPC should be walking or idle based on controller movement state
+	if "current_state" in attacker and is_instance_valid(attacker):
+		if "controller" in attacker and attacker.controller:
+			if attacker.controller.is_auto_moving:
+				attacker.current_state = "Walking"
+			else:
+				attacker.current_state = "Idle"
+		else:
+			attacker.current_state = "Idle"
 
 	combat_started.emit(attacker, target)
 
@@ -287,6 +373,9 @@ func apply_damage(attacker: Node2D, target: Node2D, damage: float) -> void:
 
 		print("CombatManager: %s dealt %.1f damage to %s" % [_get_npc_name(attacker), damage, _get_npc_name(target)])
 
+		# Update HURT state based on target's health
+		_update_hurt_state(target)
+
 		# Check if target died
 		if "stats" in target and target.stats:
 			if not target.stats.is_alive():
@@ -315,6 +404,10 @@ func find_nearest_target(attacker: Node2D, max_range: float = 500.0) -> Node2D:
 		if target == attacker:
 			continue
 
+		# Skip friendly NPCs (like the cat - should never be targeted)
+		if "is_friendly" in target and target.is_friendly:
+			continue
+
 		# Skip if target is same type as attacker (don't attack allies)
 		if _is_same_faction(attacker, target):
 			continue
@@ -335,24 +428,33 @@ func find_nearest_target(attacker: Node2D, max_range: float = 500.0) -> Node2D:
 
 ## Check if two NPCs are in the same faction (don't attack each other)
 func _is_same_faction(npc1: Node2D, npc2: Node2D) -> bool:
-	# For now, warriors and archers are allies (both humanoids)
-	# Chickens and monsters are separate
+	var faction1 = _get_npc_faction(npc1)
+	var faction2 = _get_npc_faction(npc2)
 
-	var type1 = _get_npc_type(npc1)
-	var type2 = _get_npc_type(npc2)
+	# NPCs in the same faction don't attack each other
+	return faction1 == faction2
 
-	# Humanoid faction (warriors, archers)
-	var humanoid_faction = ["warrior", "archer"]
-	# Monster faction (chicken, etc.)
-	var monster_faction = ["chicken"]
 
-	if type1 in humanoid_faction and type2 in humanoid_faction:
-		return true
+## Get NPC's faction
+func _get_npc_faction(npc: Node2D) -> NPCManager.Faction:
+	# Check if NPC explicitly defines faction
+	if "faction" in npc:
+		return npc.faction
 
-	if type1 in monster_faction and type2 in monster_faction:
-		return true
+	# Check if marked as friendly (cat, companions, etc.)
+	if "is_friendly" in npc and npc.is_friendly:
+		return NPCManager.Faction.ALLY
 
-	return false
+	# Otherwise, determine by type
+	var npc_type = _get_npc_type(npc)
+
+	match npc_type:
+		"warrior", "archer", "cat":
+			return NPCManager.Faction.ALLY
+		"chicken":
+			return NPCManager.Faction.MONSTER
+		_:
+			return NPCManager.Faction.NEUTRAL
 
 
 ## ===== COMBAT STATE MANAGEMENT =====
@@ -381,8 +483,8 @@ func is_in_combat(attacker: Node2D) -> bool:
 ## Get NPC combat state flags (from active_combatants)
 func get_combat_state(attacker: Node2D) -> int:
 	if active_combatants.has(attacker):
-		return active_combatants[attacker].get("state_flags", CombatManager.NPCState.WANDERING)
-	return CombatManager.NPCState.WANDERING
+		return active_combatants[attacker].get("state_flags", NPCManager.NPCState.WANDERING)
+	return NPCManager.NPCState.WANDERING
 
 
 ## Check if NPC has specific state flag
@@ -451,6 +553,70 @@ func _get_npc_name(npc: Node2D) -> String:
 	return npc.name
 
 
+## Get NPC's combat type
+func _get_npc_combat_type(npc: Node2D) -> NPCManager.CombatType:
+	# Check if NPC explicitly defines combat_type
+	if "combat_type" in npc:
+		return npc.combat_type
+
+	# Otherwise, determine by type for backward compatibility
+	var npc_type = _get_npc_type(npc)
+
+	match npc_type:
+		"warrior":
+			return NPCManager.CombatType.MELEE
+		"archer":
+			return NPCManager.CombatType.RANGED
+		"cat", "chicken":
+			return NPCManager.CombatType.NONE
+		_:
+			return NPCManager.CombatType.NONE
+
+
+## Update HURT state flag based on NPC health
+func _update_hurt_state(npc: Node2D) -> void:
+	if not npc or not "stats" in npc or not npc.stats:
+		return
+
+	# Check if NPC is hurt (low health)
+	if is_hurt(npc):
+		# Add HURT flag to combat state if in active_combatants
+		if active_combatants.has(npc):
+			active_combatants[npc]["state_flags"] |= NPCManager.NPCState.HURT
+		print("CombatManager: %s is now HURT (low health - defensive behavior activated)" % _get_npc_name(npc))
+	else:
+		# Remove HURT flag if health recovered
+		if active_combatants.has(npc):
+			active_combatants[npc]["state_flags"] &= ~NPCManager.NPCState.HURT
+
+
+## Calculate bow offset position based on archer's facing direction
+func _calculate_bow_offset(attacker: Node2D, target: Node2D) -> Vector2:
+	# Determine which direction the archer is facing
+	var to_target = (target.global_position - attacker.global_position).normalized()
+
+	# Bow offset from center of sprite
+	# The bow is held to the side and slightly forward
+	var bow_horizontal_offset = 40.0  # Distance from center to bow
+	var bow_vertical_offset = -10.0   # Slightly above center (bow is held up)
+
+	# Check if archer is facing left or right based on sprite flip
+	var facing_left = false
+	if "animated_sprite" in attacker:
+		var sprite = attacker.animated_sprite
+		if sprite and sprite.flip_h:
+			facing_left = true
+
+	# If we can't determine from sprite flip, use target direction
+	if not "animated_sprite" in attacker or not attacker.animated_sprite:
+		facing_left = to_target.x < 0
+
+	# Calculate offset based on facing direction
+	var horizontal_offset = bow_horizontal_offset if not facing_left else -bow_horizontal_offset
+
+	return Vector2(horizontal_offset, bow_vertical_offset)
+
+
 ## ===== NPC STATE MANAGEMENT (Animation States) =====
 
 ## Global NPC state tracking (maps NPC -> bitwise state flags)
@@ -502,10 +668,10 @@ func get_animation_state_string(npc: Node2D) -> String:
 	var state = get_npc_state(npc)
 
 	# Attack animation takes priority
-	if state & NPCState.ATTACKING:
+	if state & NPCManager.NPCState.ATTACKING:
 		return "Attacking"
 	# Walking animation (used for WALKING, RETREATING, PURSUING)
-	elif state & NPCState.WALKING:
+	elif state & NPCManager.NPCState.WALKING:
 		return "Walking"
 	# Default to idle
 	else:

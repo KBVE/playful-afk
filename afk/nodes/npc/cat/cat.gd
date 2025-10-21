@@ -45,6 +45,18 @@ class_name Cat
 
 @export var experience_to_next_level: int = 100
 
+## NPC Stats reference (assigned by NPCManager)
+var stats: NPCStats = null
+
+## Cat's faction (ALLY - never targeted by allies)
+var faction: int = 0  # NPCManager.Faction.ALLY
+
+## Cat's combat type (NONE - doesn't fight)
+var combat_type: int = 0  # NPCManager.CombatType.NONE
+
+## Cat is a friendly pet, not a monster (should never be targeted in combat)
+var is_friendly: bool = true
+
 # Node references
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var state_timer: Timer = $StateTimer

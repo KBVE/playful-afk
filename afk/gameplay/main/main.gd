@@ -95,6 +95,10 @@ func _setup_character_pool() -> void:
 	if background and background.layer4_objects:
 		NPCManager.set_layer4_container(background.layer4_objects)
 		NPCManager.set_background_reference(background)  # For heightmap queries during AI movement
+
+		# Set projectile container for arrows and other projectiles (reparents existing arrows)
+		if ProjectileManager:
+			ProjectileManager.set_projectile_container(background.layer4_objects)
 	else:
 		push_error("Layer4Objects not found in background!")
 		return
@@ -212,7 +216,7 @@ func _setup_character_pool() -> void:
 	if chicken_is_valid:
 		var chicken = NPCManager.get_generic_npc("chicken", chicken_spawn_pos)
 		if chicken:
-			chicken.scale = Vector2(4, 4)  # Make chicken bigger for visibility
+			chicken.scale = Vector2(2.5, 2.5)  # Smaller, more proportional size
 			chicken.set_physics_process(false)
 			if chicken.has_signal("chicken_clicked"):
 				chicken.chicken_clicked.connect(func(): _on_npc_clicked(chicken))

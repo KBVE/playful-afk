@@ -10,7 +10,7 @@ const PROJECTILE_REGISTRY: Dictionary = {
 	"arrow": {
 		"scene": "res://nodes/mechanics/projectile/arrow/arrow.tscn",
 		"class_name": "Arrow",
-		"pool_size": 16,  # Number of arrows to keep in pool
+		"pool_size": 100,  # Number of arrows to keep in pool (increased for multiple archers)
 		"category": "ranged"
 	}
 }
