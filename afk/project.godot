@@ -23,6 +23,8 @@ NPCManager="*res://nodes/npc/npc_manager.gd"
 InputManager="*res://nodes/input/input_manager.gd"
 StructureManager="*res://nodes/structures/structure_manager.gd"
 MechanicsManager="*res://nodes/mechanics/mechanics_manager.gd"
+ProjectileManager="*res://nodes/mechanics/projectile/projectile_manager.gd"
+
 
 [display]
 

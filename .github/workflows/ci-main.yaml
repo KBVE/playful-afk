@@ -36,12 +36,12 @@ jobs:
           cat > /tmp/supabase_inject.html << 'INJECT_EOF'
           <script>
           INJECT_EOF
-          cat afk/supabase.min.js >> /tmp/supabase_inject.html
+          cat afk/scripts/supabase.min.js >> /tmp/supabase_inject.html
           cat >> /tmp/supabase_inject.html << 'INJECT_EOF'
           </script>
           <script>
           INJECT_EOF
-          cat afk/supabase-config.js >> /tmp/supabase_inject.html
+          cat afk/scripts/supabase-config.js >> /tmp/supabase_inject.html
           cat >> /tmp/supabase_inject.html << 'INJECT_EOF'
           </script>
           INJECT_EOF
