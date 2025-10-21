@@ -677,7 +677,6 @@ func _update_npc_ai(npc: Node2D) -> void:
 						movement_target.stop_auto_movement()
 					ai_state["combat_target"] = target
 					ai_state["time_until_next_change"] = 0.5  # Check again soon
-					print("DEBUG: Warrior in range, waiting for cooldown")
 					return
 				else:
 					# Not in range - move towards enemy
@@ -708,6 +707,11 @@ func _update_npc_ai(npc: Node2D) -> void:
 			elif combat_type == NPCManager.CombatType.RANGED:
 				var movement_target = _get_movement_target(npc)
 				var distance_to_target = npc.global_position.distance_to(target.global_position)
+
+				# Flip sprite to face target
+				if "animated_sprite" in npc and npc.animated_sprite:
+					var to_target = target.global_position - npc.global_position
+					npc.animated_sprite.flip_h = to_target.x < 0
 
 				# Too close! RETREAT (kiting behavior)
 				if CombatManager.should_archer_retreat(npc, target):
