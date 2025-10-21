@@ -11,7 +11,7 @@ signal dialogue_closed
 
 ## Node references
 @onready var npc_portrait_panel: Panel = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel
-@onready var npc_name_label: Label = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCNameLabel
+@onready var npc_name_label: Label = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCNameMargin/NPCNameLabel
 @onready var npc_portrait_container: CenterContainer = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCPortraitContainer
 
 ## Stats display labels

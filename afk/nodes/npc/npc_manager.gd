@@ -83,6 +83,9 @@ var stats_database: Dictionary = {}
 ## Container for all NPCs
 var foreground_container: Node2D = null
 
+## Background reference for heightmap queries
+var background_reference: Control = null
+
 ## ===== NPC AI SYSTEM =====
 ## Centralized AI controller for all pooled NPCs
 
@@ -344,6 +347,11 @@ func set_layer4_container(container: Node2D) -> void:
 		if slot["character"] and not slot["character"].get_parent():
 			foreground_container.add_child(slot["character"])
 
+
+## Set the background reference for heightmap queries (called from main scene)
+func set_background_reference(background: Control) -> void:
+	background_reference = background
+
 	for slot in persistent_pool:
 		if slot["character"] and not slot["character"].get_parent():
 			foreground_container.add_child(slot["character"])
@@ -374,7 +382,8 @@ func _initialize_ai_system() -> void:
 
 
 ## Register NPC for AI control
-func register_npc_ai(npc: Node2D, npc_type: String, y_bounds: Vector2 = Vector2.ZERO) -> void:
+## Y position is now dynamically queried from background heightmap based on X
+func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 	if not NPC_REGISTRY.has(npc_type):
 		push_error("NPCManager: Cannot register AI for unknown NPC type: %s" % npc_type)
 		return
@@ -392,8 +401,7 @@ func register_npc_ai(npc: Node2D, npc_type: String, y_bounds: Vector2 = Vector2.
 		),
 		"movement_direction": Vector2.ZERO,
 		"is_player_controlled": false,
-		"movement_bounds_x": Vector2(100.0, 1052.0),  # Default X bounds (screen width)
-		"movement_bounds_y": y_bounds  # Y bounds for vertical positioning
+		"movement_bounds_x": Vector2(50.0, 1100.0)  # Full screen width (with margins)
 	}
 
 	# Connect to controller signals for bidirectional communication
@@ -438,6 +446,22 @@ func _update_npc_ai(npc: Node2D) -> void:
 	if ai_state["is_player_controlled"]:
 		return
 
+	# Check if NPC reached waypoint and needs to continue to final target
+	if ai_state.get("has_waypoint", false) and ai_state.get("current_state") == "Walking":
+		var waypoint = ai_state.get("waypoint", Vector2.ZERO)
+		var distance_to_waypoint = npc.position.distance_to(waypoint)
+
+		# If close enough to waypoint (within 20px), move to final target
+		if distance_to_waypoint < 20.0:
+			var final_target = ai_state.get("final_target", Vector2.ZERO)
+			ai_state["has_waypoint"] = false  # Clear waypoint
+
+			# Move to final target
+			if "controller" in npc and npc.controller:
+				npc.controller.move_to_position(final_target.x)
+				_ai_tween_y_position(npc, final_target.y, ai_state)
+				print("NPCManager AI: %s reached waypoint, continuing to final target (%.0f, %.0f)" % [ai_state["npc_type"], final_target.x, final_target.y])
+
 	# Count down to next state change
 	ai_state["time_until_next_change"] -= AI_UPDATE_INTERVAL
 
@@ -481,8 +505,7 @@ func _ai_change_state(npc: Node2D, ai_state: Dictionary) -> void:
 ## AI: Start NPC walking
 func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 	# Get movement bounds from AI state
-	var movement_bounds_x = ai_state.get("movement_bounds_x", Vector2(100.0, 1052.0))
-	var movement_bounds_y = ai_state.get("movement_bounds_y", Vector2.ZERO)
+	var movement_bounds_x = ai_state.get("movement_bounds_x", Vector2(50.0, 1100.0))  # Full screen width
 
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
@@ -491,16 +514,70 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 	# Controller executes the movement behavior
 	if "controller" in npc and npc.controller:
 		if npc.controller.has_method("move_to_position"):
-			# Generate random target position within bounds
-			var target_x = randf_range(movement_bounds_x.x, movement_bounds_x.y)
-			npc.controller.move_to_position(target_x)
+			# Try to find a safe target position (max 10 attempts)
+			var target_pos = Vector2.ZERO
+			var is_safe = false
+			var attempts = 0
 
-			# If Y bounds are set, randomly vary Y position within safe zone
-			if movement_bounds_y != Vector2.ZERO:
-				var target_y = randf_range(movement_bounds_y.x, movement_bounds_y.y)
-				npc.position.y = target_y
+			while attempts < 10 and not is_safe:
+				# Pick random X position
+				var target_x = randf_range(movement_bounds_x.x, movement_bounds_x.y)
 
-			print("NPCManager AI: %s walking to %d" % [ai_state["npc_type"], target_x])
+				# Get Y bounds at that X position
+				var target_y = 0.0
+				if background_reference and background_reference.has_method("get_walkable_y_bounds"):
+					var y_bounds = background_reference.get_walkable_y_bounds(target_x)
+					target_y = randf_range(y_bounds.x, y_bounds.y)
+				else:
+					target_y = npc.position.y  # Keep current Y if no background
+
+				target_pos = Vector2(target_x, target_y)
+
+				# Check if this target position is inside the walkable polygon
+				if background_reference and background_reference.has_method("is_position_in_walkable_area"):
+					is_safe = background_reference.is_position_in_walkable_area(target_pos)
+				else:
+					is_safe = true  # Fallback: allow movement if no background reference
+
+				attempts += 1
+
+			# If no safe position found after 10 attempts, just idle instead
+			if not is_safe:
+				print("NPCManager AI: No safe position found for %s after 10 attempts, going idle" % ai_state["npc_type"])
+				_ai_start_idle(npc, ai_state)
+				return
+
+			# Waypoint pathfinding: Complex → Safe Rectangle → Complex
+			# Check if we need a waypoint through the safe zone
+			var use_waypoint = false
+			var waypoint_pos = Vector2.ZERO
+
+			if background_reference and background_reference.has_method("is_in_safe_rectangle"):
+				var start_in_safe = background_reference.is_in_safe_rectangle(npc.position)
+				var target_in_safe = background_reference.is_in_safe_rectangle(target_pos)
+
+				# If start and target are in different zones, use waypoint
+				if not start_in_safe or not target_in_safe:
+					if background_reference.has_method("get_safe_waypoint"):
+						waypoint_pos = background_reference.get_safe_waypoint(npc.position, target_pos)
+						use_waypoint = true
+
+			# Store waypoint in AI state for multi-step movement
+			if use_waypoint:
+				ai_state["has_waypoint"] = true
+				ai_state["waypoint"] = waypoint_pos
+				ai_state["final_target"] = target_pos
+
+				# Move to waypoint first
+				npc.controller.move_to_position(waypoint_pos.x)
+				_ai_tween_y_position(npc, waypoint_pos.y, ai_state)
+				print("NPCManager AI: %s moving to waypoint (%.0f, %.0f) then to target (%.0f, %.0f)" % [ai_state["npc_type"], waypoint_pos.x, waypoint_pos.y, target_pos.x, target_pos.y])
+			else:
+				# Direct movement (no waypoint needed)
+				ai_state["has_waypoint"] = false
+				npc.controller.move_to_position(target_pos.x)
+				_ai_tween_y_position(npc, target_pos.y, ai_state)
+				print("NPCManager AI: %s walking directly to (%.0f, %.0f)" % [ai_state["npc_type"], target_pos.x, target_pos.y])
 
 
 ## AI: Start NPC idle
@@ -514,6 +591,28 @@ func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 		if npc.controller.has_method("stop_auto_movement"):
 			npc.controller.stop_auto_movement()
 			print("NPCManager AI: %s idling" % ai_state["npc_type"])
+
+
+## AI: Smoothly tween Y position with natural curve
+func _ai_tween_y_position(npc: Node2D, target_y: float, ai_state: Dictionary) -> void:
+	# Kill any existing Y tween for this NPC
+	if ai_state.has("y_tween") and ai_state["y_tween"]:
+		var old_tween = ai_state["y_tween"]
+		if old_tween.is_valid():
+			old_tween.kill()
+
+	# Calculate distance-based duration (longer distance = longer time)
+	var distance = abs(target_y - npc.position.y)
+	var duration = clamp(distance / 100.0, 1.0, 3.0)  # 1-3 seconds based on distance
+
+	# Create smooth tween with ease in-out curve
+	var tween = create_tween()
+	tween.set_ease(Tween.EASE_IN_OUT)
+	tween.set_trans(Tween.TRANS_SINE)  # Sine curve for natural arc movement
+	tween.tween_property(npc, "position:y", target_y, duration)
+
+	# Store tween reference in AI state for cleanup
+	ai_state["y_tween"] = tween
 
 
 ## Set NPC player control mode
@@ -747,7 +846,8 @@ func add_persistent_npc(
 
 
 ## Get a generic NPC from pool (creates fresh stats each time)
-func get_generic_npc(npc_type: String, position: Vector2, y_bounds: Vector2 = Vector2.ZERO) -> Node2D:
+## Y bounds are now dynamically queried from background heightmap based on movement
+func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 	# Find inactive NPC in generic pool
 	var slot_index = -1
 	for i in range(generic_pool.size()):
@@ -797,8 +897,8 @@ func get_generic_npc(npc_type: String, position: Vector2, y_bounds: Vector2 = Ve
 	npc.process_mode = Node.PROCESS_MODE_INHERIT
 	_update_character_z_index(npc)
 
-	# Register with AI system for autonomous behavior (pass Y bounds for movement)
-	register_npc_ai(npc, npc_type, y_bounds)
+	# Register with AI system for autonomous behavior (Y queried from heightmap)
+	register_npc_ai(npc, npc_type)
 
 	print("NPCManager: Spawned generic %s '%s' (ULID: %s)" % [npc_type, fresh_stats.npc_name, ULID.to_str(fresh_stats.ulid)])
 

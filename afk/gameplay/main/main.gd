@@ -74,7 +74,7 @@ func _setup_pet() -> void:
 
 	# Position cat in the center-bottom of the screen
 	var viewport_size = get_viewport_rect().size
-	cat.position = Vector2(viewport_size.x / 2, viewport_size.y - 60)  # Moved down 20px (was -80, now -60)
+	cat.position = Vector2(viewport_size.x / 2, viewport_size.y - 55)  # Moved down 25px total (was -80, now -55)
 	cat.scale = Vector2(3, 3)  # Make cat bigger for main gameplay
 
 	# Store starting position for parallax
@@ -94,44 +94,99 @@ func _setup_character_pool() -> void:
 	# Set Layer4Objects container in NPCManager (scrolls with Layer4 at 0.9 speed)
 	if background and background.layer4_objects:
 		NPCManager.set_layer4_container(background.layer4_objects)
+		NPCManager.set_background_reference(background)  # For heightmap queries during AI movement
 	else:
 		push_error("Layer4Objects not found in background!")
 		return
 
 	# Spawn NPCs using the generic pool system (with stats)
+	# Use background heightmap for accurate Y positioning - can spawn anywhere!
 	var viewport_size = get_viewport_rect().size
-	var base_y = viewport_size.y - 150
 
-	# Define safe Y zone for NPC movement
-	var upper_bound_y = viewport_size.y - 220  # Archer spawn position (moved down 10px from -230)
-	var lower_bound_y = base_y  # Warrior spawn position (ground level)
-	var y_movement_bounds = Vector2(upper_bound_y, lower_bound_y)  # Safe Y zone for AI movement
+	# Define wide spawn range - use almost full screen width
+	var spawn_x_min = 50.0
+	var spawn_x_max = viewport_size.x - 50.0
 
-	# Spawn 6 warriors with random names and stats
+	# Spawn 6 warriors spread across the full screen width
 	var num_warriors = 6
 	for i in range(num_warriors):
-		var x_pos = 200 + (i * 150)  # Spread them across the screen
-		var warrior_pos = Vector2(x_pos, base_y)
-		var warrior = NPCManager.get_generic_npc("warrior", warrior_pos, y_movement_bounds)
-		if warrior:
-			warrior.scale = Vector2(2, 2)
-			warrior.set_physics_process(false)
-			warrior.set_player_controlled(false)
-			# Use lambda to pass the warrior instance to the handler
-			warrior.warrior_clicked.connect(func(): _on_npc_clicked(warrior))
+		# Try to find a valid spawn position inside the walkable polygon
+		var spawn_pos = Vector2.ZERO
+		var is_valid = false
+		var attempts = 0
 
-	# Spawn 6 archers with random names and stats
+		while attempts < 20 and not is_valid:
+			# Spread evenly across full width
+			var x_pos = spawn_x_min + (i * (spawn_x_max - spawn_x_min) / (num_warriors - 1))
+
+			# Add some random variation to X (±50px)
+			x_pos += randf_range(-50.0, 50.0)
+			x_pos = clamp(x_pos, spawn_x_min, spawn_x_max)
+
+			# Get Y bounds at this X position
+			var y_bounds = background.get_walkable_y_bounds(x_pos)
+			var random_y = randf_range(y_bounds.x, y_bounds.y)
+
+			spawn_pos = Vector2(x_pos, random_y)
+
+			# Check if position is inside walkable area
+			if background.has_method("is_position_in_walkable_area"):
+				is_valid = background.is_position_in_walkable_area(spawn_pos)
+			else:
+				is_valid = true  # Fallback
+
+			attempts += 1
+
+		if is_valid:
+			var warrior = NPCManager.get_generic_npc("warrior", spawn_pos)
+			if warrior:
+				warrior.scale = Vector2(2, 2)
+				warrior.set_physics_process(false)
+				warrior.set_player_controlled(false)
+				warrior.warrior_clicked.connect(func(): _on_npc_clicked(warrior))
+		else:
+			push_warning("Could not find valid spawn position for warrior %d" % i)
+
+	# Spawn 6 archers spread across the full screen width
 	var num_archers = 6
 	for i in range(num_archers):
-		var x_pos = 200 + (i * 150)
-		var archer_pos = Vector2(x_pos, upper_bound_y)  # Upper bound (moved down 10px)
-		var archer = NPCManager.get_generic_npc("archer", archer_pos, y_movement_bounds)
-		if archer:
-			archer.scale = Vector2(2, 2)
-			archer.set_physics_process(false)
-			archer.set_player_controlled(false)
-			# Use lambda to pass the archer instance to the handler
-			archer.archer_clicked.connect(func(): _on_npc_clicked(archer))
+		# Try to find a valid spawn position inside the walkable polygon
+		var spawn_pos = Vector2.ZERO
+		var is_valid = false
+		var attempts = 0
+
+		while attempts < 20 and not is_valid:
+			# Spread evenly across full width (offset slightly from warriors)
+			var offset = (spawn_x_max - spawn_x_min) / (num_archers * 2)
+			var x_pos = spawn_x_min + offset + (i * (spawn_x_max - spawn_x_min) / num_archers)
+
+			# Add some random variation to X (±50px)
+			x_pos += randf_range(-50.0, 50.0)
+			x_pos = clamp(x_pos, spawn_x_min, spawn_x_max)
+
+			# Get Y bounds at this X position
+			var y_bounds = background.get_walkable_y_bounds(x_pos)
+			var random_y = randf_range(y_bounds.x, y_bounds.y)
+
+			spawn_pos = Vector2(x_pos, random_y)
+
+			# Check if position is inside walkable area
+			if background.has_method("is_position_in_walkable_area"):
+				is_valid = background.is_position_in_walkable_area(spawn_pos)
+			else:
+				is_valid = true  # Fallback
+
+			attempts += 1
+
+		if is_valid:
+			var archer = NPCManager.get_generic_npc("archer", spawn_pos)
+			if archer:
+				archer.scale = Vector2(2, 2)
+				archer.set_physics_process(false)
+				archer.set_player_controlled(false)
+				archer.archer_clicked.connect(func(): _on_npc_clicked(archer))
+		else:
+			push_warning("Could not find valid spawn position for archer %d" % i)
 
 
 func _start_cat_movement() -> void:

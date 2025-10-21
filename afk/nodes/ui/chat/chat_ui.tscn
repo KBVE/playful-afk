@@ -141,13 +141,21 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 8
 
-[node name="NPCNameLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
+[node name="NPCNameMargin" type="MarginContainer" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 8
+
+[node name="NPCNameLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCNameMargin"]
 layout_mode = 2
 theme_override_constants/line_spacing = 4
 text = "NPC Name"
 label_settings = SubResource("LabelSettings_npc_name")
 horizontal_alignment = 1
 vertical_alignment = 1
+autowrap_mode = 3
 
 [node name="NPCPortraitContainer" type="CenterContainer" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
 layout_mode = 2
