@@ -1,0 +1,96 @@
+[gd_scene load_steps=14 format=3 uid="uid://d1wqie3xxgcfr"]
+
+[ext_resource type="Script" path="res://nodes/npc/common/release.gd" id="1_release"]
+[ext_resource type="Texture2D" path="res://nodes/npc/common/release.png" id="2_release"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_0"]
+atlas = ExtResource("2_release")
+region = Rect2(0, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_1"]
+atlas = ExtResource("2_release")
+region = Rect2(120, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_2"]
+atlas = ExtResource("2_release")
+region = Rect2(240, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_3"]
+atlas = ExtResource("2_release")
+region = Rect2(360, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_4"]
+atlas = ExtResource("2_release")
+region = Rect2(480, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_5"]
+atlas = ExtResource("2_release")
+region = Rect2(600, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_6"]
+atlas = ExtResource("2_release")
+region = Rect2(720, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_7"]
+atlas = ExtResource("2_release")
+region = Rect2(840, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_8"]
+atlas = ExtResource("2_release")
+region = Rect2(960, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_9"]
+atlas = ExtResource("2_release")
+region = Rect2(1080, 0, 120, 120)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_release_10"]
+atlas = ExtResource("2_release")
+region = Rect2(1200, 0, 120, 120)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_release"]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_0")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_1")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_2")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_3")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_4")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_5")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_6")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_7")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_8")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_9")
+}, {
+"duration": 1.0,
+"texture": SubResource("AtlasTexture_release_10")
+}],
+"loop": false,
+"name": &"release",
+"speed": 12.0
+}]
+
+[node name="ReleaseEffect" type="Node2D"]
+script = ExtResource("1_release")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+sprite_frames = SubResource("SpriteFrames_release")
+animation = &"release"

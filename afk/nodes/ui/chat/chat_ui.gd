@@ -57,6 +57,12 @@ func _ready() -> void:
 	modulate.a = 0.0
 
 
+func _process(delta: float) -> void:
+	# Update stats display in realtime while dialogue is visible
+	if visible and current_npc_stats:
+		_update_stats_display()
+
+
 ## Show the chat UI with NPC (DOES NOT make visible - caller must do that)
 ## Uses cached UI sprite from NPCManager for better performance
 func show_dialogue(npc_name: String, npc: Node2D = null) -> void:

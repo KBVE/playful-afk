@@ -353,7 +353,7 @@ func scroll_to(offset: float) -> void:
 	if layer3_objects:
 		layer3_objects.position.x = initial_layer3_objects_position - (scroll_offset * scroll_speed_layer3)
 
-	# Scroll objects in layer 4 at the same speed as layer 4 (0.9 speed)
+	# Scroll objects in layer 4 at the same speed as layer 4 (1.0 speed - no parallax, moves with camera)
 	if layer4_objects:
 		layer4_objects.position.x = initial_layer4_objects_position - (scroll_offset * scroll_speed_layer4)
 
