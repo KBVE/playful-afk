@@ -20,9 +20,9 @@ texture = ExtResource("2_bubble")
 
 [node name="EmojiLabel" type="RichTextLabel" parent="BubbleSprite"]
 offset_left = -160.0
-offset_top = -80.0
+offset_top = -60.0
 offset_right = 160.0
-offset_bottom = 80.0
+offset_bottom = 100.0
 theme_override_fonts/normal_font = ExtResource("3_emoji_font")
 theme_override_font_sizes/normal_font_size = 80
 bbcode_enabled = true
