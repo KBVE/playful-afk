@@ -97,42 +97,49 @@ custom_minimum_size = Vector2(800, 400)
 layout_mode = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_main_panel")
 
-[node name="XCloseButton" type="Button" parent="CenterContainer/Panel"]
-custom_minimum_size = Vector2(32, 32)
-layout_mode = 1
-anchors_preset = 1
-anchor_left = 1.0
-anchor_right = 1.0
-offset_left = -40.0
-offset_top = 8.0
-offset_right = -8.0
-offset_bottom = 40.0
-grow_horizontal = 0
-theme_override_fonts/font = ExtResource("2_font")
-theme_override_font_sizes/font_size = 20
-theme_override_styles/normal = SubResource("StyleBoxFlat_button")
-theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
-theme_override_styles/pressed = SubResource("StyleBoxFlat_button_hover")
-theme_override_colors/font_color = Color(1, 1, 1, 1)
-theme_override_colors/font_hover_color = Color(1, 0.3, 0.3, 1)
-text = "X"
-
-[node name="HBoxContainer" type="HBoxContainer" parent="CenterContainer/Panel"]
+[node name="MainVBox" type="VBoxContainer" parent="CenterContainer/Panel"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+theme_override_constants/separation = 0
 
-[node name="NPCPortraitPanel" type="Panel" parent="CenterContainer/Panel/HBoxContainer"]
+[node name="TitleBar" type="HBoxContainer" parent="CenterContainer/Panel/MainVBox"]
+layout_mode = 2
+theme_override_constants/separation = 0
+
+[node name="Spacer" type="Control" parent="CenterContainer/Panel/MainVBox/TitleBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="XCloseButton" type="Button" parent="CenterContainer/Panel/MainVBox/TitleBar"]
+custom_minimum_size = Vector2(40, 40)
+layout_mode = 2
+theme_override_fonts/font = ExtResource("2_font")
+theme_override_font_sizes/font_size = 24
+theme_override_styles/normal = SubResource("StyleBoxFlat_button")
+theme_override_styles/hover = SubResource("StyleBoxFlat_button_hover")
+theme_override_styles/pressed = SubResource("StyleBoxFlat_button_hover")
+theme_override_colors/font_color = Color(1, 0.9, 0.9, 1)
+theme_override_colors/font_hover_color = Color(1, 0.2, 0.2, 1)
+theme_override_colors/font_pressed_color = Color(1, 0.2, 0.2, 1)
+text = "X"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="CenterContainer/Panel/MainVBox"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="NPCPortraitPanel" type="Panel" parent="CenterContainer/Panel/MainVBox/HBoxContainer"]
 custom_minimum_size = Vector2(230, 0)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 0.2
 theme_override_styles/panel = SubResource("StyleBoxFlat_portrait_panel")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel"]
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -141,14 +148,14 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 8
 
-[node name="NPCNameMargin" type="MarginContainer" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
+[node name="NPCNameMargin" type="MarginContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 12
 theme_override_constants/margin_bottom = 8
 
-[node name="NPCNameLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCNameMargin"]
+[node name="NPCNameLabel" type="Label" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCNameMargin"]
 layout_mode = 2
 theme_override_constants/line_spacing = 4
 text = "NPC Name"
@@ -157,63 +164,70 @@ horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
 
-[node name="NPCPortraitContainer" type="CenterContainer" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
+[node name="NPCPortraitContainer" type="CenterContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="NPCStatsContainer" type="VBoxContainer" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
+[node name="StatsMargin" type="MarginContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer"]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 12
+
+[node name="NPCStatsContainer" type="VBoxContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin"]
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="StatsLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer"]
+[node name="StatsLabel" type="Label" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer"]
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_font")
 theme_override_font_sizes/font_size = 14
 text = "Stats:"
 horizontal_alignment = 1
 
-[node name="HPLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer"]
+[node name="HPLabel" type="Label" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer"]
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_font")
 theme_override_font_sizes/font_size = 12
 text = "HP: 100/100"
 horizontal_alignment = 1
 
-[node name="ManaLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer"]
+[node name="ManaLabel" type="Label" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer"]
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_font")
 theme_override_font_sizes/font_size = 12
 text = "Mana: 100/100"
 horizontal_alignment = 1
 
-[node name="EnergyLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer"]
+[node name="EnergyLabel" type="Label" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer"]
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_font")
 theme_override_font_sizes/font_size = 12
 text = "Energy: 100/100"
 horizontal_alignment = 1
 
-[node name="HungerLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer"]
+[node name="HungerLabel" type="Label" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer"]
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_font")
 theme_override_font_sizes/font_size = 12
 text = "Hunger: 100/100"
 horizontal_alignment = 1
 
-[node name="EmotionLabel" type="Label" parent="CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer"]
+[node name="EmotionLabel" type="Label" parent="CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer"]
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_font")
 theme_override_font_sizes/font_size = 12
 text = "Emotion: Neutral"
 horizontal_alignment = 1
 
-[node name="DialoguePanel" type="Panel" parent="CenterContainer/Panel/HBoxContainer"]
+[node name="DialoguePanel" type="Panel" parent="CenterContainer/Panel/MainVBox/HBoxContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_stretch_ratio = 0.8
 theme_override_styles/panel = SubResource("StyleBoxFlat_dialogue_panel")
 
-[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel"]
+[node name="VBoxContainer" type="VBoxContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -222,7 +236,7 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/separation = 12
 
-[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer"]
+[node name="MarginContainer" type="MarginContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer"]
 layout_mode = 2
 size_flags_vertical = 3
 theme_override_constants/margin_left = 16
@@ -230,7 +244,7 @@ theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 16
 theme_override_constants/margin_bottom = 8
 
-[node name="DialogueText" type="RichTextLabel" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/MarginContainer"]
+[node name="DialogueText" type="RichTextLabel" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/MarginContainer"]
 layout_mode = 2
 theme_override_fonts/normal_font = ExtResource("2_font")
 theme_override_font_sizes/normal_font_size = 18
@@ -239,30 +253,30 @@ text = "Dialogue text will appear here..."
 fit_content = true
 scroll_active = false
 
-[node name="BottomContainer" type="HBoxContainer" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer"]
+[node name="BottomContainer" type="HBoxContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer"]
 layout_mode = 2
 
-[node name="KeyHintContainer" type="MarginContainer" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer"]
+[node name="KeyHintContainer" type="MarginContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer"]
 layout_mode = 2
 theme_override_constants/margin_left = 12
 theme_override_constants/margin_bottom = 8
 
-[node name="EscKeyIndicator" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer/KeyHintContainer" instance=ExtResource("3_key_indicator")]
+[node name="EscKeyIndicator" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer/KeyHintContainer" instance=ExtResource("3_key_indicator")]
 layout_mode = 2
 key_texture = ExtResource("4_esc_key")
 label_text = "Close"
 icon_size = Vector2(24, 24)
 
-[node name="Spacer" type="Control" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer"]
+[node name="Spacer" type="Control" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer"]
 layout_mode = 2
 size_flags_horizontal = 3
 
-[node name="ButtonContainer" type="VBoxContainer" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer"]
+[node name="ButtonContainer" type="VBoxContainer" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer"]
 layout_mode = 2
 alignment = 2
 theme_override_constants/separation = 8
 
-[node name="CloseButton" type="Button" parent="CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer/ButtonContainer"]
+[node name="CloseButton" type="Button" parent="CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer/ButtonContainer"]
 custom_minimum_size = Vector2(120, 40)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("2_font")

@@ -27,7 +27,6 @@ ProjectileManager="*res://nodes/mechanics/projectile/projectile_manager.gd"
 ULID="*res://utils/ulid.gd"
 NameGenerator="*res://utils/name_generator.gd"
 
-
 [display]
 
 window/stretch/mode="viewport"

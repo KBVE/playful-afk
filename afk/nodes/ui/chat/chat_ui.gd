@@ -10,22 +10,22 @@ signal dialogue_option_selected(option_index: int)
 signal dialogue_closed
 
 ## Node references
-@onready var npc_portrait_panel: Panel = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel
-@onready var npc_name_label: Label = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCNameMargin/NPCNameLabel
-@onready var npc_portrait_container: CenterContainer = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCPortraitContainer
+@onready var npc_portrait_panel: Panel = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel
+@onready var npc_name_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCNameMargin/NPCNameLabel
+@onready var npc_portrait_container: CenterContainer = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCPortraitContainer
 
 ## Stats display labels
-@onready var hp_label: Label = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer/HPLabel
-@onready var mana_label: Label = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer/ManaLabel
-@onready var energy_label: Label = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer/EnergyLabel
-@onready var hunger_label: Label = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer/HungerLabel
-@onready var emotion_label: Label = $CenterContainer/Panel/HBoxContainer/NPCPortraitPanel/VBoxContainer/NPCStatsContainer/EmotionLabel
+@onready var hp_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/HPLabel
+@onready var mana_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/ManaLabel
+@onready var energy_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/EnergyLabel
+@onready var hunger_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/HungerLabel
+@onready var emotion_label: Label = $CenterContainer/Panel/MainVBox/HBoxContainer/NPCPortraitPanel/VBoxContainer/StatsMargin/NPCStatsContainer/EmotionLabel
 
-@onready var dialogue_panel: Panel = $CenterContainer/Panel/HBoxContainer/DialoguePanel
-@onready var dialogue_text: RichTextLabel = $CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/MarginContainer/DialogueText
-@onready var button_container: VBoxContainer = $CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer/ButtonContainer
-@onready var close_button: Button = $CenterContainer/Panel/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer/ButtonContainer/CloseButton
-@onready var x_close_button: Button = $CenterContainer/Panel/XCloseButton
+@onready var dialogue_panel: Panel = $CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel
+@onready var dialogue_text: RichTextLabel = $CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/MarginContainer/DialogueText
+@onready var button_container: VBoxContainer = $CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer/ButtonContainer
+@onready var close_button: Button = $CenterContainer/Panel/MainVBox/HBoxContainer/DialoguePanel/VBoxContainer/BottomContainer/ButtonContainer/CloseButton
+@onready var x_close_button: Button = $CenterContainer/Panel/MainVBox/TitleBar/XCloseButton
 
 ## Current NPC data
 var current_npc_name: String = ""
@@ -40,12 +40,14 @@ var is_typing: bool = false
 
 
 func _ready() -> void:
-	# Connect close buttons
+	# Connect close buttons (both use the same handler)
 	if close_button:
 		close_button.pressed.connect(_on_close_button_pressed)
 
 	if x_close_button:
 		x_close_button.pressed.connect(_on_close_button_pressed)
+		x_close_button.mouse_entered.connect(_on_x_button_hover_enter)
+		x_close_button.mouse_exited.connect(_on_x_button_hover_exit)
 
 	# Start hidden with alpha 0
 	visible = false
@@ -254,7 +256,21 @@ func _on_dialogue_option_pressed(option_index: int) -> void:
 	dialogue_option_selected.emit(option_index)
 
 
-## Handle close button pressed
+## Handle X button hover enter
+func _on_x_button_hover_enter() -> void:
+	if x_close_button:
+		var tween = create_tween()
+		tween.tween_property(x_close_button, "scale", Vector2(1.1, 1.1), 0.1)
+
+
+## Handle X button hover exit
+func _on_x_button_hover_exit() -> void:
+	if x_close_button:
+		var tween = create_tween()
+		tween.tween_property(x_close_button, "scale", Vector2(1.0, 1.0), 0.1)
+
+
+## Handle close button pressed (both X button and regular close button)
 func _on_close_button_pressed() -> void:
 	print("ChatUI: Close button pressed")
 	# Hide with fade animation first, then emit signal

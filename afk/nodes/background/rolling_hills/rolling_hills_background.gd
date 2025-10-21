@@ -202,7 +202,10 @@ func _calculate_safe_rectangle() -> void:
 	# Add small margin and convert to screen space
 	var safe_y_start = 305.0 * scale_y  # ~514px in screen space
 
-	safe_rectangle = Rect2(0, safe_y_start, tile_width, viewport_size.y - safe_y_start)
+	# Bottom bound: 80px above bottom of screen (matches get_walkable_y_bounds)
+	var safe_y_end = viewport_size.y - 80.0
+
+	safe_rectangle = Rect2(0, safe_y_start, tile_width, safe_y_end - safe_y_start)
 	print("Safe rectangle: ", safe_rectangle)
 
 
@@ -379,6 +382,7 @@ func get_walkable_y_bounds(screen_x: float) -> Vector2:
 	# Convert to screen space
 	var boundary_y_screen = boundary_y_img * scale_y
 
-	# Return range: from the boundary down to bottom of screen
+	# Return range: from the boundary down to a reasonable bottom margin
 	# NPCs should be BELOW the boundary (Y > boundary_y)
-	return Vector2(boundary_y_screen, viewport_size.y - 50.0)
+	# Keep them well above the bottom of screen (80px margin)
+	return Vector2(boundary_y_screen, viewport_size.y - 80.0)
