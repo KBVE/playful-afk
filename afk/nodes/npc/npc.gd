@@ -181,7 +181,9 @@ func take_damage(amount: float) -> void:
 ## Set NPC to manual control mode
 func set_player_controlled(controlled: bool) -> void:
 	_is_player_controlled = controlled
-	# NPCManager AI system will respect _is_player_controlled flag
+	# Propagate to NPCManager AI system
+	if NPCManager:
+		NPCManager.set_npc_player_controlled(self, controlled)
 
 
 ## ============================================================================
@@ -249,7 +251,9 @@ func _update_movement(delta: float) -> void:
 ## Complete movement - called when NPC reaches target
 func _complete_movement() -> void:
 	current_speed = 0.0
-	current_state = NPCManager.NPCState.IDLE
+	# Only set to IDLE if not currently attacking
+	if not (current_state & NPCManager.NPCState.ATTACKING):
+		current_state = NPCManager.NPCState.IDLE
 	movement_completed.emit(position.x)
 
 
@@ -260,7 +264,9 @@ func stop_auto_movement() -> void:
 		movement_interrupted.emit()
 
 	current_speed = 0.0
-	current_state = NPCManager.NPCState.IDLE
+	# Only set to IDLE if not currently attacking
+	if not (current_state & NPCManager.NPCState.ATTACKING):
+		current_state = NPCManager.NPCState.IDLE
 
 
 ## Check if currently moving
@@ -271,10 +277,11 @@ func is_moving() -> bool:
 ## Called when an animation finishes
 func _on_animation_finished() -> void:
 	# Check if this animation should loop
-	var is_looping_state = current_state in [NPCManager.NPCState.IDLE, NPCManager.NPCState.WALKING]
+	# ATTACKING now loops like IDLE and WALKING
+	var is_looping_state = current_state in [NPCManager.NPCState.IDLE, NPCManager.NPCState.WALKING, NPCManager.NPCState.ATTACKING]
 
 	if not is_looping_state:
-		# Non-looping animation finished (attacking, hurt, dead, etc.)
+		# Non-looping animation finished (hurt, dead, etc.)
 		if current_state != NPCManager.NPCState.DEAD:
 			current_state = NPCManager.NPCState.IDLE
 

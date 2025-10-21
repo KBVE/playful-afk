@@ -29,16 +29,24 @@ var cat_start_position: float = 0.0
 var cat_target_position: float = 0.0
 var move_right: bool = true
 
+# Cat hover scaling
+var cat_is_hovered: bool = false
+var cat_normal_scale: Vector2 = Vector2(1.5, 1.5)
+var cat_hover_scale: Vector2 = Vector2(3, 3)
+
 
 func _ready() -> void:
 	print("Main gameplay scene loaded")
+	print("DEBUG: About to wait for process frame...")
 
 	# Wait a frame to ensure NPCManager is ready
 	await get_tree().process_frame
 
+	print("DEBUG: Process frame done, setting up pet...")
 	# Setup the pet
 	_setup_pet()
 
+	print("DEBUG: Pet setup done, setting up character pool...")
 	# Setup character pool and warriors
 	_setup_character_pool()
 
@@ -75,7 +83,7 @@ func _setup_pet() -> void:
 	# Position cat in the center-bottom of the screen
 	var viewport_size = get_viewport_rect().size
 	cat.position = Vector2(viewport_size.x / 2, viewport_size.y - 55)  # Moved down 25px total (was -80, now -55)
-	cat.scale = Vector2(3, 3)  # Make cat bigger for main gameplay
+	cat.scale = Vector2(1.5, 1.5)  # Smaller scale, grows on hover to 3x
 
 	# Store starting position for parallax
 	cat_start_position = cat.position.x
@@ -91,6 +99,12 @@ func _setup_pet() -> void:
 
 
 func _setup_character_pool() -> void:
+	print("DEBUG: _setup_character_pool() called!")
+	# DEBUG: Check what background we actually have
+	print("DEBUG: background = %s, type = %s" % [background, background.get_class() if background else "null"])
+	if background:
+		print("DEBUG: background has layer4_objects? %s" % ("layer4_objects" in background))
+
 	# Set Layer4Objects container in NPCManager (scrolls with Layer4 at 0.9 speed)
 	if background and background.layer4_objects:
 		NPCManager.set_layer4_container(background.layer4_objects)
@@ -144,7 +158,7 @@ func _setup_character_pool() -> void:
 		if is_valid:
 			var warrior = NPCManager.get_generic_npc("warrior", spawn_pos)
 			if warrior:
-				warrior.scale = Vector2(2, 2)
+				warrior.scale = Vector2(1, 1)  # Normal size for better collision/combat
 				warrior.set_physics_process(false)
 				warrior.set_player_controlled(false)
 				warrior.warrior_clicked.connect(func(): _on_npc_clicked(warrior))
@@ -185,7 +199,7 @@ func _setup_character_pool() -> void:
 		if is_valid:
 			var archer = NPCManager.get_generic_npc("archer", spawn_pos)
 			if archer:
-				archer.scale = Vector2(2, 2)
+				archer.scale = Vector2(1, 1)  # Normal size for better collision/combat
 				archer.set_physics_process(false)
 				archer.set_player_controlled(false)
 				archer.archer_clicked.connect(func(): _on_npc_clicked(archer))
@@ -216,7 +230,7 @@ func _setup_character_pool() -> void:
 	if chicken_is_valid:
 		var chicken = NPCManager.get_generic_npc("chicken", chicken_spawn_pos)
 		if chicken:
-			chicken.scale = Vector2(2.5, 2.5)  # Smaller, more proportional size
+			chicken.scale = Vector2(1, 1)  # Normal size to match warriors/archers
 			chicken.set_physics_process(false)
 			if chicken.has_signal("chicken_clicked"):
 				chicken.chicken_clicked.connect(func(): _on_npc_clicked(chicken))
@@ -286,6 +300,10 @@ func _process(delta: float) -> void:
 	if cat and background:
 		_update_background_scroll()
 
+	# Check for cat hover and update scale
+	if cat:
+		_update_cat_hover()
+
 
 func _update_background_scroll() -> void:
 	if not background or not cat:
@@ -296,6 +314,34 @@ func _update_background_scroll() -> void:
 
 	# Scroll the background based on cat's movement
 	background.scroll_to(cat_offset)
+
+
+func _update_cat_hover() -> void:
+	# Check if mouse is hovering over the cat
+	var mouse_pos = get_viewport().get_mouse_position()
+	var cat_rect = _get_cat_bounding_box()
+	var is_mouse_over = cat_rect.has_point(mouse_pos)
+
+	# Update hover state and scale
+	if is_mouse_over != cat_is_hovered:
+		cat_is_hovered = is_mouse_over
+		_update_cat_scale()
+
+
+func _get_cat_bounding_box() -> Rect2:
+	# Get the cat's screen position and size for hover detection
+	var screen_pos = cat.get_global_transform_with_canvas().origin
+	var sprite_size = Vector2(32, 29) * cat.scale  # Cat sprite base size
+	return Rect2(screen_pos - sprite_size / 2, sprite_size)
+
+
+func _update_cat_scale() -> void:
+	# Smooth scale transition
+	var target_scale = cat_hover_scale if cat_is_hovered else cat_normal_scale
+	var tween = create_tween()
+	tween.set_ease(Tween.EASE_OUT)
+	tween.set_trans(Tween.TRANS_CUBIC)
+	tween.tween_property(cat, "scale", target_scale, 0.2)
 
 
 ## Handle ESC key when at ground view (for pause menu, etc.)
