@@ -103,6 +103,9 @@ const Z_INDEX_UPDATE_INTERVAL: float = 0.1  # Update z-index every 100ms
 # Save/Load data
 var npc_save_data: Dictionary = {}
 
+# Emoji Manager for chat bubbles
+var emoji_manager: EmojiManager = null
+
 
 func _ready() -> void:
 	# Load all NPC scenes from registry
@@ -125,11 +128,14 @@ func _ready() -> void:
 	# Initialize AI system
 	_initialize_ai_system()
 
+	# Initialize Emoji Manager
+	_initialize_emoji_manager()
+
 	# Connect to save/load events
 	EventManager.game_saved.connect(_on_game_saved)
 	EventManager.game_loaded.connect(_on_game_loaded)
 
-	print("NPCManager initialized - Cat, Warrior, Character Pool, AI System, and UI Sprite Cache ready")
+	print("NPCManager initialized - Cat, Warrior, Character Pool, AI System, Emoji Manager, and UI Sprite Cache ready")
 
 
 ## ===== NPC REGISTRY HELPER FUNCTIONS =====
@@ -379,6 +385,13 @@ func _initialize_ai_system() -> void:
 	_z_index_timer.start()
 
 	print("NPCManager: AI system initialized with %0.1fs update interval" % AI_UPDATE_INTERVAL)
+
+
+## Initialize Emoji Manager for chat bubbles
+func _initialize_emoji_manager() -> void:
+	emoji_manager = EmojiManager.new()
+	add_child(emoji_manager)
+	print("NPCManager: Emoji Manager initialized for chat bubbles")
 
 
 ## Register NPC for AI control
@@ -838,6 +851,10 @@ func add_persistent_npc(
 		if activate:
 			register_npc_ai(npc, npc_type)
 
+		# Register with Emoji Manager if active
+		if activate and emoji_manager:
+			emoji_manager.register_entity(npc, npc_type, slot_index)
+
 	print("NPCManager: Added persistent NPC '%s' (%s) to slot %d (ULID: %s)" % [
 		npc_name, npc_type, slot_index, npc_stats.ulid
 	])
@@ -900,6 +917,10 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
 	register_npc_ai(npc, npc_type)
 
+	# Register with Emoji Manager for chat bubble intros
+	if emoji_manager:
+		emoji_manager.register_entity(npc, npc_type, slot_index)
+
 	print("NPCManager: Spawned generic %s '%s' (ULID: %s)" % [npc_type, fresh_stats.npc_name, ULID.to_str(fresh_stats.ulid)])
 
 	return npc
@@ -923,6 +944,10 @@ func return_generic_npc(npc: Node2D) -> void:
 			# Clear AI state
 			if _npc_ai_states.has(npc):
 				_npc_ai_states.erase(npc)
+
+			# Unregister from Emoji Manager
+			if emoji_manager:
+				emoji_manager.unregister_entity(npc)
 
 			print("NPCManager: Returned generic NPC to pool")
 			return
