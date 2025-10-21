@@ -1400,16 +1400,13 @@ func get_npc_type(npc: Node2D) -> String:
 				if script_class_name == registry_class:
 					return npc_type
 
-	# Fallback: Check using 'is' operator (works with class_name declarations)
+	# Fallback: Check using class name string matching
+	# This works because class_name declarations are available at runtime
+	var npc_class_name = npc.get_class()
 	for npc_type in NPC_REGISTRY:
 		var registry_class = NPC_REGISTRY[npc_type]["class_name"]
-		# Use type checking - if the NPC is an instance of the registered class
-		if registry_class == "Warrior" and npc is Warrior:
-			return npc_type
-		elif registry_class == "Archer" and npc is Archer:
-			return npc_type
-		elif registry_class == "Chicken" and npc is Chicken:
+		if npc_class_name == registry_class:
 			return npc_type
 
-	push_warning("NPCManager: Unknown NPC type for %s (class: %s)" % [npc, npc.get_class()])
+	push_warning("NPCManager: Unknown NPC type for %s (class: %s)" % [npc, npc_class_name])
 	return ""
