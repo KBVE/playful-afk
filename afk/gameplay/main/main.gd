@@ -29,9 +29,6 @@ var cat_start_position: float = 0.0
 var cat_target_position: float = 0.0
 var move_right: bool = true
 
-# Character pool reference (managed by NPCManager)
-# Use NPCManager.character_pool to access pooled characters
-
 
 func _ready() -> void:
 	print("Main gameplay scene loaded")
@@ -77,7 +74,7 @@ func _setup_pet() -> void:
 
 	# Position cat in the center-bottom of the screen
 	var viewport_size = get_viewport_rect().size
-	cat.position = Vector2(viewport_size.x / 2, viewport_size.y - 80)
+	cat.position = Vector2(viewport_size.x / 2, viewport_size.y - 60)  # Moved down 20px (was -80, now -60)
 	cat.scale = Vector2(3, 3)  # Make cat bigger for main gameplay
 
 	# Store starting position for parallax
@@ -101,44 +98,40 @@ func _setup_character_pool() -> void:
 		push_error("Layer4Objects not found in background!")
 		return
 
-	# Add warrior to pool at slot 0 (activate it)
-	# Position relative to Layer4Objects (will scroll with background at 0.9 speed)
+	# Spawn NPCs using the generic pool system (with stats)
 	var viewport_size = get_viewport_rect().size
-	var warrior_position = Vector2(200, viewport_size.y - 150)
+	var base_y = viewport_size.y - 150
 
-	# Define movement bounds relative to Layer4 (warrior moves within layer bounds)
-	var movement_bounds = Vector2(100.0, viewport_size.x - 100.0)
+	# Define safe Y zone for NPC movement
+	var upper_bound_y = viewport_size.y - 220  # Archer spawn position (moved down 10px from -230)
+	var lower_bound_y = base_y  # Warrior spawn position (ground level)
+	var y_movement_bounds = Vector2(upper_bound_y, lower_bound_y)  # Safe Y zone for AI movement
 
-	# Add warrior to slot 0
-	var warrior = NPCManager.add_npc_to_pool("warrior", 0, warrior_position, true, movement_bounds)
-	if warrior:
-		warrior.scale = Vector2(2, 2)  # Smaller than cat (cat is 4x, warrior is 2x)
-		warrior.set_physics_process(false)  # Disable physics/gravity (same as cat)
-		warrior.set_player_controlled(false)  # Enable autonomous behavior
+	# Spawn 6 warriors with random names and stats
+	var num_warriors = 6
+	for i in range(num_warriors):
+		var x_pos = 200 + (i * 150)  # Spread them across the screen
+		var warrior_pos = Vector2(x_pos, base_y)
+		var warrior = NPCManager.get_generic_npc("warrior", warrior_pos, y_movement_bounds)
+		if warrior:
+			warrior.scale = Vector2(2, 2)
+			warrior.set_physics_process(false)
+			warrior.set_player_controlled(false)
+			# Use lambda to pass the warrior instance to the handler
+			warrior.warrior_clicked.connect(func(): _on_npc_clicked(warrior))
 
-		# Connect warrior click signal to pan camera to bartender
-		warrior.warrior_clicked.connect(_on_warrior_clicked)
-
-		print("Warrior added to character pool at slot 0")
-
-	# Add archer to slot 1
-	var archer_position = Vector2(400, viewport_size.y - 150)
-	var archer = NPCManager.add_npc_to_pool("archer", 1, archer_position, true, movement_bounds)
-	if archer:
-		archer.scale = Vector2(2, 2)  # Same scale as warrior
-		archer.set_physics_process(false)  # Disable physics/gravity
-		archer.set_player_controlled(false)  # Enable autonomous behavior
-
-		# Connect archer click signal to pan camera to bartender
-		archer.archer_clicked.connect(_on_archer_clicked)
-
-		print("Archer added to character pool at slot 1")
-
-	# Example: Add more NPCs to pool (but keep them inactive)
-	# NPCManager.add_npc_to_pool("warrior", 2, Vector2(600, viewport_size.y - 150), false, movement_bounds)
-	# NPCManager.add_npc_to_pool("archer", 3, Vector2(800, viewport_size.y - 150), false, movement_bounds)
-
-	print("Character pool setup complete - %d active characters" % NPCManager.get_active_pool_count())
+	# Spawn 6 archers with random names and stats
+	var num_archers = 6
+	for i in range(num_archers):
+		var x_pos = 200 + (i * 150)
+		var archer_pos = Vector2(x_pos, upper_bound_y)  # Upper bound (moved down 10px)
+		var archer = NPCManager.get_generic_npc("archer", archer_pos, y_movement_bounds)
+		if archer:
+			archer.scale = Vector2(2, 2)
+			archer.set_physics_process(false)
+			archer.set_player_controlled(false)
+			# Use lambda to pass the archer instance to the handler
+			archer.archer_clicked.connect(func(): _on_npc_clicked(archer))
 
 
 func _start_cat_movement() -> void:
@@ -198,9 +191,6 @@ func _process(delta: float) -> void:
 	if cat and cat.controller:
 		cat.controller.update_movement(delta)
 
-	# Update all pooled characters (warriors, etc.)
-	NPCManager.update_pool_characters(delta)
-
 	# Update parallax background based on cat movement
 	if cat and background:
 		_update_background_scroll()
@@ -223,26 +213,28 @@ func _on_escape_pressed() -> void:
 	EventManager.game_paused.emit(not is_paused)
 
 
-## Handle warrior clicked - request dialogue via EventManager
-func _on_warrior_clicked() -> void:
-	print("Warrior clicked in main scene!")
+## Handle NPC clicked - request dialogue via EventManager
+func _on_npc_clicked(npc: Node2D) -> void:
+	if not npc or not "stats" in npc or not npc.stats:
+		push_warning("Clicked NPC has no stats!")
+		return
 
-	# Get the warrior from the pool
-	var warrior = NPCManager.character_pool[0]["character"] if NPCManager.character_pool.size() > 0 else null
+	# Get NPC info from stats
+	var npc_name = npc.stats.npc_name
+	var npc_type = npc.stats.npc_type
 
-	# Request NPC dialogue via EventManager
-	EventManager.request_npc_dialogue(warrior, "Warrior", "Hello traveler! What can I do for you?")
+	# Generate appropriate dialogue based on type
+	var dialogue = ""
+	match npc_type:
+		"warrior":
+			dialogue = "Hello traveler! I am %s, ready to serve!" % npc_name
+		"archer":
+			dialogue = "Greetings! I'm %s, my arrows never miss!" % npc_name
+		_:
+			dialogue = "Hello there!"
 
-
-## Handle archer clicked - request dialogue via EventManager
-func _on_archer_clicked() -> void:
-	print("Archer clicked in main scene!")
-
-	# Get the archer from the pool
-	var archer = NPCManager.character_pool[1]["character"] if NPCManager.character_pool.size() > 1 else null
-
-	# Request NPC dialogue via EventManager
-	EventManager.request_npc_dialogue(archer, "Archer", "Greetings! Ready to take aim at adventure?")
+	# Request NPC dialogue via EventManager (pass NPC with stats)
+	EventManager.request_npc_dialogue(npc, npc_name, dialogue)
 
 
 ## Handle NPC dialogue request from EventManager

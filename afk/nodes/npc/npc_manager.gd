@@ -62,9 +62,25 @@ var warrior: Warrior = null
 # Automatically populated from NPC_REGISTRY + cat
 var ui_sprite_cache: Dictionary = {}
 
-# Character Pool for Layer4 NPCs (scroll with Layer4 at 0.9 speed)
-const MAX_POOL_SIZE: int = 16
-var character_pool: Array[Dictionary] = []
+## ===== DUAL POOL SYSTEM =====
+
+## PERSISTENT POOL - Named NPCs with permanent stats (companions, named characters)
+## Pool stores character instances, stats stored separately by ULID
+## Example: "Warrior Companion", "Archer Guard", "Merchant Bob"
+const MAX_PERSISTENT_POOL_SIZE: int = 8
+var persistent_pool: Array[Dictionary] = []  # Each entry: {character, ulid, is_active, npc_type, npc_name, ...}
+
+## GENERIC POOL - Temporary NPCs with fresh stats each spawn (enemies, random NPCs)
+## Pool recycles character instances, new stats generated per spawn
+## Example: "Goblin", "Bandit", "Wolf"
+const MAX_GENERIC_POOL_SIZE: int = 16
+var generic_pool: Array[Dictionary] = []  # Each entry: {character, is_active, npc_type, ...}
+
+## STATS DATABASE - All NPC stats indexed by ULID
+## Key: ULID string, Value: NPCStats instance
+var stats_database: Dictionary = {}
+
+## Container for all NPCs
 var foreground_container: Node2D = null
 
 ## ===== NPC AI SYSTEM =====
@@ -96,7 +112,9 @@ func _ready() -> void:
 	_initialize_warrior()
 
 	# Initialize character pool (empty slots)
-	_initialize_character_pool()
+	# Initialize dual pool system
+	_initialize_persistent_pool()
+	_initialize_generic_pool()
 
 	# Initialize UI sprite cache (create pre-cloned sprites for UI)
 	_initialize_ui_sprite_cache()
@@ -120,7 +138,6 @@ func _load_npc_scenes() -> void:
 		var scene = load(npc_data["scene"]) as PackedScene
 		if scene:
 			_npc_scenes[npc_type] = scene
-			print("NPCManager: Loaded %s scene" % npc_type)
 		else:
 			push_error("NPCManager: Failed to load scene for %s at %s" % [npc_type, npc_data["scene"]])
 
@@ -318,226 +335,18 @@ func load_save_data(data: Dictionary) -> void:
 		_load_warrior_data(npc_save_data["warrior"])
 
 
-## ===== CHARACTER POOL SYSTEM =====
-## Manages Layer4 characters that scroll with background Layer4 at 0.9 speed
-
-## Initialize character pool with empty slots
-func _initialize_character_pool() -> void:
-	character_pool.clear()
-
-	for i in range(MAX_POOL_SIZE):
-		character_pool.append({
-			"character": null,
-			"is_active": false,
-			"slot_index": i,
-			"position": Vector2.ZERO,
-			"character_type": ""  # "warrior", "cat", etc.
-		})
-
-	print("Character pool initialized with %d slots" % MAX_POOL_SIZE)
-
-
 ## Set the Layer4Objects container reference (called from main scene)
 func set_layer4_container(container: Node2D) -> void:
 	foreground_container = container
-	print("Layer4Objects container set - characters will scroll with Layer4 at 0.9 speed")
 
+	# Add any pre-allocated NPCs to the container
+	for slot in generic_pool:
+		if slot["character"] and not slot["character"].get_parent():
+			foreground_container.add_child(slot["character"])
 
-## Add warrior to pool at a specific slot
-## Add NPC to character pool at specified slot (data-driven approach)
-## @param npc_type: Type of NPC from NPC_REGISTRY (e.g., "warrior", "archer", "mage")
-## @param slot_index: Pool slot index (0-15)
-## @param position: World position
-## @param activate: Whether to activate the NPC immediately
-## @param movement_bounds: X bounds for random movement (min_x, max_x)
-## @return: The created NPC instance or null if failed
-func add_npc_to_pool(npc_type: String, slot_index: int, position: Vector2 = Vector2.ZERO, activate: bool = false, movement_bounds: Vector2 = Vector2(100.0, 1052.0)) -> Node2D:
-	if slot_index < 0 or slot_index >= MAX_POOL_SIZE:
-		push_error("NPCManager: Invalid slot index: %d" % slot_index)
-		return null
-
-	if not is_valid_npc_type(npc_type):
-		push_error("NPCManager: Unknown NPC type '%s'. Available types: %s" % [npc_type, str(get_registered_npc_types())])
-		return null
-
-	# Create a new NPC instance
-	var new_npc = create_npc(npc_type)
-	if not new_npc:
-		return null
-
-	if _add_character_to_slot(new_npc, slot_index, position, activate, npc_type, movement_bounds):
-		return new_npc
-	else:
-		new_npc.queue_free()
-		return null
-
-
-## LEGACY: Add warrior to character pool (kept for backwards compatibility)
-## Use add_npc_to_pool("warrior", ...) instead
-func add_warrior_to_pool(slot_index: int, position: Vector2 = Vector2.ZERO, activate: bool = false, movement_bounds: Vector2 = Vector2(100.0, 1052.0)) -> Node2D:
-	return add_npc_to_pool("warrior", slot_index, position, activate, movement_bounds)
-
-
-## LEGACY: Add archer to character pool (kept for backwards compatibility)
-## Use add_npc_to_pool("archer", ...) instead
-func add_archer_to_pool(slot_index: int, position: Vector2 = Vector2.ZERO, activate: bool = false, movement_bounds: Vector2 = Vector2(100.0, 1052.0)) -> Node2D:
-	return add_npc_to_pool("archer", slot_index, position, activate, movement_bounds)
-
-
-## Internal: Add any character to a slot
-func _add_character_to_slot(character: Node2D, slot_index: int, position: Vector2, activate: bool, char_type: String, movement_bounds: Vector2 = Vector2(100.0, 1052.0)) -> bool:
-	if not foreground_container:
-		push_error("ForegroundCharacters container not set! Call set_layer4_container() first.")
-		return false
-
-	var slot = character_pool[slot_index]
-
-	# Remove existing character if any
-	if slot["character"] != null:
-		push_warning("Slot %d already occupied, replacing character" % slot_index)
-		_remove_character_from_slot(slot_index)
-
-	# Add character to slot
-	slot["character"] = character
-	slot["position"] = position
-	slot["is_active"] = activate
-	slot["character_type"] = char_type
-	slot["movement_bounds"] = movement_bounds  # Store for AI system
-
-	# Add to scene (in Layer4Objects - will scroll with Layer4)
-	foreground_container.add_child(character)
-	character.position = position
-	character.visible = activate
-
-	# Set z-index based on Y position for proper depth sorting
-	_update_character_z_index(character)
-
-	# Configure character
-	if not activate:
-		_deactivate_character(character)
-	else:
-		_activate_character(character, movement_bounds)
-
-	print("Added %s to pool slot %d (active: %s)" % [char_type, slot_index, activate])
-	return true
-
-
-## Activate a character in a slot
-func activate_pool_character(slot_index: int) -> bool:
-	if slot_index < 0 or slot_index >= MAX_POOL_SIZE:
-		return false
-
-	var slot = character_pool[slot_index]
-	if slot["character"] == null or slot["is_active"]:
-		return false
-
-	slot["is_active"] = true
-	var character = slot["character"]
-	character.visible = true
-	_activate_character(character)
-
-	print("Activated character in slot %d" % slot_index)
-	return true
-
-
-## Deactivate a character in a slot
-func deactivate_pool_character(slot_index: int) -> bool:
-	if slot_index < 0 or slot_index >= MAX_POOL_SIZE:
-		return false
-
-	var slot = character_pool[slot_index]
-	if slot["character"] == null or not slot["is_active"]:
-		return false
-
-	slot["is_active"] = false
-	var character = slot["character"]
-	character.visible = false
-	_deactivate_character(character)
-
-	print("Deactivated character in slot %d" % slot_index)
-	return true
-
-
-## Internal: Activate character logic
-func _activate_character(character: Node2D, movement_bounds: Vector2 = Vector2(100.0, 1052.0)) -> void:
-	# Enable physics
-	if character.has_method("set_physics_process"):
-		character.set_physics_process(true)
-
-	# Get character type for AI registration
-	var char_type = get_npc_type(character)
-
-	# Register with centralized AI system
-	if char_type and NPC_REGISTRY.has(char_type):
-		register_npc_ai(character, char_type)
-
-		# Disable individual NPC's state timer (AI system handles it now)
-		if character.has_node("StateTimer"):
-			var timer = character.get_node("StateTimer")
-			if timer is Timer:
-				timer.stop()
-
-		# DO NOT start controller's random movement timer!
-		# The centralized AI system will call controller.move_to_position() as needed
-
-
-## Internal: Deactivate character logic
-func _deactivate_character(character: Node2D) -> void:
-	# Disable physics
-	if character.has_method("set_physics_process"):
-		character.set_physics_process(false)
-
-	# Unregister from AI system
-	unregister_npc_ai(character)
-
-	# Stop controller movement if available
-	if character.has_method("get") and "controller" in character and character.controller:
-		if character.controller.has_method("stop_random_movement"):
-			character.controller.stop_random_movement()
-
-	# Stop state timer
-	if character.has_node("StateTimer"):
-		var timer = character.get_node("StateTimer")
-		if timer is Timer:
-			timer.stop()
-
-
-## Internal: Remove character from slot
-func _remove_character_from_slot(slot_index: int) -> void:
-	var slot = character_pool[slot_index]
-	if slot["character"] != null:
-		slot["character"].queue_free()
-		slot["character"] = null
-		slot["is_active"] = false
-		slot["character_type"] = ""
-
-
-## Update all active pooled characters
-func update_pool_characters(delta: float) -> void:
-	for slot in character_pool:
-		if slot["is_active"] and slot["character"] != null:
-			var character = slot["character"]
-			# Update Warrior controllers
-			if character is Warrior and character.controller:
-				character.controller.update_movement(delta)
-
-
-## Get active character count
-func get_active_pool_count() -> int:
-	var count = 0
-	for slot in character_pool:
-		if slot["is_active"]:
-			count += 1
-	return count
-
-
-## Get all active pooled characters
-func get_active_pool_characters() -> Array:
-	var active = []
-	for slot in character_pool:
-		if slot["is_active"] and slot["character"] != null:
-			active.append(slot["character"])
-	return active
+	for slot in persistent_pool:
+		if slot["character"] and not slot["character"].get_parent():
+			foreground_container.add_child(slot["character"])
 
 
 ## ===== NPC AI SYSTEM =====
@@ -565,7 +374,7 @@ func _initialize_ai_system() -> void:
 
 
 ## Register NPC for AI control
-func register_npc_ai(npc: Node2D, npc_type: String) -> void:
+func register_npc_ai(npc: Node2D, npc_type: String, y_bounds: Vector2 = Vector2.ZERO) -> void:
 	if not NPC_REGISTRY.has(npc_type):
 		push_error("NPCManager: Cannot register AI for unknown NPC type: %s" % npc_type)
 		return
@@ -582,7 +391,9 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 			ai_profile.get("state_change_max", 8.0)
 		),
 		"movement_direction": Vector2.ZERO,
-		"is_player_controlled": false
+		"is_player_controlled": false,
+		"movement_bounds_x": Vector2(100.0, 1052.0),  # Default X bounds (screen width)
+		"movement_bounds_y": y_bounds  # Y bounds for vertical positioning
 	}
 
 	# Connect to controller signals for bidirectional communication
@@ -669,12 +480,9 @@ func _ai_change_state(npc: Node2D, ai_state: Dictionary) -> void:
 
 ## AI: Start NPC walking
 func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
-	# Get movement bounds from character pool
-	var movement_bounds = Vector2(100.0, 1052.0)
-	for slot in character_pool:
-		if slot["character"] == npc:
-			movement_bounds = slot.get("movement_bounds", movement_bounds)
-			break
+	# Get movement bounds from AI state
+	var movement_bounds_x = ai_state.get("movement_bounds_x", Vector2(100.0, 1052.0))
+	var movement_bounds_y = ai_state.get("movement_bounds_y", Vector2.ZERO)
 
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
@@ -684,8 +492,14 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 	if "controller" in npc and npc.controller:
 		if npc.controller.has_method("move_to_position"):
 			# Generate random target position within bounds
-			var target_x = randf_range(movement_bounds.x, movement_bounds.y)
+			var target_x = randf_range(movement_bounds_x.x, movement_bounds_x.y)
 			npc.controller.move_to_position(target_x)
+
+			# If Y bounds are set, randomly vary Y position within safe zone
+			if movement_bounds_y != Vector2.ZERO:
+				var target_y = randf_range(movement_bounds_y.x, movement_bounds_y.y)
+				npc.position.y = target_y
+
 			print("NPCManager AI: %s walking to %d" % [ai_state["npc_type"], target_x])
 
 
@@ -776,14 +590,290 @@ func _update_character_z_index(character: Node2D) -> void:
 
 ## Update z-index for all active characters
 func _update_all_characters_z_index() -> void:
-	# Update cat z-index
-	if cat:
-		_update_character_z_index(cat)
+	var max_z_index = 0
 
-	# Update all pooled characters
-	for slot in character_pool:
+	# Update all pooled characters from generic and persistent pools
+	for slot in generic_pool:
 		if slot["is_active"] and slot["character"] != null:
 			_update_character_z_index(slot["character"])
+			max_z_index = max(max_z_index, slot["character"].z_index)
+
+	for slot in persistent_pool:
+		if slot["is_active"] and slot["character"] != null:
+			_update_character_z_index(slot["character"])
+			max_z_index = max(max_z_index, slot["character"].z_index)
+
+	# Cat always stays in front (highest z-index + 1)
+	if cat:
+		cat.z_index = max_z_index + 1
+
+
+## ===== DUAL POOL MANAGEMENT =====
+
+## Initialize the persistent pool with empty slots
+func _initialize_persistent_pool() -> void:
+	persistent_pool.clear()
+	for i in range(MAX_PERSISTENT_POOL_SIZE):
+		persistent_pool.append({
+			"character": null,
+			"ulid": "",  # ULID key to look up stats in stats_database
+			"is_active": false,
+			"slot": i,
+			"npc_type": "",
+			"npc_name": "",  # Display name (e.g., "Warrior Companion")
+			"movement_bounds": Vector2(100.0, 1052.0)
+		})
+	print("NPCManager: Persistent pool initialized with %d slots" % MAX_PERSISTENT_POOL_SIZE)
+
+
+## Initialize the generic pool with pre-allocated NPCs
+func _initialize_generic_pool() -> void:
+	generic_pool.clear()
+
+	# Pre-allocate warriors (4-8 instances)
+	var num_warriors = 6
+	for i in range(num_warriors):
+		_preallocate_generic_npc("warrior", i)
+
+	# Pre-allocate archers (4-8 instances)
+	var num_archers = 6
+	for i in range(num_archers):
+		_preallocate_generic_npc("archer", num_warriors + i)
+
+	# Fill remaining slots with empty entries
+	for i in range(num_warriors + num_archers, MAX_GENERIC_POOL_SIZE):
+		generic_pool.append({
+			"character": null,
+			"is_active": false,
+			"slot": i,
+			"npc_type": ""
+		})
+
+	print("NPCManager: Generic pool initialized with %d warriors, %d archers" % [num_warriors, num_archers])
+
+
+## Pre-allocate a generic NPC instance (but don't activate it yet)
+func _preallocate_generic_npc(npc_type: String, slot_index: int) -> void:
+	if not NPC_REGISTRY.has(npc_type):
+		push_error("NPCManager: Cannot preallocate unknown NPC type: %s" % npc_type)
+		return
+
+	# Load and instantiate the NPC scene
+	var npc_scene = load(NPC_REGISTRY[npc_type]["scene"])
+	var npc = npc_scene.instantiate()
+
+	# Add to scene but keep hidden
+	if foreground_container:
+		foreground_container.add_child(npc)
+
+	npc.visible = false
+	npc.position = Vector2.ZERO
+	npc.process_mode = Node.PROCESS_MODE_DISABLED
+
+	# Store in pool
+	generic_pool.append({
+		"character": npc,
+		"is_active": false,
+		"slot": slot_index,
+		"npc_type": npc_type
+	})
+
+
+## Add a persistent NPC (keeps stats across activations)
+func add_persistent_npc(
+	npc_type: String,
+	npc_name: String,
+	position: Vector2,
+	initial_stats: NPCStats = null,
+	activate: bool = true,
+	movement_bounds: Vector2 = Vector2(100.0, 1052.0)
+) -> Node2D:
+	# Find empty slot in persistent pool
+	var slot_index = -1
+	for i in range(persistent_pool.size()):
+		if persistent_pool[i]["character"] == null:
+			slot_index = i
+			break
+
+	if slot_index == -1:
+		push_error("NPCManager: Persistent pool is full!")
+		return null
+
+	# Create NPC instance
+	if not NPC_REGISTRY.has(npc_type):
+		push_error("NPCManager: Unknown NPC type: %s" % npc_type)
+		return null
+
+	var npc_scene = load(NPC_REGISTRY[npc_type]["scene"])
+	var npc = npc_scene.instantiate()
+
+	# Create or assign stats
+	var npc_stats = initial_stats if initial_stats else NPCStats.new()
+
+	# Store stats in database by ULID
+	stats_database[npc_stats.ulid] = npc_stats
+
+	# Store in persistent pool
+	var slot = persistent_pool[slot_index]
+	slot["character"] = npc
+	slot["ulid"] = npc_stats.ulid  # Store ULID reference
+	slot["is_active"] = activate
+	slot["npc_type"] = npc_type
+	slot["npc_name"] = npc_name
+	slot["movement_bounds"] = movement_bounds
+
+	# Add to scene
+	if foreground_container:
+		foreground_container.add_child(npc)
+		npc.position = position
+		npc.visible = activate
+
+		# Assign stats to NPC (NPC stores reference)
+		if "stats" in npc:
+			npc.stats = npc_stats
+
+		# Set z-index
+		_update_character_z_index(npc)
+
+		# Register AI if active
+		if activate:
+			register_npc_ai(npc, npc_type)
+
+	print("NPCManager: Added persistent NPC '%s' (%s) to slot %d (ULID: %s)" % [
+		npc_name, npc_type, slot_index, npc_stats.ulid
+	])
+
+	return npc
+
+
+## Get a generic NPC from pool (creates fresh stats each time)
+func get_generic_npc(npc_type: String, position: Vector2, y_bounds: Vector2 = Vector2.ZERO) -> Node2D:
+	# Find inactive NPC in generic pool
+	var slot_index = -1
+	for i in range(generic_pool.size()):
+		var slot = generic_pool[i]
+		if not slot["is_active"] and (slot["npc_type"] == npc_type or slot["character"] == null):
+			slot_index = i
+			break
+
+	if slot_index == -1:
+		push_error("NPCManager: No available generic NPCs of type %s" % npc_type)
+		return null
+
+	var slot = generic_pool[slot_index]
+
+	# Create NPC if slot is empty
+	if slot["character"] == null:
+		if not NPC_REGISTRY.has(npc_type):
+			push_error("NPCManager: Unknown NPC type: %s" % npc_type)
+			return null
+
+		var npc_scene = load(NPC_REGISTRY[npc_type]["scene"])
+		var npc = npc_scene.instantiate()
+
+		slot["character"] = npc
+		slot["npc_type"] = npc_type
+
+		if foreground_container:
+			foreground_container.add_child(npc)
+
+	var npc = slot["character"]
+
+	# Generate FRESH stats for this spawn with random name
+	var fresh_stats = NPCStats.new(100.0, 100.0, 100.0, 100.0, NPCStats.Emotion.NEUTRAL, npc_type)
+
+	# Store in database (use hex string as key for dictionary compatibility)
+	var ulid_key = ULID.to_hex(fresh_stats.ulid)
+	stats_database[ulid_key] = fresh_stats
+
+	# Assign to NPC
+	if "stats" in npc:
+		npc.stats = fresh_stats
+
+	# Activate NPC
+	slot["is_active"] = true
+	npc.position = position
+	npc.visible = true
+	npc.process_mode = Node.PROCESS_MODE_INHERIT
+	_update_character_z_index(npc)
+
+	# Register with AI system for autonomous behavior (pass Y bounds for movement)
+	register_npc_ai(npc, npc_type, y_bounds)
+
+	print("NPCManager: Spawned generic %s '%s' (ULID: %s)" % [npc_type, fresh_stats.npc_name, ULID.to_str(fresh_stats.ulid)])
+
+	return npc
+
+
+## Return generic NPC to pool
+func return_generic_npc(npc: Node2D) -> void:
+	# Find NPC in generic pool
+	for slot in generic_pool:
+		if slot["character"] == npc:
+			slot["is_active"] = false
+			npc.visible = false
+			npc.position = Vector2.ZERO
+
+			# Remove stats from database (generic NPCs don't persist stats)
+			if "stats" in npc and npc.stats:
+				var ulid_key = ULID.to_hex(npc.stats.ulid)
+				stats_database.erase(ulid_key)
+				npc.stats = null
+
+			# Clear AI state
+			if _npc_ai_states.has(npc):
+				_npc_ai_states.erase(npc)
+
+			print("NPCManager: Returned generic NPC to pool")
+			return
+
+	push_warning("NPCManager: NPC not found in generic pool")
+
+
+## Get NPC stats by binary ULID
+func get_stats(ulid: PackedByteArray) -> NPCStats:
+	var ulid_key = ULID.to_hex(ulid)
+	return stats_database.get(ulid_key, null)
+
+
+## Get NPC stats by hex string key (for internal use)
+func get_stats_by_key(ulid_key: String) -> NPCStats:
+	return stats_database.get(ulid_key, null)
+
+
+## Get persistent NPC stats by name
+func get_persistent_npc_stats_by_name(npc_name: String) -> NPCStats:
+	for slot in persistent_pool:
+		if slot["npc_name"] == npc_name and slot.has("ulid"):
+			return stats_database.get(slot["ulid"], null)
+	return null
+
+
+## Save all NPC stats (both persistent and generic currently active)
+func save_all_stats() -> Dictionary:
+	var saved_data = {}
+
+	# Save all stats from database with metadata
+	for ulid_key in stats_database:
+		var stats = stats_database[ulid_key]
+
+		# Find if this is a persistent NPC
+		var npc_name = ""
+		var npc_type = ""
+		for slot in persistent_pool:
+			if slot.has("ulid") and slot["ulid"] == ulid_key:
+				npc_name = slot["npc_name"]
+				npc_type = slot["npc_type"]
+				break
+
+		saved_data[ulid_key] = {
+			"stats": stats.to_dict(),
+			"npc_name": npc_name,
+			"npc_type": npc_type,
+			"is_persistent": npc_name != ""
+		}
+
+	return saved_data
 
 
 ## ===== UI SPRITE CACHE SYSTEM =====

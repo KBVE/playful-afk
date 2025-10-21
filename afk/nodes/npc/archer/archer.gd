@@ -17,7 +17,10 @@ signal archer_clicked
 ## Movement speed when walking
 @export var walk_speed: float = 60.0
 
-## Archer's stats
+## NPC Stats reference (assigned by NPCManager)
+var stats: NPCStats = null
+
+## Archer's stats (DEPRECATED - keeping for backward compatibility)
 @export_group("Stats")
 @export var health: float = 80.0:
 	set(value):
