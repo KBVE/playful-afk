@@ -104,6 +104,19 @@ const NPC_REGISTRY: Dictionary = {
 			"state_change_max": 4.0,
 			"movement_speed": 0.7   # Medium speed
 		}
+	},
+	"goblin": {
+		"scene": "res://nodes/npc/goblin/goblin.tscn",
+		"class_name": "Goblin",
+		"category": "monster",
+		"monster_types": [MonsterType.AGGRESSIVE],
+		"ai_profile": {
+			"idle_weight": 40,      # Goblins are aggressive
+			"walk_weight": 60,      # Move around more than mushrooms
+			"state_change_min": 1.0,  # Very quick state changes
+			"state_change_max": 3.0,
+			"movement_speed": 0.8   # Faster than mushrooms
+		}
 	}
 	# Future NPCs: Add here! Example:
 	# "mage": {
@@ -563,7 +576,7 @@ func _initialize_release_effect_pool() -> void:
 	for i in range(RELEASE_POOL_SIZE):
 		var effect = release_effect_scene.instantiate()
 		effect.visible = false
-		effect.scale = Vector2(0.8, 0.8)  # Scale down to 80%
+		effect.scale = Vector2(0.5, 0.5)  # Scale down to 80%
 
 		# Add to foreground container if available, otherwise add to NPCManager
 		if foreground_container:
@@ -589,7 +602,7 @@ func _get_release_effect() -> Node2D:
 	# All busy - create a new one and add to pool
 	print("NPCManager: All release effects busy, creating new one")
 	var new_effect = release_effect_scene.instantiate()
-	new_effect.scale = Vector2(0.8, 0.8)  # Scale down to 80%
+	new_effect.scale = Vector2(0.5, 0.5)  # Scale down to 80%
 
 	if foreground_container:
 		foreground_container.add_child(new_effect)
@@ -1281,6 +1294,17 @@ func _create_stats_for_type(npc_type: String) -> NPCStats:
 				NPCStats.Emotion.NEUTRAL,
 				npc_type
 			)
+		"goblin":
+			return NPCStats.new(
+				100.0,  # HP (medium - glass cannon)
+				0.0,    # Mana (goblins don't use mana)
+				80.0,   # Energy (high - very active)
+				100.0,  # Hunger
+				12.0,   # Attack (high melee damage - hits harder than mushrooms)
+				5.0,    # Defense (low - fragile)
+				NPCStats.Emotion.NEUTRAL,
+				npc_type
+			)
 		_:
 			# Default stats for unknown NPCs
 			return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
@@ -1328,8 +1352,13 @@ func _initialize_generic_pool() -> void:
 	for i in range(num_mushrooms):
 		_preallocate_generic_npc("mushroom", num_warriors + num_archers + num_chickens + i)
 
+	# Pre-allocate goblins (aggressive monsters - fast glass cannons)
+	var num_goblins = 6
+	for i in range(num_goblins):
+		_preallocate_generic_npc("goblin", num_warriors + num_archers + num_chickens + num_mushrooms + i)
+
 	# Fill remaining slots with empty entries
-	var total_preallocated = num_warriors + num_archers + num_chickens + num_mushrooms
+	var total_preallocated = num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins
 	for i in range(total_preallocated, MAX_GENERIC_POOL_SIZE):
 		generic_pool.append({
 			"character": null,
@@ -1570,6 +1599,28 @@ func return_generic_npc(npc: Node2D) -> void:
 			return
 
 	push_warning("NPCManager: NPC not found in generic pool")
+
+
+## Get all available monster types from the generic pool
+func get_available_monster_types() -> Array:
+	var monster_types = []
+	var seen_types = {}
+
+	for slot in generic_pool:
+		var npc_type = slot.get("npc_type", "")
+		if npc_type.is_empty():
+			continue
+
+		# Check if this is a monster type (has "monster" category in registry)
+		if NPC_REGISTRY.has(npc_type):
+			var registry_entry = NPC_REGISTRY[npc_type]
+			if registry_entry.get("category", "") == "monster":
+				# Only add each type once
+				if not seen_types.has(npc_type):
+					monster_types.append(npc_type)
+					seen_types[npc_type] = true
+
+	return monster_types
 
 
 ## Get pool statistics for a specific NPC type

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://c02i4380gyv3n"
-path="res://.godot/imported/Mushroom-Attack.png-d2b115ebf611eedc6a99e630177ce9ae.ctex"
+uid="uid://c7qrnlfbljk2s"
+path="res://.godot/imported/Idle.png-489e9648199f7aed4024157fe0c5190c.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://nodes/npc/mushroom/Mushroom-Attack.png"
-dest_files=["res://.godot/imported/Mushroom-Attack.png-d2b115ebf611eedc6a99e630177ce9ae.ctex"]
+source_file="res://nodes/npc/mushroom/Idle.png"
+dest_files=["res://.godot/imported/Idle.png-489e9648199f7aed4024157fe0c5190c.ctex"]
 
 [params]
 

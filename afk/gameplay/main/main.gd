@@ -281,6 +281,44 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for mushroom %d" % m)
 
+	# Spawn 2-3 initial goblins
+	for g in range(3):
+		var goblin_spawn_pos = Vector2.ZERO
+		var goblin_is_valid = false
+		var goblin_attempts = 0
+
+		while goblin_attempts < 20 and not goblin_is_valid:
+			# Spawn spread across the screen (offset from mushrooms)
+			var x_pos = viewport_size.x * (0.4 + (g * 0.2)) + randf_range(-50.0, 50.0)
+			var y_bounds = background.get_walkable_y_bounds(x_pos)
+			var random_y = randf_range(y_bounds.x, y_bounds.y)
+
+			goblin_spawn_pos = Vector2(x_pos, random_y)
+
+			# Check if position is inside walkable area
+			if background.has_method("is_position_in_walkable_area"):
+				goblin_is_valid = background.is_position_in_walkable_area(goblin_spawn_pos)
+			else:
+				goblin_is_valid = true
+
+			goblin_attempts += 1
+
+		if goblin_is_valid:
+			var goblin = NPCManager.get_generic_npc("goblin", goblin_spawn_pos)
+			if goblin:
+				goblin.scale = Vector2(1, 1)
+				goblin.set_physics_process(false)
+				if goblin.has_signal("goblin_died"):
+					if not goblin.goblin_died.is_connected(_on_monster_died):
+						goblin.goblin_died.connect(_on_monster_died.bind(goblin))
+				if goblin.has_signal("goblin_clicked"):
+					if not goblin.goblin_clicked.is_connected(_on_npc_clicked):
+						goblin.goblin_clicked.connect(func(): _on_npc_clicked(goblin))
+				active_monsters.append(goblin)
+			print("Spawned goblin #%d at %s" % [g + 1, goblin_spawn_pos])
+		else:
+			push_warning("Could not find valid spawn position for goblin %d" % g)
+
 
 func _start_cat_movement() -> void:
 	# Disable the cat's built-in random state timer
@@ -411,8 +449,12 @@ func _on_monster_spawn_timer_timeout() -> void:
 		print("Max monsters reached (%d/%d) - skipping spawn" % [active_monsters.size(), MAX_ACTIVE_MONSTERS])
 		return
 
-	# Cycle through monster types: mushroom, chicken
-	var monster_types = ["mushroom", "chicken"]
+	# Get available monster types from the pool dynamically
+	var monster_types = NPCManager.get_available_monster_types()
+	if monster_types.is_empty():
+		push_warning("No monster types available in pool!")
+		return
+
 	var monster_type = monster_types[randi() % monster_types.size()]
 
 	# Randomly choose left or right edge
@@ -437,21 +479,23 @@ func _on_monster_spawn_timer_timeout() -> void:
 		monster.scale = Vector2(1, 1)
 		monster.set_physics_process(false)
 
-		# Connect death signal (check not already connected)
-		if monster.has_signal("monster_died"):
+		# Connect death signal dynamically (pattern: {type}_died)
+		var death_signal_name = monster_type + "_died"
+		if monster.has_signal(death_signal_name):
+			var death_signal = monster.get(death_signal_name)
+			if not death_signal.is_connected(_on_monster_died):
+				death_signal.connect(_on_monster_died.bind(monster))
+		# Fallback to generic monster_died signal
+		elif monster.has_signal("monster_died"):
 			if not monster.monster_died.is_connected(_on_monster_died):
 				monster.monster_died.connect(_on_monster_died.bind(monster))
-		if monster.has_signal("chicken_died"):
-			if not monster.chicken_died.is_connected(_on_monster_died):
-				monster.chicken_died.connect(_on_monster_died.bind(monster))
 
-		# Connect click signal (check not already connected)
-		if monster.has_signal("mushroom_clicked"):
-			if not monster.mushroom_clicked.is_connected(_on_npc_clicked):
-				monster.mushroom_clicked.connect(func(): _on_npc_clicked(monster))
-		elif monster.has_signal("chicken_clicked"):
-			if not monster.chicken_clicked.is_connected(_on_npc_clicked):
-				monster.chicken_clicked.connect(func(): _on_npc_clicked(monster))
+		# Connect click signal dynamically (pattern: {type}_clicked)
+		var click_signal_name = monster_type + "_clicked"
+		if monster.has_signal(click_signal_name):
+			var click_signal = monster.get(click_signal_name)
+			if not click_signal.is_connected(_on_npc_clicked):
+				click_signal.connect(func(): _on_npc_clicked(monster))
 
 		active_monsters.append(monster)
 

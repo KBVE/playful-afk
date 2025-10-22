@@ -1,125 +1,121 @@
-[gd_scene load_steps=25 format=3 uid="uid://c8wqie3xxgcfm"]
+[gd_scene load_steps=29 format=3 uid="uid://goblin_scene_001"]
 
-[ext_resource type="Script" path="res://nodes/npc/mushroom/mushroom.gd" id="1_mushroom"]
-[ext_resource type="Texture2D" path="res://nodes/npc/mushroom/Idle.png" id="2_idle"]
-[ext_resource type="Texture2D" path="res://nodes/npc/mushroom/Walk.png" id="3_walk"]
-[ext_resource type="Texture2D" path="res://nodes/npc/mushroom/Attack.png" id="4_attack"]
-[ext_resource type="Texture2D" path="res://nodes/npc/mushroom/Hurt.png" id="5_hurt"]
-[ext_resource type="Texture2D" path="res://nodes/npc/mushroom/Death.png" id="6_die"]
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_idle_0"]
-atlas = ExtResource("2_idle")
-region = Rect2(0, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_idle_1"]
-atlas = ExtResource("2_idle")
-region = Rect2(150, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_idle_2"]
-atlas = ExtResource("2_idle")
-region = Rect2(300, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_idle_3"]
-atlas = ExtResource("2_idle")
-region = Rect2(450, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_walk_0"]
-atlas = ExtResource("3_walk")
-region = Rect2(0, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_walk_1"]
-atlas = ExtResource("3_walk")
-region = Rect2(150, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_walk_2"]
-atlas = ExtResource("3_walk")
-region = Rect2(300, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_walk_3"]
-atlas = ExtResource("3_walk")
-region = Rect2(450, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_walk_4"]
-atlas = ExtResource("3_walk")
-region = Rect2(600, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_walk_5"]
-atlas = ExtResource("3_walk")
-region = Rect2(750, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_walk_6"]
-atlas = ExtResource("3_walk")
-region = Rect2(900, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_walk_7"]
-atlas = ExtResource("3_walk")
-region = Rect2(1050, 0, 150, 150)
+[ext_resource type="Script" path="res://nodes/npc/goblin/goblin.gd" id="1_goblin"]
+[ext_resource type="Texture2D" path="res://nodes/npc/goblin/Attack.png" id="2_attack"]
+[ext_resource type="Texture2D" path="res://nodes/npc/goblin/Death.png" id="3_death"]
+[ext_resource type="Texture2D" path="res://nodes/npc/goblin/Hurt.png" id="4_hurt"]
+[ext_resource type="Texture2D" path="res://nodes/npc/goblin/Idle.png" id="5_idle"]
+[ext_resource type="Texture2D" path="res://nodes/npc/goblin/Walk.png" id="6_walk"]
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_attack_0"]
-atlas = ExtResource("4_attack")
+atlas = ExtResource("2_attack")
 region = Rect2(0, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_attack_1"]
-atlas = ExtResource("4_attack")
+atlas = ExtResource("2_attack")
 region = Rect2(150, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_attack_2"]
-atlas = ExtResource("4_attack")
+atlas = ExtResource("2_attack")
 region = Rect2(300, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_attack_3"]
-atlas = ExtResource("4_attack")
+atlas = ExtResource("2_attack")
 region = Rect2(450, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_attack_4"]
-atlas = ExtResource("4_attack")
+atlas = ExtResource("2_attack")
 region = Rect2(600, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_attack_5"]
-atlas = ExtResource("4_attack")
+atlas = ExtResource("2_attack")
 region = Rect2(750, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_attack_6"]
-atlas = ExtResource("4_attack")
+atlas = ExtResource("2_attack")
 region = Rect2(900, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_attack_7"]
-atlas = ExtResource("4_attack")
+atlas = ExtResource("2_attack")
 region = Rect2(1050, 0, 150, 150)
 
+[sub_resource type="AtlasTexture" id="AtlasTexture_death_0"]
+atlas = ExtResource("3_death")
+region = Rect2(0, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_death_1"]
+atlas = ExtResource("3_death")
+region = Rect2(150, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_death_2"]
+atlas = ExtResource("3_death")
+region = Rect2(300, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_death_3"]
+atlas = ExtResource("3_death")
+region = Rect2(450, 0, 150, 150)
+
 [sub_resource type="AtlasTexture" id="AtlasTexture_hurt_0"]
-atlas = ExtResource("5_hurt")
+atlas = ExtResource("4_hurt")
 region = Rect2(0, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_hurt_1"]
-atlas = ExtResource("5_hurt")
+atlas = ExtResource("4_hurt")
 region = Rect2(150, 0, 150, 150)
 
 [sub_resource type="AtlasTexture" id="AtlasTexture_hurt_2"]
-atlas = ExtResource("5_hurt")
+atlas = ExtResource("4_hurt")
 region = Rect2(300, 0, 150, 150)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_hurt_3"]
-atlas = ExtResource("5_hurt")
-region = Rect2(450, 0, 150, 150)
-
-[sub_resource type="AtlasTexture" id="AtlasTexture_die_0"]
-atlas = ExtResource("6_die")
+[sub_resource type="AtlasTexture" id="AtlasTexture_idle_0"]
+atlas = ExtResource("5_idle")
 region = Rect2(0, 0, 150, 150)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_die_1"]
-atlas = ExtResource("6_die")
+[sub_resource type="AtlasTexture" id="AtlasTexture_idle_1"]
+atlas = ExtResource("5_idle")
 region = Rect2(150, 0, 150, 150)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_die_2"]
-atlas = ExtResource("6_die")
+[sub_resource type="AtlasTexture" id="AtlasTexture_idle_2"]
+atlas = ExtResource("5_idle")
 region = Rect2(300, 0, 150, 150)
 
-[sub_resource type="AtlasTexture" id="AtlasTexture_die_3"]
-atlas = ExtResource("6_die")
+[sub_resource type="AtlasTexture" id="AtlasTexture_idle_3"]
+atlas = ExtResource("5_idle")
 region = Rect2(450, 0, 150, 150)
 
-[sub_resource type="SpriteFrames" id="SpriteFrames_mushroom"]
+[sub_resource type="AtlasTexture" id="AtlasTexture_walk_0"]
+atlas = ExtResource("6_walk")
+region = Rect2(0, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_walk_1"]
+atlas = ExtResource("6_walk")
+region = Rect2(150, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_walk_2"]
+atlas = ExtResource("6_walk")
+region = Rect2(300, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_walk_3"]
+atlas = ExtResource("6_walk")
+region = Rect2(450, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_walk_4"]
+atlas = ExtResource("6_walk")
+region = Rect2(600, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_walk_5"]
+atlas = ExtResource("6_walk")
+region = Rect2(750, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_walk_6"]
+atlas = ExtResource("6_walk")
+region = Rect2(900, 0, 150, 150)
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_walk_7"]
+atlas = ExtResource("6_walk")
+region = Rect2(1050, 0, 150, 150)
+
+[sub_resource type="SpriteFrames" id="SpriteFrames_goblin"]
 animations = [{
 "frames": [{
 "duration": 1.0,
@@ -152,19 +148,19 @@ animations = [{
 }, {
 "frames": [{
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_die_0")
+"texture": SubResource("AtlasTexture_death_0")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_die_1")
+"texture": SubResource("AtlasTexture_death_1")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_die_2")
+"texture": SubResource("AtlasTexture_death_2")
 }, {
 "duration": 1.0,
-"texture": SubResource("AtlasTexture_die_3")
+"texture": SubResource("AtlasTexture_death_3")
 }],
 "loop": false,
-"name": &"die",
+"name": &"death",
 "speed": 10.0
 }, {
 "frames": [{
@@ -176,9 +172,6 @@ animations = [{
 }, {
 "duration": 1.0,
 "texture": SubResource("AtlasTexture_hurt_2")
-}, {
-"duration": 1.0,
-"texture": SubResource("AtlasTexture_hurt_3")
 }],
 "loop": false,
 "name": &"hurt",
@@ -231,23 +224,23 @@ animations = [{
 "speed": 8.0
 }]
 
-[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_mushroom"]
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_goblin"]
 radius = 12.0
 height = 24.0
 
-[node name="Mushroom" type="CharacterBody2D"]
+[node name="Goblin" type="CharacterBody2D"]
 collision_layer = 2
 collision_mask = 3
-script = ExtResource("1_mushroom")
+script = ExtResource("1_goblin")
 
 [node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
-sprite_frames = SubResource("SpriteFrames_mushroom")
+sprite_frames = SubResource("SpriteFrames_goblin")
 animation = &"idle"
 autoplay = "idle"
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="."]
 position = Vector2(0, 4)
-shape = SubResource("CapsuleShape2D_mushroom")
+shape = SubResource("CapsuleShape2D_goblin")
 
 [node name="StateTimer" type="Timer" parent="."]
 wait_time = 3.0

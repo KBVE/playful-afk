@@ -106,6 +106,12 @@ func _process(delta: float) -> void:
 func _update_movement(delta: float) -> void:
 	# Simple movement for monsters
 	if current_state == NPCManager.NPCState.WALKING:
+		# Flip sprite based on movement direction (only if not in combat)
+		# Combat code in NPCManager handles flipping to face target
+		if _move_direction.x != 0 and not (current_state & NPCManager.NPCState.ATTACKING):
+			if animated_sprite:
+				animated_sprite.flip_h = _move_direction.x < 0
+
 		# Calculate potential new position
 		var new_position = position + (_move_direction * walk_speed * delta)
 

@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://be44aple0sr41"
-path="res://.godot/imported/Mushroom-Idle.png-74c308a274f33fa63ffb90e6f3bf16cc.ctex"
+uid="uid://dagnuntc3bnmp"
+path="res://.godot/imported/Death.png-f14ff7b1943093b660765d1e5fae7764.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://nodes/npc/mushroom/Mushroom-Idle.png"
-dest_files=["res://.godot/imported/Mushroom-Idle.png-74c308a274f33fa63ffb90e6f3bf16cc.ctex"]
+source_file="res://nodes/npc/goblin/Death.png"
+dest_files=["res://.godot/imported/Death.png-f14ff7b1943093b660765d1e5fae7764.ctex"]
 
 [params]
 

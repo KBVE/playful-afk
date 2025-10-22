@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://kiq3a74dmmdw"
-path="res://.godot/imported/Mushroom-Walk.png-b90e9329024b7cd192d7d29e0d1ab4d9.ctex"
+uid="uid://5gkt3724x476"
+path="res://.godot/imported/Idle.png-a1c72e3b4326bc923d329fb10104cb82.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://nodes/npc/mushroom/Mushroom-Walk.png"
-dest_files=["res://.godot/imported/Mushroom-Walk.png-b90e9329024b7cd192d7d29e0d1ab4d9.ctex"]
+source_file="res://nodes/npc/goblin/Idle.png"
+dest_files=["res://.godot/imported/Idle.png-a1c72e3b4326bc923d329fb10104cb82.ctex"]
 
 [params]
 
