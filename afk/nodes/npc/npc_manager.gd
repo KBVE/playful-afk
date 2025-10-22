@@ -696,6 +696,10 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 		"movement_bounds_x": Vector2(50.0, 1100.0)  # Full screen width (with margins)
 	}
 
+	# Sync initial state to NPC's current_state property (important for bitwise checks!)
+	if "current_state" in npc:
+		npc.current_state = initial_state
+
 	# Connect to movement signals for bidirectional communication
 	# Try controller first (warrior), then direct NPC signals (archer)
 	var signal_source = null
@@ -1817,12 +1821,14 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	if initial_target != Vector2.ZERO and npc is Monster and "_move_direction" in npc:
 		var direction = (initial_target - position).normalized()
 		npc._move_direction = direction
-		npc.current_state = NPCState.WALKING
+
+		# Preserve WANDERING flag, remove IDLE, add WALKING (bitwise)
+		npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
 
 		# Update AI state to match
 		var ai_state = get_npc_ai_state(npc)
 		if ai_state:
-			ai_state["current_state"] = NPCState.WALKING
+			ai_state["current_state"] = npc.current_state
 			ai_state["time_until_next_change"] = randf_range(3.0, 6.0)  # Will wander after reaching target
 
 		print("NPCManager: Monster %s spawned at (%.0f, %.0f), moving toward (%.0f, %.0f)" % [npc_type, position.x, position.y, initial_target.x, initial_target.y])
