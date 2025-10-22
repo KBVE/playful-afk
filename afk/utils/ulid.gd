@@ -45,7 +45,8 @@ static func generate() -> PackedByteArray:
 	ulid.resize(TOTAL_BYTES)
 
 	# Encode timestamp (6 bytes, big-endian)
-	var timestamp_ms = Time.get_ticks_msec()
+	# Use Unix time (milliseconds since epoch) for real-world timestamps
+	var timestamp_ms = int(Time.get_unix_time_from_system() * 1000.0)
 	_encode_timestamp_bytes(ulid, timestamp_ms)
 
 	# Encode randomness (10 bytes)

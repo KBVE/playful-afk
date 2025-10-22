@@ -23,6 +23,10 @@ func on_spawn() -> void:
 		# Static sprite - could add gentle sway with shaders later
 		pass
 
+	# CASTABLE: Call for help once when flag is placed (rally point)
+	# Find nearest enemy and send idle NPCs to engage
+	_call_for_help()
+
 
 ## Called when despawned
 func on_despawn() -> void:
@@ -30,3 +34,28 @@ func on_despawn() -> void:
 	if animated_sprite:
 		animated_sprite.stop()
 	is_waving = false
+
+
+## Rally point logic - Find nearest enemy and send idle NPCs to engage
+func _call_for_help() -> void:
+	if not CombatManager:
+		print("CatFlag: Cannot call for help - CombatManager not available")
+		return
+
+	# Find nearest enemy within a large range (flag acts as rally point)
+	var nearest_enemy = CombatManager.find_nearest_target(self, 2000.0)
+
+	if nearest_enemy and is_instance_valid(nearest_enemy):
+		var distance = global_position.distance_to(nearest_enemy.global_position)
+		print("CatFlag: 🚩 Rally point activated! Calling allies to engage %s at %.0fpx" % [
+			nearest_enemy.get_class(),
+			distance
+		])
+
+		# Send signal to NPCManager to rally idle NPCs to this enemy
+		if NPCManager:
+			NPCManager._on_cat_call_for_help(nearest_enemy)
+		else:
+			print("CatFlag: ✗ ERROR - NPCManager not available!")
+	else:
+		print("CatFlag: 🚩 Rally point placed but no enemies found on map")

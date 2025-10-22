@@ -292,7 +292,7 @@ func _on_cat_call_for_help(enemy: Node2D) -> void:
 			continue
 
 		# Check if NPC is idle (not already moving to a target)
-		var combat_type = CombatManager.CombatType.NONE
+		var combat_type = CombatType.NONE
 		if "combat_type" in npc:
 			combat_type = npc.combat_type
 
@@ -459,6 +459,73 @@ func set_background_reference(background: Control) -> void:
 			foreground_container.add_child(slot["character"])
 
 
+## ===== SAFE MOVEMENT HELPERS =====
+
+## Clamp a position to safe bounds using background reference
+## This is the centralized function for ALL movement - ensures NPCs stay in bounds
+func clamp_to_safe_bounds(position: Vector2) -> Vector2:
+	if not background_reference:
+		return position
+
+	# Check if position is in safe rectangle
+	if background_reference.has_method("is_in_safe_rectangle"):
+		if background_reference.is_in_safe_rectangle(position):
+			return position  # Already safe
+
+	# Position is unsafe - clamp to nearest point in safe rectangle
+	# Get safe rectangle from background
+	if "safe_rectangle" in background_reference:
+		var safe_rect = background_reference.safe_rectangle
+		var clamped_x = clamp(position.x, safe_rect.position.x, safe_rect.position.x + safe_rect.size.x)
+		var clamped_y = clamp(position.y, safe_rect.position.y, safe_rect.position.y + safe_rect.size.y)
+		return Vector2(clamped_x, clamped_y)
+
+	return position
+
+
+## Get a safe Y position for a given X coordinate
+## Uses background heightmap to ensure NPCs stay on walkable terrain
+func get_safe_y_for_x(x: float, current_y: float) -> float:
+	if not background_reference or not background_reference.has_method("get_walkable_y_bounds"):
+		return current_y
+
+	var y_bounds = background_reference.get_walkable_y_bounds(x)
+	# Clamp to walkable range (y_bounds.x = min_y, y_bounds.y = max_y)
+	return clamp(current_y, y_bounds.x, y_bounds.y)
+
+
+## Move NPC to target position with automatic bounds checking
+## This is the ONE function all movement should use
+func move_npc_to_position_safe(npc: Node2D, target_x: float, target_y: float = -1.0) -> void:
+	if not is_instance_valid(npc):
+		return
+
+	# If no target_y specified, calculate safe Y for the target X
+	if target_y < 0:
+		target_y = get_safe_y_for_x(target_x, npc.global_position.y)
+
+	# Create target position
+	var target_pos = Vector2(target_x, target_y)
+
+	# Clamp to safe bounds
+	var safe_pos = clamp_to_safe_bounds(target_pos)
+
+	# Get the movement target (controller or NPC itself)
+	var movement_target = _get_movement_target(npc)
+
+	# Move to safe position
+	if movement_target and movement_target.has_method("move_to_position"):
+		movement_target.move_to_position(safe_pos.x)
+
+		# Tween Y position if NPC has AI state
+		var ai_state = _npc_ai_states.get(npc)
+		if ai_state:
+			_ai_tween_y_position(npc, safe_pos.y, ai_state)
+		else:
+			# No AI state, just set position directly
+			npc.global_position.y = safe_pos.y
+
+
 ## ===== NPC AI SYSTEM =====
 ## Centralized autonomous behavior controller for all pooled NPCs
 
@@ -496,6 +563,7 @@ func _initialize_release_effect_pool() -> void:
 	for i in range(RELEASE_POOL_SIZE):
 		var effect = release_effect_scene.instantiate()
 		effect.visible = false
+		effect.scale = Vector2(0.8, 0.8)  # Scale down to 80%
 
 		# Add to foreground container if available, otherwise add to NPCManager
 		if foreground_container:
@@ -521,6 +589,7 @@ func _get_release_effect() -> Node2D:
 	# All busy - create a new one and add to pool
 	print("NPCManager: All release effects busy, creating new one")
 	var new_effect = release_effect_scene.instantiate()
+	new_effect.scale = Vector2(0.8, 0.8)  # Scale down to 80%
 
 	if foreground_container:
 		foreground_container.add_child(new_effect)
@@ -769,21 +838,28 @@ func _update_npc_ai(npc: Node2D) -> void:
 								else:
 									retreat_pos = npc.global_position
 
-					# Only retreat if not already retreating or target moved
+					# Only retreat if not already retreating or target moved significantly
 					var should_retreat = false
 					var last_retreat_pos = ai_state.get("last_retreat_pos", Vector2.ZERO)
+					var last_retreat_time = ai_state.get("last_retreat_time", 0.0)
+					var current_time = Time.get_ticks_msec() / 1000.0
 					var is_moving = movement_target.has_method("is_moving") and movement_target.is_moving()
 
-					if not is_moving:
-						should_retreat = true  # Not currently moving
-					elif retreat_pos.distance_to(last_retreat_pos) > 20.0:
-						should_retreat = true  # Retreat position changed significantly
+					# Add cooldown to prevent excessive retreat recalculations (reduces tweaking)
+					var retreat_cooldown = 0.5  # Only update retreat every 0.5 seconds
+					var time_since_last_retreat = current_time - last_retreat_time
+
+					if not is_moving and time_since_last_retreat >= retreat_cooldown:
+						should_retreat = true  # Not currently moving and cooldown passed
+					elif retreat_pos.distance_to(last_retreat_pos) > 50.0 and time_since_last_retreat >= retreat_cooldown:
+						should_retreat = true  # Retreat position changed significantly (increased from 20 to 50px)
 
 					if should_retreat and movement_target.has_method("move_to_position"):
 						movement_target.move_to_position(retreat_pos.x)
 						_ai_tween_y_position(npc, retreat_pos.y, ai_state)
 						ai_state["combat_target"] = target
 						ai_state["last_retreat_pos"] = retreat_pos
+						ai_state["last_retreat_time"] = current_time
 						ai_state["time_until_next_change"] = 1.0
 					return
 
@@ -828,9 +904,9 @@ func _update_npc_ai(npc: Node2D) -> void:
 		elif CombatManager.is_in_combat(npc):
 			CombatManager.end_combat(npc)
 
-	# AGGRESSIVE MONSTER BEHAVIOR - Move toward safe bounds when no enemies
-	# Check if this is an aggressive (non-PASSIVE) monster
-	if npc is Monster and not npc.is_passive():
+	# MONSTER ROAMING BEHAVIOR - All monsters roam with bounds checking (passive and aggressive)
+	# Passive monsters (chickens) roam but don't attack, aggressive monsters (mushrooms) attack + roam
+	if npc is Monster:
 		# Check if already has combat target (handled above)
 		if not ai_state.get("combat_target"):
 			var movement_target = _get_movement_target(npc)
@@ -851,17 +927,25 @@ func _update_npc_ai(npc: Node2D) -> void:
 						needs_new_target = true
 
 			# Pick a random position in safe rectangle and move there
-			if needs_new_target and background_reference and background_reference.has_method("get_random_safe_position"):
-				var safe_pos = background_reference.get_random_safe_position()
+			if needs_new_target and background_reference:
+				# Get a safe target position (or clamp current position if out of bounds)
+				var safe_pos: Vector2
+				if background_reference.has_method("is_in_safe_rectangle") and not background_reference.is_in_safe_rectangle(npc.global_position):
+					# Out of bounds - move towards center of safe rectangle
+					if "safe_rectangle" in background_reference:
+						var safe_rect = background_reference.safe_rectangle
+						safe_pos = Vector2(
+							safe_rect.position.x + safe_rect.size.x / 2,
+							safe_rect.position.y + safe_rect.size.y / 2
+						)
+				elif background_reference.has_method("get_random_safe_position"):
+					# In bounds - pick random safe target
+					safe_pos = background_reference.get_random_safe_position()
+				else:
+					return  # Can't get safe position
 
-				# Check if monster has controller-based movement
-				if movement_target.has_method("move_to_position"):
-					movement_target.move_to_position(safe_pos.x)
-					_ai_tween_y_position(npc, safe_pos.y, ai_state)
-					ai_state["roam_target"] = safe_pos
-					ai_state["time_until_next_change"] = 5.0
 				# Otherwise use direct _move_direction for monsters without controllers
-				elif "_move_direction" in npc:
+				if "_move_direction" in npc:
 					var direction = (safe_pos - npc.global_position).normalized()
 					npc._move_direction = direction
 					npc.current_state = NPCState.WALKING
@@ -944,38 +1028,17 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 	if has_controller or has_move_to_position:
 		var movement_target = npc.controller if has_controller else npc
 		if movement_target.has_method("move_to_position"):
-			# Try to find a safe target position (max 10 attempts)
-			var target_pos = Vector2.ZERO
-			var is_safe = false
-			var attempts = 0
+			# Pick random X position
+			var target_x = randf_range(movement_bounds_x.x, movement_bounds_x.y)
 
-			while attempts < 10 and not is_safe:
-				# Pick random X position
-				var target_x = randf_range(movement_bounds_x.x, movement_bounds_x.y)
+			# Get safe Y for that X position
+			var target_y = get_safe_y_for_x(target_x, npc.global_position.y)
 
-				# Get Y bounds at that X position
-				var target_y = 0.0
-				if background_reference and background_reference.has_method("get_walkable_y_bounds"):
-					var y_bounds = background_reference.get_walkable_y_bounds(target_x)
-					target_y = randf_range(y_bounds.x, y_bounds.y)
-				else:
-					target_y = npc.position.y  # Keep current Y if no background
+			# Create target position
+			var target_pos = Vector2(target_x, target_y)
 
-				target_pos = Vector2(target_x, target_y)
-
-				# Check if this target position is inside the walkable polygon
-				if background_reference and background_reference.has_method("is_position_in_walkable_area"):
-					is_safe = background_reference.is_position_in_walkable_area(target_pos)
-				else:
-					is_safe = true  # Fallback: allow movement if no background reference
-
-				attempts += 1
-
-			# If no safe position found after 10 attempts, just idle instead
-			if not is_safe:
-				print("NPCManager AI: No safe position found for %s after 10 attempts, going idle" % ai_state["npc_type"])
-				_ai_start_idle(npc, ai_state)
-				return
+			# Clamp to safe bounds (this ensures chickens stay in bounds!)
+			target_pos = clamp_to_safe_bounds(target_pos)
 
 			# Waypoint pathfinding: Complex → Safe Rectangle → Complex
 			# Check if we need a waypoint through the safe zone
@@ -1027,6 +1090,21 @@ func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 
 ## AI: Smoothly tween Y position with natural curve
 func _ai_tween_y_position(npc: Node2D, target_y: float, ai_state: Dictionary) -> void:
+	# Calculate distance to target Y
+	var distance = abs(target_y - npc.position.y)
+
+	# Skip if change is too small (< 5px) - prevents excessive tweaking
+	if distance < 5.0:
+		return
+
+	# For combat situations (archers kiting), use instant movement for small changes
+	# This prevents the "tweaking" effect during kiting
+	var in_combat = ai_state.get("combat_target") != null
+	if in_combat and distance < 20.0:
+		# Small Y adjustment during combat - just set it instantly
+		npc.position.y = target_y
+		return
+
 	# Kill any existing Y tween for this NPC
 	if ai_state.has("y_tween") and ai_state["y_tween"]:
 		var old_tween = ai_state["y_tween"]
@@ -1034,8 +1112,7 @@ func _ai_tween_y_position(npc: Node2D, target_y: float, ai_state: Dictionary) ->
 			old_tween.kill()
 
 	# Calculate distance-based duration (longer distance = longer time)
-	var distance = abs(target_y - npc.position.y)
-	var duration = clamp(distance / 100.0, 1.0, 3.0)  # 1-3 seconds based on distance
+	var duration = clamp(distance / 100.0, 0.5, 2.0)  # 0.5-2 seconds (faster than before)
 
 	# Create smooth tween with ease in-out curve
 	var tween = create_tween()

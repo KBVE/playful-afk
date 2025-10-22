@@ -74,7 +74,7 @@ var _is_player_controlled: bool = false
 # Danger detection
 var _danger_check_timer: float = 0.0
 const DANGER_CHECK_INTERVAL: float = 2.0  # Check for enemies every 2 seconds
-const DANGER_RANGE: float = 200.0  # Range at which cat detects danger
+const DANGER_RANGE: float = 600.0  # Range at which cat detects danger (covers most of screen)
 
 
 func _ready() -> void:
@@ -93,21 +93,31 @@ func _ready() -> void:
 	# Connect to EventManager for feeding
 	EventManager.pet_fed.connect(_on_pet_fed)
 
-	print("Cat initialized - Current state: %s" % current_state)
+	print("Cat initialized - Current state: %s, Danger detection range: %.0fpx (checks every %.1fs)" % [current_state, DANGER_RANGE, DANGER_CHECK_INTERVAL])
 
 
-func _physics_process(delta: float) -> void:
-	# Handle movement based on state
-	if current_state == "Walking" and not _is_player_controlled:
-		if controller:
-			controller.move_cat(_move_direction, true)
-		move_and_slide()
+# Track if we've logged the first process
+var _first_process_logged = false
+
+func _process(delta: float) -> void:
+	# Log once to confirm process is running
+	if not _first_process_logged:
+		print("Cat: _process is running! Will check for danger every %.1fs" % DANGER_CHECK_INTERVAL)
+		_first_process_logged = true
 
 	# Check for nearby enemies periodically
 	_danger_check_timer += delta
 	if _danger_check_timer >= DANGER_CHECK_INTERVAL:
 		_danger_check_timer = 0.0
 		_check_for_danger()
+
+
+func _physics_process(delta: float) -> void:
+	# Handle movement based on state (only if not controlled by main scene)
+	if current_state == "Walking" and not _is_player_controlled:
+		if controller:
+			controller.move_cat(_move_direction, true)
+		move_and_slide()
 
 
 func _update_animation() -> void:
@@ -217,15 +227,48 @@ func _on_pet_fed(food_item: Dictionary) -> void:
 ## Check for nearby enemies and call for help if found
 func _check_for_danger() -> void:
 	if not CombatManager:
+		print("Cat: Danger check skipped - CombatManager not available")
 		return
 
 	# Find nearest enemy within danger range
 	var nearest_enemy = CombatManager.find_nearest_target(self, DANGER_RANGE)
 
-	if nearest_enemy and is_instance_valid(nearest_enemy):
-		# Enemy detected! Spawn catflag to signal for help
-		if EnvironmentManager:
-			EnvironmentManager.spawn_object("catflag", global_position)
+	# Also check for nearest enemy beyond range (for debugging)
+	var nearest_any_enemy = CombatManager.find_nearest_target(self, 2000.0)  # Much larger range for debug
 
-		# Emit signal for NPCs to respond
-		call_for_help.emit(nearest_enemy)
+	if nearest_enemy and is_instance_valid(nearest_enemy):
+		var distance = global_position.distance_to(nearest_enemy.global_position)
+		print("Cat: ⚠️ ENEMY DETECTED! Type: %s, Distance: %.1fpx (Detection range: %.1fpx)" % [
+			nearest_enemy.get_class() if nearest_enemy else "Unknown",
+			distance,
+			DANGER_RANGE
+		])
+
+		# Enemy detected! Spawn catflag rally point near the enemy (with bounds checking)
+		# The flag itself will call for help (CASTABLE behavior)
+		if EnvironmentManager:
+			# Calculate flag position: between cat and enemy, closer to enemy
+			var flag_pos = global_position.lerp(nearest_enemy.global_position, 0.7)
+
+			# Ensure flag position is in safe bounds
+			if NPCManager:
+				flag_pos = NPCManager.clamp_to_safe_bounds(flag_pos)
+
+			var flag = EnvironmentManager.spawn_object("catflag", flag_pos)
+			if flag:
+				print("Cat: ✓ Placed rally flag at (%d, %d) near enemy - Flag will call allies" % [int(flag_pos.x), int(flag_pos.y)])
+			else:
+				print("Cat: ✗ WARNING - Failed to place rally flag (flag may already be on map)")
+		else:
+			print("Cat: ✗ ERROR - EnvironmentManager not available!")
+	else:
+		# Show nearest enemy distance even if out of range
+		if nearest_any_enemy and is_instance_valid(nearest_any_enemy):
+			var distance = global_position.distance_to(nearest_any_enemy.global_position)
+			print("Cat: No danger (Nearest enemy: %s at %.0fpx, outside %.0fpx detection range)" % [
+				nearest_any_enemy.get_class(),
+				distance,
+				DANGER_RANGE
+			])
+		else:
+			print("Cat: Scanning for danger... No enemies found anywhere on map")

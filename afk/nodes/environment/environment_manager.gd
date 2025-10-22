@@ -4,12 +4,16 @@ extends Node
 ## Handles spawning, despawning, and lifecycle management of environment objects
 ## Uses two separate pools: static (permanent) and dynamic (ULID-based with expiration)
 
-## Pool type enum for static vs dynamic objects
+## Pool type flags (bitwise) for object behavior
 enum PoolType {
-	STATIC,   # Permanent objects that stay on map
-	DYNAMIC,  # ULID-based temporary objects with expiration
-	UNIQUE    # Only one instance allowed on map at a time (like catflag)
+	STATIC = 1 << 0,   # 1: Permanent objects that stay on map
+	DYNAMIC = 1 << 1,  # 2: ULID-based temporary objects with expiration
+	UNIQUE = 1 << 2,   # 4: Only one instance allowed on map at a time
+	CASTABLE = 1 << 3  # 8: Object is "cast" once (spawns, triggers effect, then auto-returns to pool)
 }
+# Can combine flags:
+# - DYNAMIC | UNIQUE = catflag (expires after time AND only 1 allowed)
+# - DYNAMIC | UNIQUE | CASTABLE = catflag that triggers call_for_help once on spawn
 
 ## Static object pool - objects that stay on map permanently
 var static_pool: Dictionary = {}  # Key: object_type, Value: Array of pooled objects
@@ -40,9 +44,10 @@ const OBJECT_REGISTRY: Dictionary = {
 	"catflag": {
 		"scene": "res://nodes/environment/catflag/catflag.tscn",
 		"class_name": "CatFlag",
-		"pool_type": PoolType.UNIQUE,  # Only one catflag allowed on map at a time
+		"pool_type": PoolType.DYNAMIC | PoolType.UNIQUE | PoolType.CASTABLE,  # Cast once to call NPCs, expires after 60s, only 1 allowed
 		"lifetime_seconds": 60.0,  # 1 minute lifetime
-		"pool_size": 2  # Small pool since only 1 active at a time
+		"pool_size": 1,  # UNIQUE = only 1 can exist on map, so pool only needs 1 object
+		"scale": Vector2(0.35, 0.35)  # Scale down to 35%
 	}
 }
 
@@ -69,13 +74,14 @@ func _initialize_pools() -> void:
 	for object_type in OBJECT_REGISTRY:
 		var config = OBJECT_REGISTRY[object_type]
 		var pool_size = config.get("pool_size", DEFAULT_POOL_SIZE)
-		var pool_type_enum = config.get("pool_type", PoolType.DYNAMIC)
+		var pool_type_flags = config.get("pool_type", PoolType.DYNAMIC)
 
-		# Determine which pool to use
+		# Determine which pool to use based on flags
 		var pool: Dictionary
-		if pool_type_enum == PoolType.STATIC:
+		if pool_type_flags & PoolType.STATIC:
 			pool = static_pool
-		elif pool_type_enum == PoolType.UNIQUE:
+		elif pool_type_flags & PoolType.UNIQUE:
+			# UNIQUE objects go in unique pool (can also be DYNAMIC for expiration)
 			pool = unique_pool
 		else:
 			pool = dynamic_pool
@@ -88,7 +94,18 @@ func _initialize_pools() -> void:
 			if obj:
 				pool[object_type].append(obj)
 
-		var pool_type_name = "static" if pool_type_enum == PoolType.STATIC else ("unique" if pool_type_enum == PoolType.UNIQUE else "dynamic")
+		# Build pool type description
+		var pool_flags = []
+		if pool_type_flags & PoolType.STATIC:
+			pool_flags.append("static")
+		if pool_type_flags & PoolType.DYNAMIC:
+			pool_flags.append("dynamic")
+		if pool_type_flags & PoolType.UNIQUE:
+			pool_flags.append("unique")
+		if pool_type_flags & PoolType.CASTABLE:
+			pool_flags.append("castable")
+		var pool_type_name = " + ".join(pool_flags) if pool_flags.size() > 0 else "unknown"
+
 		print("EnvironmentManager: Initialized %s pool for '%s' with %d objects" % [pool_type_name, object_type, pool_size])
 
 
@@ -114,6 +131,10 @@ func _create_object(object_type: String) -> Node2D:
 	else:
 		add_child(obj)
 
+	# Apply custom scaling if specified in config
+	if config.has("scale"):
+		obj.scale = config["scale"]
+
 	# Hide object initially (pooled state)
 	obj.visible = false
 	obj.process_mode = Node.PROCESS_MODE_DISABLED
@@ -133,7 +154,8 @@ func _setup_cleanup_timer() -> void:
 
 ## Cleanup timer callback - remove expired dynamic objects only
 func _on_cleanup_timer_timeout() -> void:
-	var current_time = Time.get_unix_time_from_system()
+	# Get current time in milliseconds (ULID stores timestamps in ms)
+	var current_time_ms = int(Time.get_unix_time_from_system() * 1000.0)
 	var expired_dynamic_objects: Array[String] = []
 	var expired_unique_objects: Array[String] = []
 
@@ -145,13 +167,16 @@ func _on_cleanup_timer_timeout() -> void:
 			expired_dynamic_objects.append(ulid_hex)
 			continue
 
-		# Get object's spawn time from ULID
+		# Get object's spawn time from ULID (returns milliseconds)
 		if "ulid" in obj and obj.ulid.size() > 0:
-			var spawn_time = ULID.get_timestamp(obj.ulid)
-			var lifetime = obj.get("lifetime_seconds", 60.0)
+			var spawn_time_ms = ULID.decode_time(obj.ulid)
+			var lifetime_seconds = 60.0
+			if "lifetime_seconds" in obj:
+				lifetime_seconds = obj.lifetime_seconds
+			var lifetime_ms = lifetime_seconds * 1000.0
 
-			# Check if expired
-			if current_time - spawn_time >= lifetime:
+			# Check if expired (both values in milliseconds)
+			if current_time_ms - spawn_time_ms >= lifetime_ms:
 				expired_dynamic_objects.append(ulid_hex)
 
 	# Check unique objects (they also have ULID with timestamp)
@@ -162,13 +187,16 @@ func _on_cleanup_timer_timeout() -> void:
 			expired_unique_objects.append(object_type)
 			continue
 
-		# Get object's spawn time from ULID
+		# Get object's spawn time from ULID (returns milliseconds)
 		if "ulid" in obj and obj.ulid.size() > 0:
-			var spawn_time = ULID.get_timestamp(obj.ulid)
-			var lifetime = obj.get("lifetime_seconds", 60.0)
+			var spawn_time_ms = ULID.decode_time(obj.ulid)
+			var lifetime_seconds = 60.0
+			if "lifetime_seconds" in obj:
+				lifetime_seconds = obj.lifetime_seconds
+			var lifetime_ms = lifetime_seconds * 1000.0
 
-			# Check if expired
-			if current_time - spawn_time >= lifetime:
+			# Check if expired (both values in milliseconds)
+			if current_time_ms - spawn_time_ms >= lifetime_ms:
 				expired_unique_objects.append(object_type)
 
 	# Remove expired dynamic objects
@@ -193,16 +221,16 @@ func spawn_object(object_type: String, position: Vector2, pool_type_override: in
 		push_error("EnvironmentManager: Cannot spawn unknown object type '%s'. Valid types: %s" % [object_type, str(OBJECT_REGISTRY.keys())])
 		return null
 
-	# Get config to determine pool type
+	# Get config to determine pool type flags
 	var config = OBJECT_REGISTRY.get(object_type, {})
-	var pool_type_enum = config.get("pool_type", PoolType.DYNAMIC)
+	var pool_type_flags = config.get("pool_type", PoolType.DYNAMIC)
 
 	# Apply override if provided
 	if pool_type_override >= 0:
-		pool_type_enum = pool_type_override
+		pool_type_flags = pool_type_override
 
-	# Check if UNIQUE object already exists
-	if pool_type_enum == PoolType.UNIQUE:
+	# Check if UNIQUE flag is set and object already exists
+	if pool_type_flags & PoolType.UNIQUE:
 		if active_unique_objects.has(object_type):
 			var existing = active_unique_objects[object_type]
 			if is_instance_valid(existing):
@@ -213,7 +241,7 @@ func spawn_object(object_type: String, position: Vector2, pool_type_override: in
 	check_pool_health(object_type)
 
 	# Get object from appropriate pool
-	var obj = _get_from_pool(object_type, pool_type_enum)
+	var obj = _get_from_pool(object_type, pool_type_flags)
 
 	if not obj:
 		# Pool exhausted - provide detailed error
@@ -222,12 +250,13 @@ func spawn_object(object_type: String, position: Vector2, pool_type_override: in
 		print_pool_stats()  # Print full pool stats to help debug
 		return null
 
-	# Configure object based on pool type
-	var is_static = (pool_type_enum == PoolType.STATIC)
+	# Configure object based on pool type flags
+	var is_static = (pool_type_flags & PoolType.STATIC)
 	if "is_static" in obj:
 		obj.is_static = is_static
 
-	if pool_type_enum == PoolType.DYNAMIC:
+	# Handle DYNAMIC flag (creates ULID for expiration)
+	if pool_type_flags & PoolType.DYNAMIC:
 		# Dynamic object - generate new ULID for this spawn (includes timestamp)
 		var ulid = ULID.generate()
 		var ulid_hex = ULID.to_hex(ulid)
@@ -240,24 +269,23 @@ func spawn_object(object_type: String, position: Vector2, pool_type_override: in
 		if "lifetime_seconds" in obj:
 			obj.lifetime_seconds = lifetime
 
-		# Store in active dynamic objects
-		active_dynamic_objects[ulid_hex] = obj
-	elif pool_type_enum == PoolType.UNIQUE:
-		# Unique object - generate ULID for expiration tracking
-		var ulid = ULID.generate()
-		var ulid_hex = ULID.to_hex(ulid)
+		# Store in active dynamic objects (unless also UNIQUE)
+		if not (pool_type_flags & PoolType.UNIQUE):
+			active_dynamic_objects[ulid_hex] = obj
 
-		if "ulid" in obj:
-			obj.ulid = ulid
-
-		# Get lifetime from registry
-		var lifetime = config.get("lifetime_seconds", 60.0)
-		if "lifetime_seconds" in obj:
-			obj.lifetime_seconds = lifetime
+	# Handle UNIQUE flag (only one allowed, tracked separately)
+	if pool_type_flags & PoolType.UNIQUE:
+		# For UNIQUE + DYNAMIC, we already created ULID above
+		if not (pool_type_flags & PoolType.DYNAMIC):
+			# UNIQUE but not DYNAMIC - still create ULID if needed for future use
+			if "ulid" in obj and obj.ulid.size() == 0:
+				obj.ulid = ULID.generate()
 
 		# Store in active unique objects (only one per type)
 		active_unique_objects[object_type] = obj
-	else:
+
+	# Handle STATIC flag (permanent, no ULID)
+	if pool_type_flags & PoolType.STATIC:
 		# Static object - just add to active list
 		active_static_objects.append(obj)
 
@@ -272,6 +300,7 @@ func spawn_object(object_type: String, position: Vector2, pool_type_override: in
 
 	# Emit signal for catflag spawns
 	if object_type == "catflag":
+		print("EnvironmentManager: CatFlag spawned at position (%d, %d)" % [int(position.x), int(position.y)])
 		catflag_spawned.emit(obj, position)
 
 	return obj
@@ -289,38 +318,39 @@ func despawn_object(obj: Node2D) -> void:
 		return
 
 	var config = OBJECT_REGISTRY.get(object_type, {})
-	var pool_type_enum = config.get("pool_type", PoolType.DYNAMIC)
+	var pool_type_flags = config.get("pool_type", PoolType.DYNAMIC)
 
-	# Remove from appropriate active tracking
-	if pool_type_enum == PoolType.STATIC:
+	# Remove from appropriate active tracking based on flags
+	if pool_type_flags & PoolType.STATIC:
 		active_static_objects.erase(obj)
-	elif pool_type_enum == PoolType.UNIQUE:
+
+	if pool_type_flags & PoolType.UNIQUE:
 		# Remove from unique objects
 		active_unique_objects.erase(object_type)
-		# Also clear ULID
-		if "ulid" in obj and obj.ulid.size() > 0:
-			var ulid_hex = ULID.to_hex(obj.ulid)
-	else:
-		# Dynamic object - remove using ULID
-		if "ulid" in obj and obj.ulid.size() > 0:
-			var ulid_hex = ULID.to_hex(obj.ulid)
-			active_dynamic_objects.erase(ulid_hex)
+
+	if pool_type_flags & PoolType.DYNAMIC:
+		# Dynamic object - remove using ULID (if not also UNIQUE)
+		if not (pool_type_flags & PoolType.UNIQUE):
+			if "ulid" in obj and obj.ulid.size() > 0:
+				var ulid_hex = ULID.to_hex(obj.ulid)
+				active_dynamic_objects.erase(ulid_hex)
 
 	# Call object's despawn hook if it exists
 	if obj.has_method("on_despawn"):
 		obj.on_despawn()
 
 	# Return to pool
-	_return_to_pool(obj, object_type, pool_type_enum)
+	_return_to_pool(obj, object_type, pool_type_flags)
 
 
 ## Get object from pool
-func _get_from_pool(object_type: String, pool_type_enum: int) -> Node2D:
-	# Select the appropriate pool
+func _get_from_pool(object_type: String, pool_type_flags: int) -> Node2D:
+	# Select the appropriate pool based on flags
 	var pool_dict: Dictionary
-	if pool_type_enum == PoolType.STATIC:
+	if pool_type_flags & PoolType.STATIC:
 		pool_dict = static_pool
-	elif pool_type_enum == PoolType.UNIQUE:
+	elif pool_type_flags & PoolType.UNIQUE:
+		# UNIQUE objects use unique pool (regardless of DYNAMIC flag)
 		pool_dict = unique_pool
 	else:
 		pool_dict = dynamic_pool
@@ -354,14 +384,14 @@ func _get_from_pool(object_type: String, pool_type_enum: int) -> Node2D:
 
 
 ## Return object to pool
-func _return_to_pool(obj: Node2D, object_type: String, pool_type_enum: int) -> void:
+func _return_to_pool(obj: Node2D, object_type: String, pool_type_flags: int) -> void:
 	# Hide and disable object
 	obj.visible = false
 	obj.process_mode = Node.PROCESS_MODE_DISABLED
 	obj.global_position = Vector2.ZERO
 
-	# Clear ULID for dynamic and unique objects
-	if (pool_type_enum == PoolType.DYNAMIC or pool_type_enum == PoolType.UNIQUE) and "ulid" in obj:
+	# Clear ULID for dynamic objects (includes UNIQUE + DYNAMIC)
+	if (pool_type_flags & PoolType.DYNAMIC) and "ulid" in obj:
 		obj.ulid = PackedByteArray()
 
 
@@ -429,13 +459,13 @@ func get_pool_stats(object_type: String) -> Dictionary:
 		return {}
 
 	var config = OBJECT_REGISTRY[object_type]
-	var pool_type_enum = config.get("pool_type", PoolType.DYNAMIC)
+	var pool_type_flags = config.get("pool_type", PoolType.DYNAMIC)
 
-	# Get the appropriate pool
+	# Get the appropriate pool based on flags
 	var pool_dict: Dictionary
-	if pool_type_enum == PoolType.STATIC:
+	if pool_type_flags & PoolType.STATIC:
 		pool_dict = static_pool
-	elif pool_type_enum == PoolType.UNIQUE:
+	elif pool_type_flags & PoolType.UNIQUE:
 		pool_dict = unique_pool
 	else:
 		pool_dict = dynamic_pool
@@ -452,9 +482,21 @@ func get_pool_stats(object_type: String) -> Dictionary:
 			if is_instance_valid(obj) and obj.visible:
 				active_count += 1
 
+	# Build pool type string from flags
+	var pool_flags = []
+	if pool_type_flags & PoolType.STATIC:
+		pool_flags.append("static")
+	if pool_type_flags & PoolType.DYNAMIC:
+		pool_flags.append("dynamic")
+	if pool_type_flags & PoolType.UNIQUE:
+		pool_flags.append("unique")
+	if pool_type_flags & PoolType.CASTABLE:
+		pool_flags.append("castable")
+	var pool_type_str = " + ".join(pool_flags) if pool_flags.size() > 0 else "unknown"
+
 	return {
 		"type": object_type,
-		"pool_type": "static" if pool_type_enum == PoolType.STATIC else ("unique" if pool_type_enum == PoolType.UNIQUE else "dynamic"),
+		"pool_type": pool_type_str,
 		"total": total,
 		"active": active_count,
 		"inactive": total - active_count,
