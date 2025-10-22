@@ -1,19 +1,19 @@
 extends Monster
-class_name Mushroom
+class_name Skeleton
 
-## Mushroom NPC - Aggressive Enemy
-## An enemy mushroom that can attack allies
+## Skeleton NPC - Aggressive Undead Enemy
+## A hostile skeleton warrior that attacks allies
 
-## Emitted when the mushroom is clicked
-signal mushroom_clicked
+## Emitted when the skeleton is clicked
+signal skeleton_clicked
 
-## Emitted when the mushroom dies
-signal mushroom_died
+## Emitted when the skeleton dies
+signal skeleton_died
 
 
 func _init() -> void:
-	# Set mushroom-specific properties
-	walk_speed = 25.0  # Slightly slower than chicken
+	# Set skeleton-specific properties
+	walk_speed = 28.0  # Medium speed (between mushroom and goblin)
 	combat_type = NPCManager.CombatType.MELEE  # Melee attacker
 
 	# Set monster types
@@ -21,13 +21,13 @@ func _init() -> void:
 		NPCManager.MonsterType.AGGRESSIVE
 	]
 
-	# State-to-animation mapping (mushroom has all 5 animations)
+	# State-to-animation mapping (skeleton has all 5 animations)
 	state_to_animation = {
 		NPCManager.NPCState.IDLE: "idle",
 		NPCManager.NPCState.WALKING: "walk",
 		NPCManager.NPCState.ATTACKING: "attack",
 		NPCManager.NPCState.DAMAGED: "hurt",
-		NPCManager.NPCState.DEAD: "die"
+		NPCManager.NPCState.DEAD: "death"
 	}
 
 
@@ -49,23 +49,23 @@ func _random_state_change() -> void:
 	pass
 
 
-## Override damage behavior - mushrooms don't flee, they fight back
+## Override damage behavior - skeletons don't flee, they fight back
 func _on_take_damage(amount: float) -> void:
-	# Mushrooms are aggressive - they don't flee when hurt
+	# Skeletons are aggressive - they don't flee when hurt
 	# The hurt animation will play via the base Monster class
 	pass
 
 
-## Override click handler to emit mushroom-specific signal
+## Override click handler to emit skeleton-specific signal
 func _on_input_manager_clicked() -> void:
-	mushroom_clicked.emit()
+	skeleton_clicked.emit()
 
 
-## Override take_damage to also emit mushroom_died
+## Override take_damage to also emit skeleton_died
 func take_damage(amount: float, attacker: Node2D = null) -> void:
 	# Call parent implementation
 	super.take_damage(amount, attacker)
 
-	# Check if we died and emit mushroom-specific signal
+	# Check if we died and emit skeleton-specific signal
 	if stats and stats.hp <= 0:
-		mushroom_died.emit()
+		skeleton_died.emit()

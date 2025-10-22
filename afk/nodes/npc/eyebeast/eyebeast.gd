@@ -61,10 +61,10 @@ func _on_input_manager_clicked() -> void:
 	eyebeast_clicked.emit()
 
 
-## Override monster_died to also emit eyebeast_died
-func take_damage(amount: float) -> void:
+## Override take_damage to also emit eyebeast_died
+func take_damage(amount: float, attacker: Node2D = null) -> void:
 	# Call parent implementation
-	super.take_damage(amount)
+	super.take_damage(amount, attacker)
 
 	# Check if we died and emit eyebeast-specific signal
 	if stats and stats.hp <= 0:

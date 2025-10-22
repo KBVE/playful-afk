@@ -105,22 +105,27 @@ func _process(delta: float) -> void:
 
 func _update_movement(delta: float) -> void:
 	# Simple movement for monsters
-	if current_state == NPCManager.NPCState.WALKING:
+	# Check if WALKING flag is set (bitwise AND, not equality)
+	if current_state & NPCManager.NPCState.WALKING:
 		# Flip sprite based on movement direction (only if not in combat)
 		# Combat code in NPCManager handles flipping to face target
-		if _move_direction.x != 0 and not (current_state & NPCManager.NPCState.ATTACKING):
+		# Only flip if significant horizontal movement (threshold prevents flickering during vertical movement)
+		if abs(_move_direction.x) > 0.3 and not (current_state & NPCManager.NPCState.ATTACKING):
 			if animated_sprite:
 				animated_sprite.flip_h = _move_direction.x < 0
 
 		# Calculate potential new position
 		var new_position = position + (_move_direction * walk_speed * delta)
+		var new_global_position = global_position + (_move_direction * walk_speed * delta)
 
-		# Check if new position is within safe rectangle bounds (stricter than walkable area)
-		if _background_ref and _background_ref.has_method("is_in_safe_rectangle"):
-			if _background_ref.is_in_safe_rectangle(new_position):
+		# Check if we're moving within valid bounds
+		if _background_ref and _background_ref.has_method("is_position_in_walkable_area"):
+			# Check if new position is in walkable area
+			if _background_ref.is_position_in_walkable_area(new_global_position):
+				# Valid position - move there
 				position = new_position
 			else:
-				# Hit bounds - pick a random safe direction
+				# Hit outer walkable bounds - redirect toward safe zone
 				if _background_ref.has_method("get_random_safe_position"):
 					var safe_target = _background_ref.get_random_safe_position()
 					_move_direction = (safe_target - global_position).normalized()
@@ -128,8 +133,7 @@ func _update_movement(delta: float) -> void:
 					# Fallback: move toward center
 					var viewport_size = get_viewport_rect().size
 					var center = Vector2(viewport_size.x / 2, position.y)
-					var to_center = (center - position).normalized()
-					_move_direction = (to_center + Vector2(randf_range(-0.3, 0.3), randf_range(-0.3, 0.3))).normalized()
+					_move_direction = (center - global_position).normalized()
 		else:
 			# Fallback: simple screen bounds check if background not available
 			var viewport_size = get_viewport_rect().size
@@ -190,8 +194,8 @@ func _random_state_change() -> void:
 	state_timer.wait_time = randf_range(2.0, 5.0)
 
 
-## Take damage
-func take_damage(amount: float) -> void:
+## Take damage (attacker parameter is optional for backward compatibility)
+func take_damage(amount: float, attacker: Node2D = null) -> void:
 	# Reduce HP through stats system if available
 	if stats:
 		stats.hp -= amount
@@ -208,6 +212,15 @@ func take_damage(amount: float) -> void:
 	# Add DAMAGED state with bitwise OR (allows coexisting with ATTACKING)
 	_is_hurt = true
 	current_state |= NPCManager.NPCState.DAMAGED
+
+	# Notify NPCManager to set combat target (counter-attack)
+	# Skip if monster is passive
+	if attacker and NPCManager:
+		var passive = false
+		if has_method("is_passive"):
+			passive = call("is_passive")
+		if not passive:
+			NPCManager.on_npc_damaged(self, attacker)
 
 	# Call subclass-specific hurt behavior
 	_on_take_damage(amount)

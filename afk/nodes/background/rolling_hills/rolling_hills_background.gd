@@ -205,9 +205,9 @@ func _calculate_safe_rectangle() -> void:
 	# Bottom bound: 80px above bottom of screen (matches get_walkable_y_bounds)
 	var safe_y_end = viewport_size.y - 80.0
 
-	# Expand horizontal bounds by 100px on each side
-	var safe_x_start = -100.0
-	var safe_width = tile_width + 200.0  # Add 100px to each side (left and right)
+	# Expand horizontal bounds by 200px on each side (total 400px expansion)
+	var safe_x_start = -200.0
+	var safe_width = tile_width + 400.0  # Add 200px to each side (left and right)
 
 	safe_rectangle = Rect2(safe_x_start, safe_y_start, safe_width, safe_y_end - safe_y_start)
 	print("Safe rectangle: ", safe_rectangle)

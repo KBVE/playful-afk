@@ -130,6 +130,19 @@ const NPC_REGISTRY: Dictionary = {
 			"state_change_max": 2.5,
 			"movement_speed": 0.9   # Fastest monster (flying)
 		}
+	},
+	"skeleton": {
+		"scene": "res://nodes/npc/skeleton/skeleton.tscn",
+		"class_name": "Skeleton",
+		"category": "monster",
+		"monster_types": [MonsterType.AGGRESSIVE],
+		"ai_profile": {
+			"idle_weight": 35,      # Skeletons are aggressive
+			"walk_weight": 65,      # Move around steadily
+			"state_change_min": 1.2,  # Medium state changes
+			"state_change_max": 3.5,
+			"movement_speed": 0.75  # Medium speed
+		}
 	}
 	# Future NPCs: Add here! Example:
 	# "mage": {
@@ -164,13 +177,19 @@ var persistent_pool: Array[Dictionary] = []  # Each entry: {character, ulid, is_
 ## GENERIC POOL - Temporary NPCs with fresh stats each spawn (enemies, random NPCs)
 ## Pool recycles character instances, new stats generated per spawn
 ## Example: "Goblin", "Bandit", "Wolf"
-## Current allocation: 6 warriors + 6 archers + 8 chickens + 6 mushrooms + 6 goblins + 6 eyebeasts = 38 total
-const MAX_GENERIC_POOL_SIZE: int = 40
+## Current allocation: 6 warriors + 6 archers + 8 chickens + 6 mushrooms + 6 goblins + 6 eyebeasts + 6 skeletons = 44 total
+const MAX_GENERIC_POOL_SIZE: int = 50
 var generic_pool: Array[Dictionary] = []  # Each entry: {character, is_active, npc_type, ...}
 
 ## STATS DATABASE - All NPC stats indexed by ULID
 ## Key: ULID string, Value: NPCStats instance
 var stats_database: Dictionary = {}
+
+## HEALTHBAR POOL - Pooled healthbars for NPCs
+## Pre-allocated healthbars that are assigned to NPCs when spawned
+const MAX_HEALTHBAR_POOL_SIZE: int = 50  # Match generic pool size
+var healthbar_pool: Array[Dictionary] = []  # Each entry: {healthbar: HealthBar, is_active: bool, npc: Node2D}
+var healthbar_scene: PackedScene = null
 
 ## Container for all NPCs
 var foreground_container: Node2D = null
@@ -251,6 +270,11 @@ func _load_npc_scenes() -> void:
 			_npc_scenes[npc_type] = scene
 		else:
 			push_error("NPCManager: Failed to load scene for %s at %s" % [npc_type, npc_data["scene"]])
+
+	# Load healthbar scene
+	healthbar_scene = load("res://nodes/ui/healthbar/healthbar.tscn") as PackedScene
+	if not healthbar_scene:
+		push_error("NPCManager: Failed to load healthbar scene")
 
 
 ## Get NPC scene by type name (e.g., "warrior", "archer", "mage")
@@ -475,6 +499,9 @@ func set_layer4_container(container: Node2D) -> void:
 	# Initialize release effect pool now that we have foreground_container
 	_initialize_release_effect_pool()
 
+	# Initialize healthbar pool now that we have foreground_container
+	_initialize_healthbar_pool()
+
 
 ## Set the background reference for heightmap queries (called from main scene)
 func set_background_reference(background: Control) -> void:
@@ -647,16 +674,23 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 		return
 
 	var ai_profile = NPC_REGISTRY[npc_type].get("ai_profile", {})
+	var npc_category = NPC_REGISTRY[npc_type].get("category", "")
+
+	# Determine initial state based on NPC category
+	# Monsters start in IDLE | WANDERING (bitwise) for natural movement
+	# Other NPCs (warriors, archers) start in just IDLE
+	var initial_state = (NPCState.IDLE | NPCState.WANDERING) if npc_category == "monster" else NPCState.IDLE
+	var initial_timer = randf_range(0.5, 1.5) if npc_category == "monster" else randf_range(
+		ai_profile.get("state_change_min", 3.0),
+		ai_profile.get("state_change_max", 8.0)
+	)
 
 	# Create AI state for this NPC
 	_npc_ai_states[npc] = {
 		"npc_type": npc_type,
 		"ai_profile": ai_profile,
-		"current_state": NPCState.IDLE,  # Use enum instead of string
-		"time_until_next_change": randf_range(
-			ai_profile.get("state_change_min", 3.0),
-			ai_profile.get("state_change_max", 8.0)
-		),
+		"current_state": initial_state,
+		"time_until_next_change": initial_timer,
 		"movement_direction": Vector2.ZERO,
 		"is_player_controlled": false,
 		"movement_bounds_x": Vector2(50.0, 1100.0)  # Full screen width (with margins)
@@ -692,6 +726,49 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 func unregister_npc_ai(npc: Node2D) -> void:
 	if _npc_ai_states.has(npc):
 		_npc_ai_states.erase(npc)
+
+
+## Called when NPC takes damage - sets combat target for counter-attack
+func on_npc_damaged(victim: Node2D, attacker: Node2D) -> void:
+	if not is_instance_valid(victim) or not is_instance_valid(attacker):
+		return
+
+	# Check if victim is passive (chickens, etc.) - they don't counter-attack
+	if victim.has_method("is_passive") and victim.is_passive():
+		return
+
+	# Get victim's AI state
+	if not _npc_ai_states.has(victim):
+		return
+
+	var ai_state = _npc_ai_states[victim]
+
+	# Check if victim can actually attack (not passive)
+	var combat_type = ai_state.get("combat_type", CombatType.NONE)
+	if combat_type == CombatType.NONE:
+		return
+
+	# Set attacker as combat target for counter-attack
+	ai_state["combat_target"] = attacker
+	ai_state["time_until_next_change"] = 0.1  # Immediate response
+
+	# If not already in combat, start combat
+	if not CombatManager.is_in_combat(victim):
+		CombatManager.start_combat(victim, attacker)
+
+	# For monsters, immediately set movement direction and combat state
+	if victim is Monster and "_move_direction" in victim:
+		var direction = (attacker.global_position - victim.global_position).normalized()
+		victim._move_direction = direction
+
+		# Remove WANDERING, add COMBAT and WALKING flags (bitwise)
+		victim.current_state = (victim.current_state & ~NPCState.WANDERING) | NPCState.COMBAT | NPCState.WALKING
+		ai_state["current_state"] = victim.current_state
+
+	# Log counter-attack initiation
+	var victim_type = ai_state.get("npc_type", "unknown")
+	var attacker_type = get_npc_type(attacker)
+	print("NPCManager: %s damaged by %s - counter-attacking!" % [victim_type, attacker_type])
 
 
 ## AI timer callback - update all NPC AI states
@@ -752,7 +829,9 @@ func _update_npc_ai(npc: Node2D) -> void:
 				# The facing check happens inside can_melee_attack, so we need to face first
 				if "animated_sprite" in npc and npc.animated_sprite:
 					var to_target = target.global_position - npc.global_position
-					npc.animated_sprite.flip_h = to_target.x < 0
+					# Only flip if significant horizontal movement (prevents flickering during vertical movement)
+					if abs(to_target.normalized().x) > 0.3:
+						npc.animated_sprite.flip_h = to_target.x < 0
 
 				if CombatManager.can_melee_attack(npc, target):
 					# In range and facing - ATTACK!
@@ -760,9 +839,18 @@ func _update_npc_ai(npc: Node2D) -> void:
 					if movement_target.has_method("stop_auto_movement"):
 						movement_target.stop_auto_movement()
 
+					# Stop monster movement (clear direction)
+					if npc is Monster and "_move_direction" in npc:
+						npc._move_direction = Vector2.ZERO
+
 					# Set NPC to attacking state (triggers attack animation)
+					# For monsters, remove WANDERING and WALKING, add COMBAT and ATTACKING (bitwise)
 					if "current_state" in npc:
-						npc.current_state = NPCState.ATTACKING  # Use enum
+						if npc is Monster:
+							npc.current_state = (npc.current_state & ~NPCState.WANDERING & ~NPCState.WALKING) | NPCState.COMBAT | NPCState.ATTACKING
+							ai_state["current_state"] = npc.current_state
+						else:
+							npc.current_state = NPCState.ATTACKING  # Warriors/archers use simple state
 
 					# Execute combat logic (damage calculation, state tracking)
 					CombatManager.start_melee_attack(npc, target)
@@ -795,12 +883,26 @@ func _update_npc_ai(npc: Node2D) -> void:
 					elif last_target.global_position.distance_to(target.global_position) > 20.0:
 						should_move = true  # Target moved significantly
 
-					if should_move and movement_target.has_method("move_to_position"):
-						movement_target.move_to_position(target.global_position.x)
-						_ai_tween_y_position(npc, target.global_position.y, ai_state)
-						ai_state["combat_target"] = target
-						ai_state["last_combat_target_pos"] = target.global_position
-						ai_state["time_until_next_change"] = 2.0
+					if should_move:
+						# NPCs with controllers (warriors, archers)
+						if movement_target.has_method("move_to_position"):
+							movement_target.move_to_position(target.global_position.x)
+							_ai_tween_y_position(npc, target.global_position.y, ai_state)
+							ai_state["combat_target"] = target
+							ai_state["last_combat_target_pos"] = target.global_position
+							ai_state["time_until_next_change"] = 2.0
+						# Monsters without controllers - use direct movement
+						elif npc is Monster and "_move_direction" in npc:
+							var direction = (target.global_position - npc.global_position).normalized()
+							npc._move_direction = direction
+
+							# Remove WANDERING, add COMBAT and WALKING flags (bitwise)
+							npc.current_state = (npc.current_state & ~NPCState.WANDERING) | NPCState.COMBAT | NPCState.WALKING
+							ai_state["current_state"] = npc.current_state
+
+							ai_state["combat_target"] = target
+							ai_state["last_combat_target_pos"] = target.global_position
+							ai_state["time_until_next_change"] = 2.0
 					return
 
 			# RANGED COMBAT + KITING (Archers, Crossbowmen, etc.)
@@ -927,8 +1029,19 @@ func _update_npc_ai(npc: Node2D) -> void:
 					return
 
 		# No enemies nearby - exit combat mode
-		elif CombatManager.is_in_combat(npc):
-			CombatManager.end_combat(npc)
+		else:
+			# Clear combat target from AI state so monsters can resume roaming
+			if ai_state.has("combat_target"):
+				ai_state.erase("combat_target")
+
+			# Clear CombatManager combat state
+			if CombatManager.is_in_combat(npc):
+				CombatManager.end_combat(npc)
+
+			# Restore WANDERING state for monsters (remove COMBAT, add WANDERING)
+			if npc is Monster and "current_state" in npc:
+				npc.current_state = (npc.current_state & ~NPCState.COMBAT) | NPCState.WANDERING
+				ai_state["current_state"] = npc.current_state
 
 	# MONSTER ROAMING BEHAVIOR - All monsters roam with bounds checking (passive and aggressive)
 	# Passive monsters (chickens) roam but don't attack, aggressive monsters (mushrooms) attack + roam
@@ -1044,7 +1157,12 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
-		npc.current_state = NPCState.WALKING  # Use enum
+		# For monsters, preserve WANDERING flag if present (bitwise)
+		if npc is Monster and (npc.current_state & NPCState.WANDERING):
+			npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
+		else:
+			# For NPCs with controllers, use simple state
+			npc.current_state = NPCState.WALKING
 
 	# Check if NPC has controller or direct movement
 	var has_controller = "controller" in npc and npc.controller
@@ -1098,12 +1216,36 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 				_ai_tween_y_position(npc, target_pos.y, ai_state)
 				print("NPCManager AI: %s walking directly to (%.0f, %.0f)" % [ai_state["npc_type"], target_pos.x, target_pos.y])
 
+	# Monsters without controllers - use direct movement direction
+	elif npc is Monster and "_move_direction" in npc:
+		# Pick random target position within safe bounds
+		var target_x = randf_range(movement_bounds_x.x, movement_bounds_x.y)
+		var target_y = get_safe_y_for_x(target_x, npc.global_position.y)
+		var target_pos = Vector2(target_x, target_y)
+
+		# Clamp to safe bounds
+		target_pos = clamp_to_safe_bounds(target_pos)
+
+		# Set movement direction towards target
+		var direction = (target_pos - npc.global_position).normalized()
+		npc._move_direction = direction
+
+		# Store target in AI state for when monster gets close
+		ai_state["wander_target"] = target_pos
+
+		print("NPCManager AI: Monster %s wandering to (%.0f, %.0f)" % [ai_state["npc_type"], target_pos.x, target_pos.y])
+
 
 ## AI: Start NPC idle
 func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
-		npc.current_state = NPCState.IDLE  # Use enum
+		# For monsters, preserve WANDERING flag if present (bitwise)
+		if npc is Monster and (npc.current_state & NPCState.WANDERING):
+			npc.current_state = (npc.current_state & ~NPCState.WALKING) | NPCState.IDLE
+		else:
+			# For NPCs with controllers, use simple state
+			npc.current_state = NPCState.IDLE
 
 	# Stop movement (controller or direct)
 	var has_controller = "controller" in npc and npc.controller
@@ -1112,6 +1254,13 @@ func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 	if movement_target.has_method("stop_auto_movement"):
 		movement_target.stop_auto_movement()
 		# print("NPCManager AI: %s idling" % ai_state["npc_type"])
+
+	# Monsters without controllers - stop direct movement
+	elif npc is Monster and "_move_direction" in npc:
+		npc._move_direction = Vector2.ZERO
+		# Clear wander target
+		if ai_state.has("wander_target"):
+			ai_state.erase("wander_target")
 
 
 ## AI: Smoothly tween Y position with natural curve
@@ -1329,6 +1478,17 @@ func _create_stats_for_type(npc_type: String) -> NPCStats:
 				NPCStats.Emotion.NEUTRAL,
 				npc_type
 			)
+		"skeleton":
+			return NPCStats.new(
+				110.0,  # HP (medium-high - undead durability)
+				0.0,    # Mana (skeletons don't use mana)
+				75.0,   # Energy (medium - steady movement)
+				100.0,  # Hunger
+				10.0,   # Attack (medium melee damage - balanced)
+				6.0,    # Defense (medium - bony armor)
+				NPCStats.Emotion.NEUTRAL,
+				npc_type
+			)
 		_:
 			# Default stats for unknown NPCs
 			return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
@@ -1386,8 +1546,13 @@ func _initialize_generic_pool() -> void:
 	for i in range(num_eyebeasts):
 		_preallocate_generic_npc("eyebeast", num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + i)
 
+	# Pre-allocate skeletons (aggressive undead monsters - balanced melee)
+	var num_skeletons = 6
+	for i in range(num_skeletons):
+		_preallocate_generic_npc("skeleton", num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + num_eyebeasts + i)
+
 	# Fill remaining slots with empty entries
-	var total_preallocated = num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + num_eyebeasts
+	var total_preallocated = num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + num_eyebeasts + num_skeletons
 	for i in range(total_preallocated, MAX_GENERIC_POOL_SIZE):
 		generic_pool.append({
 			"character": null,
@@ -1396,7 +1561,78 @@ func _initialize_generic_pool() -> void:
 			"npc_type": ""
 		})
 
-	print("NPCManager: Generic pool initialized with %d warriors, %d archers, %d chickens, %d mushrooms, %d goblins, %d eyebeasts" % [num_warriors, num_archers, num_chickens, num_mushrooms, num_goblins, num_eyebeasts])
+	print("NPCManager: Generic pool initialized with %d warriors, %d archers, %d chickens, %d mushrooms, %d goblins, %d eyebeasts, %d skeletons" % [num_warriors, num_archers, num_chickens, num_mushrooms, num_goblins, num_eyebeasts, num_skeletons])
+
+	# NOTE: Healthbar pool will be initialized when set_layer4_container is called
+
+
+## Initialize the healthbar pool with pre-allocated healthbars
+func _initialize_healthbar_pool() -> void:
+	if not healthbar_scene:
+		push_warning("NPCManager: Healthbar scene not loaded, skipping healthbar pool initialization")
+		return
+
+	if not foreground_container:
+		push_warning("NPCManager: Layer4 container not set, skipping healthbar pool initialization")
+		return
+
+	healthbar_pool.clear()
+
+	# Pre-allocate healthbars
+	for i in range(MAX_HEALTHBAR_POOL_SIZE):
+		var healthbar = healthbar_scene.instantiate()
+		foreground_container.add_child(healthbar)
+		healthbar.visible = false  # Hide until assigned
+
+		healthbar_pool.append({
+			"healthbar": healthbar,
+			"is_active": false,
+			"npc": null
+		})
+
+	print("NPCManager: Healthbar pool initialized with %d healthbars" % MAX_HEALTHBAR_POOL_SIZE)
+
+
+## Get an available healthbar from the pool and assign it to an NPC
+func get_healthbar_for_npc(npc: Node2D) -> HealthBar:
+	if not npc:
+		return null
+
+	# Find an inactive healthbar
+	for slot in healthbar_pool:
+		if not slot["is_active"]:
+			var healthbar = slot["healthbar"]
+			slot["is_active"] = true
+			slot["npc"] = npc
+
+			# Connect healthbar to NPC
+			healthbar.connect_to_entity(npc)
+			healthbar.visible = true
+
+			return healthbar
+
+	push_warning("NPCManager: No available healthbars in pool!")
+	return null
+
+
+## Return a healthbar to the pool when NPC is released
+func return_healthbar(npc: Node2D) -> void:
+	if not npc:
+		return
+
+	# Find the healthbar assigned to this NPC
+	for slot in healthbar_pool:
+		if slot["is_active"] and slot["npc"] == npc:
+			var healthbar = slot["healthbar"]
+
+			# Disconnect from NPC and hide
+			healthbar.disconnect_from_entity()
+			healthbar.visible = false
+
+			# Mark as inactive
+			slot["is_active"] = false
+			slot["npc"] = null
+			return
 
 
 ## Pre-allocate a generic NPC instance (but don't activate it yet)
@@ -1496,7 +1732,7 @@ func add_persistent_npc(
 
 ## Get a generic NPC from pool (creates fresh stats each time)
 ## Y bounds are now dynamically queried from background heightmap based on movement
-func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
+func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector2 = Vector2.ZERO) -> Node2D:
 	# Validate NPC type exists in registry
 	if not NPC_REGISTRY.has(npc_type):
 		push_error("NPCManager: Cannot spawn unknown NPC type '%s'. Valid types: %s" % [npc_type, str(NPC_REGISTRY.keys())])
@@ -1577,11 +1813,33 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
 	register_npc_ai(npc, npc_type)
 
-	# Connect to death signal for release animation (if monster)
+	# Set initial movement direction for monsters spawned with a target
+	if initial_target != Vector2.ZERO and npc is Monster and "_move_direction" in npc:
+		var direction = (initial_target - position).normalized()
+		npc._move_direction = direction
+		npc.current_state = NPCState.WALKING
+
+		# Update AI state to match
+		var ai_state = get_npc_ai_state(npc)
+		if ai_state:
+			ai_state["current_state"] = NPCState.WALKING
+			ai_state["time_until_next_change"] = randf_range(3.0, 6.0)  # Will wander after reaching target
+
+		print("NPCManager: Monster %s spawned at (%.0f, %.0f), moving toward (%.0f, %.0f)" % [npc_type, position.x, position.y, initial_target.x, initial_target.y])
+
+	# Assign healthbar to NPC (from pool)
+	get_healthbar_for_npc(npc)
+
+	# Connect to death signal for release animation
+	# Monsters use monster_died signal, allies use npc_died signal
 	if npc.has_signal("monster_died"):
 		# Check if already connected to avoid duplicate connections
 		if not npc.monster_died.is_connected(_on_npc_died):
 			npc.monster_died.connect(_on_npc_died.bind(npc))
+	elif npc.has_signal("npc_died"):
+		# Check if already connected to avoid duplicate connections
+		if not npc.npc_died.is_connected(_on_npc_died):
+			npc.npc_died.connect(_on_npc_died.bind(npc))
 
 
 	return npc
@@ -1602,6 +1860,9 @@ func _on_npc_died(npc: Node2D) -> void:
 
 ## Return generic NPC to pool
 func return_generic_npc(npc: Node2D) -> void:
+	# Return healthbar to pool FIRST (before resetting NPC)
+	return_healthbar(npc)
+
 	# Find NPC in generic pool
 	for slot in generic_pool:
 		if slot["character"] == npc:
@@ -1619,6 +1880,10 @@ func return_generic_npc(npc: Node2D) -> void:
 			# Reset NPC state flags
 			if "current_state" in npc:
 				npc.current_state = NPCState.IDLE
+
+			# Reset monster movement direction
+			if npc is Monster and "_move_direction" in npc:
+				npc._move_direction = Vector2.ZERO
 
 			# Clear AI state
 			if _npc_ai_states.has(npc):

@@ -175,3 +175,14 @@ https://monopixelart.itch.io/forest-monsters-pixel-art/
 
 Monsters Fantasy
 https://luizmelo.itch.io/monsters-creatures-fantasy
+
+
+Need to add:
+https://craftpix.net/freebies/free-ninja-sprite-sheets-pixel-art/
+https://craftpix.net/freebies/free-wizard-sprite-sheets-pixel-art/
+https://craftpix.net/freebies/free-knight-character-sprites-pixel-art/
+https://craftpix.net/freebies/free-street-animal-pixel-art-asset-pack/
+https://craftpix.net/freebies/free-shinobi-sprites-pixel-art/
+https://craftpix.net/freebies/free-pixel-art-tiny-hero-sprites/
+https://craftpix.net/freebies/free-pixel-magic-sprite-effects-pack/
+https://craftpix.net/freebies/free-minotaur-sprite-sheet-pixel-art-pack/

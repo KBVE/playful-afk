@@ -36,9 +36,17 @@ var cat_hover_scale: Vector2 = Vector2(3, 3)
 
 # Monster spawning system
 var monster_spawn_timer: Timer = null
-const MONSTER_SPAWN_INTERVAL: float = 8.0  # Spawn every 8 seconds
+const MONSTER_SPAWN_INTERVAL: float = 4.0  # Spawn every 4 seconds (2x faster)
 const MAX_ACTIVE_MONSTERS: int = 6  # Maximum monsters at once
 var active_monsters: Array[Node2D] = []
+
+# Ally respawn system
+var ally_respawn_timer: Timer = null
+const ALLY_RESPAWN_INTERVAL: float = 3.0  # Check every 3 seconds for dead allies
+const MAX_WARRIORS: int = 6  # Always maintain 6 warriors
+const MAX_ARCHERS: int = 6  # Always maintain 6 archers
+var active_warriors: Array[Node2D] = []
+var active_archers: Array[Node2D] = []
 
 
 func _ready() -> void:
@@ -71,6 +79,9 @@ func _ready() -> void:
 
 	# Setup monster spawning system
 	_setup_monster_spawner()
+
+	# Setup ally respawn system
+	_setup_ally_respawner()
 
 
 func _setup_pet() -> void:
@@ -167,6 +178,13 @@ func _setup_character_pool() -> void:
 				warrior.set_physics_process(false)
 				warrior.set_player_controlled(false)
 				warrior.warrior_clicked.connect(func(): _on_npc_clicked(warrior))
+
+				# Connect death signal for respawn tracking
+				if warrior.has_signal("npc_died"):
+					if not warrior.npc_died.is_connected(_on_ally_died):
+						warrior.npc_died.connect(_on_ally_died.bind(warrior, "warrior"))
+
+				active_warriors.append(warrior)
 		else:
 			push_warning("Could not find valid spawn position for warrior %d" % i)
 
@@ -208,6 +226,13 @@ func _setup_character_pool() -> void:
 				archer.set_physics_process(false)
 				archer.set_player_controlled(false)
 				archer.archer_clicked.connect(func(): _on_npc_clicked(archer))
+
+				# Connect death signal for respawn tracking
+				if archer.has_signal("npc_died"):
+					if not archer.npc_died.is_connected(_on_ally_died):
+						archer.npc_died.connect(_on_ally_died.bind(archer, "archer"))
+
+				active_archers.append(archer)
 		else:
 			push_warning("Could not find valid spawn position for archer %d" % i)
 
@@ -357,6 +382,44 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for eyebeast %d" % e)
 
+	# Spawn 2-3 initial skeletons
+	for s in range(3):
+		var skeleton_spawn_pos = Vector2.ZERO
+		var skeleton_is_valid = false
+		var skeleton_attempts = 0
+
+		while skeleton_attempts < 20 and not skeleton_is_valid:
+			# Spawn spread across the screen (offset from eyebeasts)
+			var x_pos = viewport_size.x * (0.25 + (s * 0.3)) + randf_range(-50.0, 50.0)
+			var y_bounds = background.get_walkable_y_bounds(x_pos)
+			var random_y = randf_range(y_bounds.x, y_bounds.y)
+
+			skeleton_spawn_pos = Vector2(x_pos, random_y)
+
+			# Check if position is inside walkable area
+			if background.has_method("is_position_in_walkable_area"):
+				skeleton_is_valid = background.is_position_in_walkable_area(skeleton_spawn_pos)
+			else:
+				skeleton_is_valid = true
+
+			skeleton_attempts += 1
+
+		if skeleton_is_valid:
+			var skeleton = NPCManager.get_generic_npc("skeleton", skeleton_spawn_pos)
+			if skeleton:
+				skeleton.scale = Vector2(1, 1)
+				skeleton.set_physics_process(false)
+				if skeleton.has_signal("skeleton_died"):
+					if not skeleton.skeleton_died.is_connected(_on_monster_died):
+						skeleton.skeleton_died.connect(_on_monster_died.bind(skeleton))
+				if skeleton.has_signal("skeleton_clicked"):
+					if not skeleton.skeleton_clicked.is_connected(_on_npc_clicked):
+						skeleton.skeleton_clicked.connect(func(): _on_npc_clicked(skeleton))
+				active_monsters.append(skeleton)
+			print("Spawned skeleton #%d at %s" % [s + 1, skeleton_spawn_pos])
+		else:
+			push_warning("Could not find valid spawn position for skeleton %d" % s)
+
 
 func _start_cat_movement() -> void:
 	# Disable the cat's built-in random state timer
@@ -495,10 +558,19 @@ func _on_monster_spawn_timer_timeout() -> void:
 
 	var monster_type = monster_types[randi() % monster_types.size()]
 
-	# Randomly choose left or right edge
+	# Randomly choose left or right edge - spawn OUTSIDE safe rectangle
 	var viewport_size = get_viewport_rect().size
 	var spawn_from_left = randf() > 0.5
-	var spawn_x = 50.0 if spawn_from_left else viewport_size.x - 50.0
+
+	# Get safe rectangle bounds to spawn inside at the edges
+	var safe_rect = background.safe_rectangle if background and "safe_rectangle" in background else Rect2(-100, 0, viewport_size.x + 200, viewport_size.y)
+
+	# Spawn inside the safe zone, well inside from edges (150-250px inside from edge)
+	var spawn_x = 0.0
+	if spawn_from_left:
+		spawn_x = safe_rect.position.x + randf_range(150.0, 250.0)  # Left side, well inside safe zone
+	else:
+		spawn_x = safe_rect.position.x + safe_rect.size.x - randf_range(150.0, 250.0)  # Right side, well inside safe zone
 
 	# Get Y bounds for this X position
 	var y_bounds = background.get_walkable_y_bounds(spawn_x)
@@ -511,7 +583,7 @@ func _on_monster_spawn_timer_timeout() -> void:
 			print("Invalid spawn position, trying again next cycle")
 			return
 
-	# Spawn the monster
+	# Spawn the monster (NPCManager handles AI state initialization)
 	var monster = NPCManager.get_generic_npc(monster_type, spawn_pos)
 	if monster:
 		monster.scale = Vector2(1, 1)
@@ -542,6 +614,110 @@ func _on_monster_spawn_timer_timeout() -> void:
 func _on_monster_died(monster: Node2D) -> void:
 	if monster in active_monsters:
 		active_monsters.erase(monster)
+
+
+## Setup ally respawn system
+func _setup_ally_respawner() -> void:
+	ally_respawn_timer = Timer.new()
+	ally_respawn_timer.wait_time = ALLY_RESPAWN_INTERVAL
+	ally_respawn_timer.one_shot = false
+	ally_respawn_timer.timeout.connect(_on_ally_respawn_timer_timeout)
+	add_child(ally_respawn_timer)
+	ally_respawn_timer.start()
+	print("Ally respawner initialized - checking every %0.1fs" % ALLY_RESPAWN_INTERVAL)
+
+
+## Called when ally respawn timer times out - respawn dead allies
+func _on_ally_respawn_timer_timeout() -> void:
+	# Clean up invalid references
+	active_warriors = active_warriors.filter(func(w): return is_instance_valid(w))
+	active_archers = active_archers.filter(func(a): return is_instance_valid(a))
+
+	# Respawn warriors if needed
+	var warriors_needed = MAX_WARRIORS - active_warriors.size()
+	if warriors_needed > 0:
+		print("Respawning %d warrior(s) - currently have %d/%d" % [warriors_needed, active_warriors.size(), MAX_WARRIORS])
+		for i in range(warriors_needed):
+			_respawn_ally("warrior")
+
+	# Respawn archers if needed
+	var archers_needed = MAX_ARCHERS - active_archers.size()
+	if archers_needed > 0:
+		print("Respawning %d archer(s) - currently have %d/%d" % [archers_needed, active_archers.size(), MAX_ARCHERS])
+		for i in range(archers_needed):
+			_respawn_ally("archer")
+
+
+## Respawn a single ally of the given type
+func _respawn_ally(ally_type: String) -> void:
+	var viewport_size = get_viewport_rect().size
+	var spawn_x_min = 50.0
+	var spawn_x_max = viewport_size.x - 50.0
+
+	# Try to find a valid spawn position inside the walkable polygon
+	var spawn_pos = Vector2.ZERO
+	var is_valid = false
+	var attempts = 0
+
+	while attempts < 20 and not is_valid:
+		# Random position across screen width
+		var x_pos = randf_range(spawn_x_min, spawn_x_max)
+
+		# Get Y bounds at this X position
+		var y_bounds = background.get_walkable_y_bounds(x_pos)
+		var random_y = randf_range(y_bounds.x, y_bounds.y)
+
+		spawn_pos = Vector2(x_pos, random_y)
+
+		# Check if position is inside walkable area
+		if background.has_method("is_position_in_walkable_area"):
+			is_valid = background.is_position_in_walkable_area(spawn_pos)
+		else:
+			is_valid = true  # Fallback
+
+		attempts += 1
+
+	if not is_valid:
+		push_warning("Could not find valid spawn position for %s respawn" % ally_type)
+		return
+
+	# Spawn the ally
+	var ally = NPCManager.get_generic_npc(ally_type, spawn_pos)
+	if not ally:
+		push_warning("Failed to spawn %s from pool" % ally_type)
+		return
+
+	ally.scale = Vector2(1, 1)
+	ally.set_physics_process(false)
+	ally.set_player_controlled(false)
+
+	# Connect signals based on type
+	if ally_type == "warrior":
+		if ally.has_signal("warrior_clicked"):
+			ally.warrior_clicked.connect(func(): _on_npc_clicked(ally))
+		if ally.has_signal("npc_died"):
+			if not ally.npc_died.is_connected(_on_ally_died):
+				ally.npc_died.connect(_on_ally_died.bind(ally, "warrior"))
+		active_warriors.append(ally)
+	elif ally_type == "archer":
+		if ally.has_signal("archer_clicked"):
+			ally.archer_clicked.connect(func(): _on_npc_clicked(ally))
+		if ally.has_signal("npc_died"):
+			if not ally.npc_died.is_connected(_on_ally_died):
+				ally.npc_died.connect(_on_ally_died.bind(ally, "archer"))
+		active_archers.append(ally)
+
+	print("Respawned %s at %s" % [ally_type, spawn_pos])
+
+
+## Handle ally death - remove from active list
+func _on_ally_died(ally: Node2D, ally_type: String) -> void:
+	if ally_type == "warrior" and ally in active_warriors:
+		active_warriors.erase(ally)
+		print("Warrior died - now have %d/%d warriors" % [active_warriors.size(), MAX_WARRIORS])
+	elif ally_type == "archer" and ally in active_archers:
+		active_archers.erase(ally)
+		print("Archer died - now have %d/%d archers" % [active_archers.size(), MAX_ARCHERS])
 
 
 ## Handle NPC clicked - request dialogue via EventManager

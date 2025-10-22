@@ -149,8 +149,8 @@ func attack() -> void:
 	current_state = previous_state
 
 
-## Take damage (can be overridden by subclasses)
-func take_damage(amount: float) -> void:
+## Take damage (attacker parameter is optional for backward compatibility)
+func take_damage(amount: float, attacker: Node2D = null) -> void:
 	# Reduce HP through stats system
 	if not stats:
 		push_warning("NPC has no stats assigned - cannot take damage")
@@ -167,6 +167,15 @@ func take_damage(amount: float) -> void:
 		current_state = NPCManager.NPCState.DEAD
 		npc_died.emit()
 		return
+
+	# Notify NPCManager to set combat target (counter-attack)
+	# Skip if NPC is passive
+	if attacker and NPCManager:
+		var passive = false
+		if has_method("is_passive"):
+			passive = call("is_passive")
+		if not passive:
+			NPCManager.on_npc_damaged(self, attacker)
 
 	# Play hurt animation
 	current_state = NPCManager.NPCState.DAMAGED
@@ -257,8 +266,8 @@ func _complete_movement() -> void:
 
 ## Stop automatic movement
 func stop_auto_movement() -> void:
-	# Only emit interrupted if we were actually walking
-	if current_state == NPCManager.NPCState.WALKING:
+	# Only emit interrupted if we were actually walking (bitwise check)
+	if current_state & NPCManager.NPCState.WALKING:
 		movement_interrupted.emit()
 
 	current_speed = 0.0
@@ -269,7 +278,7 @@ func stop_auto_movement() -> void:
 
 ## Check if currently moving
 func is_moving() -> bool:
-	return current_state == NPCManager.NPCState.WALKING
+	return (current_state & NPCManager.NPCState.WALKING) != 0
 
 
 ## Called when an animation finishes

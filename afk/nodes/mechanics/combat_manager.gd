@@ -388,7 +388,7 @@ func apply_damage(attacker: Node2D, target: Node2D, damage: float) -> void:
 
 	# Apply damage to target
 	if target.has_method("take_damage"):
-		target.take_damage(damage)
+		target.take_damage(damage, attacker)  # Pass attacker for counter-attack
 		damage_dealt.emit(attacker, target, damage)
 		# Update HURT state based on target's health
 		_update_hurt_state(target)
@@ -508,7 +508,7 @@ func _get_npc_faction(npc: Node2D) -> NPCManager.Faction:
 	match npc_type:
 		"warrior", "archer", "cat":
 			return NPCManager.Faction.ALLY
-		"chicken":
+		"chicken", "mushroom", "goblin", "eyebeast", "skeleton":
 			return NPCManager.Faction.MONSTER
 		_:
 			return NPCManager.Faction.NEUTRAL

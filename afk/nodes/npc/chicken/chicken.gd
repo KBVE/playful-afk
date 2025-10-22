@@ -69,10 +69,10 @@ func _on_input_manager_clicked() -> void:
 	chicken_clicked.emit()
 
 
-## Override monster_died to also emit chicken_died
-func take_damage(amount: float) -> void:
+## Override take_damage to also emit chicken_died
+func take_damage(amount: float, attacker: Node2D = null) -> void:
 	# Call parent implementation
-	super.take_damage(amount)
+	super.take_damage(amount, attacker)
 
 	# Check if we died and emit chicken-specific signal
 	if stats and stats.hp <= 0:
