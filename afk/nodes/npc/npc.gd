@@ -123,6 +123,10 @@ func _update_animation() -> void:
 	# Early exit pattern for common cases (optimized for performance)
 	var animation_name: String = ""
 
+	# Debug for warriors/archers to see what animation they're choosing
+	var is_warrior_or_archer = (current_state & NPCManager.NPCState.ALLY) and (current_state & (NPCManager.NPCState.MELEE | NPCManager.NPCState.RANGED))
+	var is_actually_moving = current_speed > 0.1
+
 	# Check high-priority states first (less common, but more important)
 	if current_state & NPCManager.NPCState.DEAD:
 		animation_name = state_to_animation.get(NPCManager.NPCState.DEAD, "dead")
@@ -133,23 +137,48 @@ func _update_animation() -> void:
 	# Check common states (most frequent cases)
 	elif current_state & NPCManager.NPCState.WALKING:
 		animation_name = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
-	else:  # Default to idle (most common state)
+	# If actually moving (speed > 0), always show walking animation regardless of state
+	elif current_speed > 5.0:
+		animation_name = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
+	elif current_state & NPCManager.NPCState.IDLE:
 		animation_name = state_to_animation.get(NPCManager.NPCState.IDLE, "idle")
+	else:
+		# Debug: No behavioral state flag found, check what flags are set
+		var is_ally = current_state & NPCManager.NPCState.ALLY
+		var is_melee = current_state & NPCManager.NPCState.MELEE
+		var is_ranged = current_state & NPCManager.NPCState.RANGED
+		if is_ally and (is_melee or is_ranged):
+			print("WARNING: Warrior/Archer with no behavioral state! State=%d, Stack trace:" % current_state)
+			print(get_stack())
+		animation_name = "idle"  # Fallback to idle
+		# Force IDLE state to fix this edge case - remove all other behavioral states first
+		current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.ATTACKING & ~NPCManager.NPCState.DAMAGED) | NPCManager.NPCState.IDLE
 
 	# Play animation if it exists, otherwise fallback to idle
+	# Only call play() if animation has changed to avoid restarting the same animation
+	var is_warrior = (current_state & NPCManager.NPCState.ALLY) and (current_state & NPCManager.NPCState.MELEE)
 	if animated_sprite.sprite_frames.has_animation(animation_name):
-		animated_sprite.play(animation_name)
+		if animated_sprite.animation != animation_name:
+			if is_warrior:
+				print("ANIM CHANGE: %s -> %s (state=%d, speed=%.2f)" % [animated_sprite.animation, animation_name, current_state, current_speed])
+			animated_sprite.play(animation_name)
 	elif animated_sprite.sprite_frames.has_animation("idle"):
-		animated_sprite.play("idle")
+		if animated_sprite.animation != "idle":
+			if is_warrior:
+				print("ANIM CHANGE: %s -> idle (fallback, state=%d)" % [animated_sprite.animation, current_state])
+			animated_sprite.play("idle")
 
 
 ## Attack action (can be overridden by subclasses)
 func attack() -> void:
-	var previous_state = current_state
-	current_state = NPCManager.NPCState.ATTACKING
+	# Preserve combat type and faction flags, remove behavioral states, add ATTACKING
+	current_state = (current_state & ~NPCManager.NPCState.IDLE & ~NPCManager.NPCState.WALKING) | NPCManager.NPCState.ATTACKING
 
 	await get_tree().create_timer(1.0).timeout
-	current_state = previous_state
+
+	# After attack animation, return to IDLE (don't restore previous state as it may be stale)
+	# Remove ATTACKING, add IDLE, preserve combat type and faction flags
+	current_state = (current_state & ~NPCManager.NPCState.ATTACKING) | NPCManager.NPCState.IDLE
 
 
 ## Take damage (attacker parameter is optional for backward compatibility)
@@ -159,7 +188,6 @@ func take_damage(amount: float, attacker: Node2D = null) -> void:
 		push_warning("NPC has no stats assigned - cannot take damage")
 		return
 
-	var previous_state = current_state
 	stats.hp -= amount
 
 	# Emit damage signal for NPCManager
@@ -167,7 +195,8 @@ func take_damage(amount: float, attacker: Node2D = null) -> void:
 
 	# Check if NPC died
 	if stats.hp <= 0:
-		current_state = NPCManager.NPCState.DEAD
+		# Preserve combat type and faction flags when dying
+		current_state = (current_state & ~NPCManager.NPCState.IDLE & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.ATTACKING) | NPCManager.NPCState.DEAD
 		npc_died.emit()
 		return
 
@@ -180,12 +209,13 @@ func take_damage(amount: float, attacker: Node2D = null) -> void:
 		if not passive:
 			NPCManager.on_npc_damaged(self, attacker)
 
-	# Play hurt animation
-	current_state = NPCManager.NPCState.DAMAGED
+	# Play hurt animation - preserve combat type and faction flags
+	current_state = (current_state & ~NPCManager.NPCState.IDLE & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.ATTACKING) | NPCManager.NPCState.DAMAGED
 	await get_tree().create_timer(0.5).timeout
 
-	# Return to previous state
-	current_state = previous_state
+	# After damage animation, return to IDLE (don't restore previous state as NPCManager may have changed it)
+	# Remove DAMAGED, add IDLE, preserve combat type and faction flags
+	current_state = (current_state & ~NPCManager.NPCState.DAMAGED) | NPCManager.NPCState.IDLE
 
 
 ## Set NPC to manual control mode
@@ -217,7 +247,9 @@ func move_to_position(target_x: float) -> void:
 		print("NPC movement queued - waiting for attack to finish")
 		return  # Don't interrupt attack animation
 
-	current_state = NPCManager.NPCState.WALKING
+	# Preserve combat type and faction flags when transitioning to WALKING
+	# Add WAYPOINT flag to prevent AI from interrupting movement
+	current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING | NPCManager.NPCState.WAYPOINT
 
 	# Emit signal to AI System
 	movement_started.emit(target_x)
@@ -226,7 +258,8 @@ func move_to_position(target_x: float) -> void:
 ## Update movement (handles targeted movement from NPCManager AI)
 func _update_movement(delta: float) -> void:
 	# Only move if in WALKING state (set by NPCManager AI or move_to_position)
-	if current_state != NPCManager.NPCState.WALKING:
+	# Use bitwise check since state includes combat type and faction flags
+	if not (current_state & NPCManager.NPCState.WALKING):
 		return
 
 	# Calculate distance to target
@@ -263,7 +296,9 @@ func _complete_movement() -> void:
 	current_speed = 0.0
 	# Only set to IDLE if not currently attacking
 	if not (current_state & NPCManager.NPCState.ATTACKING):
-		current_state = NPCManager.NPCState.IDLE
+		# Preserve combat type and faction flags when transitioning to IDLE
+		# Clear WAYPOINT, WALKING, RETREATING, PURSUING flags
+		current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.WAYPOINT & ~NPCManager.NPCState.RETREATING & ~NPCManager.NPCState.PURSUING) | NPCManager.NPCState.IDLE
 	movement_completed.emit(position.x)
 
 
@@ -276,7 +311,9 @@ func stop_auto_movement() -> void:
 	current_speed = 0.0
 	# Only set to IDLE if not currently attacking
 	if not (current_state & NPCManager.NPCState.ATTACKING):
-		current_state = NPCManager.NPCState.IDLE
+		# Preserve combat type and faction flags when transitioning to IDLE
+		# Clear WAYPOINT, WALKING, RETREATING, PURSUING flags
+		current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.WAYPOINT & ~NPCManager.NPCState.RETREATING & ~NPCManager.NPCState.PURSUING) | NPCManager.NPCState.IDLE
 
 
 ## Check if currently moving
@@ -286,14 +323,18 @@ func is_moving() -> bool:
 
 ## Called when an animation finishes
 func _on_animation_finished() -> void:
-	# Check if this animation should loop
-	# ATTACKING now loops like IDLE and WALKING
-	var is_looping_state = current_state in [NPCManager.NPCState.IDLE, NPCManager.NPCState.WALKING, NPCManager.NPCState.ATTACKING]
+	# Check if this animation should loop using bitwise checks
+	# IDLE, WALKING, and ATTACKING animations loop
+	var is_looping_state = (current_state & NPCManager.NPCState.IDLE) or \
+	                       (current_state & NPCManager.NPCState.WALKING) or \
+	                       (current_state & NPCManager.NPCState.ATTACKING)
 
 	if not is_looping_state:
 		# Non-looping animation finished (hurt, dead, etc.)
-		if current_state != NPCManager.NPCState.DEAD:
-			current_state = NPCManager.NPCState.IDLE
+		# Only transition if not dead (use bitwise check)
+		if not (current_state & NPCManager.NPCState.DEAD):
+			# Preserve combat type and faction flags when transitioning to IDLE
+			current_state = (current_state & ~NPCManager.NPCState.DAMAGED) | NPCManager.NPCState.IDLE
 
 
 ## ============================================================================

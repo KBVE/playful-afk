@@ -36,16 +36,17 @@ static func create_stats() -> NPCStats:
 
 
 func _ready() -> void:
+	# IMPORTANT: Set state flags FIRST, before parent _ready() which triggers AI registration
+	# RANGED combat type + ALLY faction
+	# Archers are RANGED ALLY (ranged attacks for player)
+	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.RANGED | NPCManager.NPCState.ALLY
+
 	# Set archer-specific properties
 	walk_speed = 60.0
 	max_speed = 100.0  # Slightly slower than warrior
 	attack_range = 150.0  # Optimal ranged distance for archers
 
-	# Set state flags: RANGED combat type + ALLY faction
-	# Archers are RANGED ALLY (ranged attacks for player)
-	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.RANGED | NPCManager.NPCState.ALLY
-
-	# Call parent _ready
+	# Call parent _ready (this triggers AI registration which reads current_state)
 	super._ready()
 
 

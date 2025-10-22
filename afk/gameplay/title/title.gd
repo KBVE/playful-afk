@@ -72,10 +72,6 @@ func _setup_cat_testing() -> void:
 		print("ERROR: Cat not found in NPCManager")
 		return
 
-	print("Cat found! Current parent: %s" % NPCManager.cat.get_parent().name)
-	print("Cat initial position: %s" % NPCManager.cat.position)
-	print("Cat global position: %s" % NPCManager.cat.global_position)
-	print("Screen dimensions: %s x %s" % [screen_width, screen_height])
 
 	# IMPORTANT: Reparent cat to this Control node so it renders in the UI layer
 	var cat = NPCManager.cat
@@ -101,26 +97,20 @@ func _setup_cat_testing() -> void:
 	# Stop the state timer completely for title screen testing
 	if cat.state_timer:
 		cat.state_timer.stop()
-		print("Cat state timer stopped for testing")
 
 	# Check if controller exists
 	if not cat.controller:
 		print("ERROR: Cat controller not found!")
 		return
 
-	print("Cat controller found!")
-	print("AnimatedSprite2D: %s" % cat.controller.animated_sprite)
 
 	# Start in idle state - will begin moving after idle period
 	if cat.controller.animated_sprite:
 		idle_timer = 0.0
 		cat.controller.play_state("idle")
-		print("Cat starting in idle state")
 	else:
 		print("ERROR: AnimatedSprite2D not found!")
 
-	print("Cat testing setup complete - Position: %s, Scale: %s" % [cat.position, cat.scale])
-	print("Controller will handle movement and animations")
 
 
 func _process(delta: float) -> void:

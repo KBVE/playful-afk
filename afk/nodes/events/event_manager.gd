@@ -550,23 +550,6 @@ func close_top_ui() -> void:
 # ===== Legacy Modal API (for backwards compatibility) =====
 # These will be deprecated once all code uses the new UI system
 
-## Open a modal (DEPRECATED - use show_ui(UIType.MODAL) instead)
-func open_modal(modal: Control) -> void:
-	push_warning("EventManager: open_modal() is deprecated, use show_ui(UIType.MODAL)")
-	show_ui(UIType.MODAL)
-
-
-## Close the active modal (DEPRECATED - use hide_ui(UIType.MODAL) instead)
-func close_modal(modal: Control = null) -> void:
-	push_warning("EventManager: close_modal() is deprecated, use hide_ui(UIType.MODAL)")
-	hide_ui(UIType.MODAL)
-
-
-## Check if a modal is currently active (DEPRECATED - use has_active_ui() instead)
-func has_active_modal() -> bool:
-	return ui_state_stack.has(UIType.MODAL)
-
-
 # ===== NPC Dialogue Management =====
 
 ## Request NPC dialogue (emits signal that main scene will handle)

@@ -36,6 +36,14 @@ static func create_stats() -> NPCStats:
 
 
 func _ready() -> void:
+	# IMPORTANT: Set state flags FIRST, before parent _ready() which triggers AI registration
+	# MELEE combat type + ALLY faction
+	# Warriors are MELEE ALLY (fight for player, don't attack each other)
+	var desired_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.ALLY
+	print("DEBUG Warrior _ready: Setting state from %d to %d" % [current_state, desired_state])
+	current_state = desired_state
+	print("DEBUG Warrior _ready: State is now %d" % current_state)
+
 	# Set warrior-specific properties
 	walk_speed = 50.0
 	max_speed = 120.0  # Faster than archer
@@ -43,11 +51,7 @@ func _ready() -> void:
 	deceleration_rate = 400.0
 	attack_range = 60.0  # Melee range - can attack from close range
 
-	# Set state flags: MELEE combat type + ALLY faction
-	# Warriors are MELEE ALLY (fight for player, don't attack each other)
-	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.ALLY
-
-	# Call parent _ready
+	# Call parent _ready (this triggers AI registration which reads current_state)
 	super._ready()
 
 

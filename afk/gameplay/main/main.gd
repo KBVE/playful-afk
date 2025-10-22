@@ -118,7 +118,6 @@ func _setup_pet() -> void:
 	# Start the cat moving around
 	_start_cat_movement()
 
-	print("Cat setup complete in main scene at position: ", cat.position)
 
 
 func _setup_character_pool() -> void:
@@ -147,8 +146,8 @@ func _setup_character_pool() -> void:
 	var spawn_x_min = 50.0
 	var spawn_x_max = viewport_size.x - 50.0
 
-	# Spawn 6 warriors spread across the full screen width
-	var num_warriors = 6
+	# Spawn 1 warrior for debugging
+	var num_warriors = 1
 	for i in range(num_warriors):
 		# Try to find a valid spawn position inside the walkable polygon
 		var spawn_pos = Vector2.ZERO
@@ -203,8 +202,8 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for warrior %d" % i)
 
-	# Spawn 6 archers spread across the full screen width
-	var num_archers = 6
+	# Spawn 0 archers for debugging
+	var num_archers = 0
 	for i in range(num_archers):
 		# Try to find a valid spawn position inside the walkable polygon
 		var spawn_pos = Vector2.ZERO
@@ -297,7 +296,6 @@ func _setup_character_pool() -> void:
 			chicken.set_physics_process(false)
 			if chicken.has_signal("chicken_clicked"):
 				chicken.chicken_clicked.connect(func(): _on_npc_clicked(chicken))
-		print("Spawned chicken at %s for combat testing!" % chicken_spawn_pos)
 	else:
 		push_warning("Could not find valid spawn position for chicken")
 
@@ -344,7 +342,6 @@ func _setup_character_pool() -> void:
 					if not mushroom.mushroom_clicked.is_connected(_on_npc_clicked):
 						mushroom.mushroom_clicked.connect(func(): _on_npc_clicked(mushroom))
 				active_monsters.append(mushroom)
-			print("Spawned mushroom #%d at %s" % [m + 1, mushroom_spawn_pos])
 		else:
 			push_warning("Could not find valid spawn position for mushroom %d" % m)
 
@@ -391,7 +388,6 @@ func _setup_character_pool() -> void:
 					if not goblin.goblin_clicked.is_connected(_on_npc_clicked):
 						goblin.goblin_clicked.connect(func(): _on_npc_clicked(goblin))
 				active_monsters.append(goblin)
-			print("Spawned goblin #%d at %s" % [g + 1, goblin_spawn_pos])
 		else:
 			push_warning("Could not find valid spawn position for goblin %d" % g)
 
@@ -438,7 +434,6 @@ func _setup_character_pool() -> void:
 					if not eyebeast.eyebeast_clicked.is_connected(_on_npc_clicked):
 						eyebeast.eyebeast_clicked.connect(func(): _on_npc_clicked(eyebeast))
 				active_monsters.append(eyebeast)
-			print("Spawned eyebeast #%d at %s" % [e + 1, eyebeast_spawn_pos])
 		else:
 			push_warning("Could not find valid spawn position for eyebeast %d" % e)
 
@@ -485,7 +480,6 @@ func _setup_character_pool() -> void:
 					if not skeleton.skeleton_clicked.is_connected(_on_npc_clicked):
 						skeleton.skeleton_clicked.connect(func(): _on_npc_clicked(skeleton))
 				active_monsters.append(skeleton)
-			print("Spawned skeleton #%d at %s" % [s + 1, skeleton_spawn_pos])
 		else:
 			push_warning("Could not find valid spawn position for skeleton %d" % s)
 
@@ -504,7 +498,6 @@ func _start_cat_movement() -> void:
 		move_right = true
 		cat_target_position = screen_width - 100
 		cat.controller.move_to_position(cat_target_position)
-		print("Cat moving to position: ", cat_target_position)
 
 		# Set up a timer to change direction when cat reaches target
 		var move_timer = Timer.new()
@@ -512,7 +505,6 @@ func _start_cat_movement() -> void:
 		move_timer.timeout.connect(_on_move_timer_timeout)
 		add_child(move_timer)
 		move_timer.start()
-		print("Cat movement timer started")
 
 
 func _on_move_timer_timeout() -> void:
@@ -533,7 +525,6 @@ func _on_move_timer_timeout() -> void:
 		cat_target_position = 100
 
 	cat.controller.move_to_position(cat_target_position)
-	print("Cat changing direction, moving to: ", cat_target_position)
 
 
 func _on_game_paused(paused: bool) -> void:
@@ -707,7 +698,6 @@ func _setup_ally_respawn_checker() -> void:
 	ally_respawn_timer.timeout.connect(_on_ally_respawn_timer_timeout)
 	add_child(ally_respawn_timer)
 	ally_respawn_timer.start()
-	print("Ally respawner initialized - checking every %0.1fs" % ALLY_RESPAWN_INTERVAL)
 
 
 ## Called when ally respawn timer times out - respawn dead allies

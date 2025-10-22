@@ -45,39 +45,11 @@ enum NPCState {
 	# Factions (15-17) - Determines who can attack whom
 	ALLY = 1 << 15,       # 32768:  Player's allies - don't attack each other
 	MONSTER = 1 << 16,    # 65536:  Hostile creatures - attack allies
-	PASSIVE = 1 << 17     # 131072: Doesn't attack/do damage (chickens, critters)
+	PASSIVE = 1 << 17,    # 131072: Doesn't attack/do damage (chickens, critters)
+
+	# Waypoint
+	WAYPOINT = 1 << 18
 }
-
-## ===== FACTION HELPERS =====
-
-## DEPRECATED: Use bitwise checks directly instead
-## Example: if npc.current_state & NPCState.ALLY
-## Or to check same faction: (npc1.current_state & faction_mask) == (npc2.current_state & faction_mask)
-## where faction_mask = (NPCState.ALLY | NPCState.MONSTER | NPCState.PASSIVE)
-##
-## Get NPC's faction from bitwise state flags - determines who they can/cannot attack
-## Returns the faction bitwise flag (ALLY, MONSTER, or PASSIVE)
-static func get_faction(npc: Node2D) -> int:
-	if not is_instance_valid(npc):
-		return 0  # No faction
-
-	# Read faction from current_state bitwise flags
-	if "current_state" in npc:
-		var state = npc.current_state
-
-		# Check bitwise flags for faction
-		if state & NPCState.ALLY:
-			return NPCState.ALLY
-		elif state & NPCState.MONSTER:
-			return NPCState.MONSTER
-		elif state & NPCState.PASSIVE:
-			return NPCState.PASSIVE
-
-	# Check if marked as friendly (cat, companions, etc.) - legacy support
-	if "is_friendly" in npc and npc.is_friendly:
-		return NPCState.ALLY
-
-	return 0  # No faction
 
 # Virtual Pet Reference
 var cat: Cat = null
@@ -383,9 +355,9 @@ func _on_cat_call_for_help(enemy: Node2D) -> void:
 			movement_target.move_to_position(enemy.global_position.x)
 			_ai_tween_y_position(npc, enemy.global_position.y, ai_state)
 
-			# Set NPC to walking state
+			# Set NPC to walking state - preserve combat type and faction flags
 			if "current_state" in npc:
-				npc.current_state = NPCState.WALKING
+				npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
 
 
 ## Handle catflag being spawned - send idle NPCs to flag location
@@ -415,9 +387,9 @@ func _on_catflag_spawned(flag: Node2D, flag_position: Vector2) -> void:
 			movement_target.move_to_position(flag_position.x)
 			_ai_tween_y_position(npc, flag_position.y, ai_state)
 
-			# Set NPC to walking state
+			# Set NPC to walking state - preserve combat type and faction flags
 			if "current_state" in npc:
-				npc.current_state = NPCState.WALKING
+				npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
 
 			# Store flag as rally point (not combat target)
 			ai_state["rally_point"] = flag_position
@@ -714,31 +686,46 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 		if NPC_REGISTRY.has(npc_type):
 			npc_category = NPC_REGISTRY[npc_type].get("category", "")
 
-	# Determine initial state based on NPC category
+	# Determine behavioral state based on NPC category
 	# Monsters start in IDLE | WANDERING (bitwise) for natural movement
 	# Other NPCs (warriors, archers) start in just IDLE
-	var initial_state = (NPCState.IDLE | NPCState.WANDERING) if npc_category == "monster" else NPCState.IDLE
+	# IMPORTANT: Only set BEHAVIORAL states here, preserve combat type and faction flags!
+	var behavioral_state = (NPCState.IDLE | NPCState.WANDERING) if npc_category == "monster" else NPCState.IDLE
 	var initial_timer = randf_range(0.5, 1.5) if npc_category == "monster" else randf_range(
 		ai_profile.get("state_change_min", 3.0),
 		ai_profile.get("state_change_max", 8.0)
 	)
 
+	# Get NPC's full state - it should already be set in _ready() with combat type + faction
+	# Warriors: IDLE | MELEE | ALLY = 34817
+	# Archers: IDLE | RANGED | ALLY = 36865
+	# Monsters: IDLE | WANDERING | MELEE/RANGED | MONSTER
+	var npc_full_state: int
+	if "current_state" in npc and npc.current_state != 0:
+		# NPC has already set its state (warriors, archers, monsters)
+		npc_full_state = npc.current_state
+		# Only log for warriors and archers
+		if npc_type == "warrior" or npc_type == "archer":
+			print("DEBUG register_npc_ai: %s has state %d (preserving)" % [npc_type, npc_full_state])
+	else:
+		# Fallback: NPC doesn't have state yet, use behavioral state
+		# This should rarely happen since NPCs set state in _ready()
+		npc_full_state = behavioral_state
+		if npc_type == "warrior" or npc_type == "archer":
+			print("DEBUG register_npc_ai: %s has no state, using behavioral %d" % [npc_type, behavioral_state])
+		# Don't set it on the NPC - let the NPC's _ready() handle state initialization
+		# Setting it here would strip combat type and faction flags
+
 	# Create AI state for this NPC
 	_npc_ai_states[npc] = {
 		"npc_type": npc_type,
 		"ai_profile": ai_profile,
-		"current_state": initial_state,
+		"current_state": npc_full_state,
 		"time_until_next_change": initial_timer,
 		"movement_direction": Vector2.ZERO,
 		"is_player_controlled": false,
 		"movement_bounds_x": Vector2(50.0, 1100.0)  # Full screen width (with margins)
 	}
-
-	# Sync initial state to NPC's current_state property (important for bitwise checks!)
-	# But don't overwrite if NPC already has a state (e.g., SPAWN state set during spawning)
-	if "current_state" in npc:
-		if npc.current_state == 0 or npc.current_state == NPCState.IDLE:
-			npc.current_state = initial_state
 
 	# Connect to movement signals for bidirectional communication
 	# Try controller first (warrior), then direct NPC signals (archer)
@@ -868,6 +855,15 @@ func _update_npc_ai(npc: Node2D) -> void:
 			# Get NPC's combat type from bitwise state flags
 			var has_combat_type = npc.current_state & (NPCState.MELEE | NPCState.RANGED | NPCState.MAGIC | NPCState.HEALER)
 
+			# Debug logging for warriors and archers only
+			var npc_type = ai_state["npc_type"]
+			if npc_type == "warrior" or npc_type == "archer":
+				if has_combat_type == 0:
+					print("DEBUG %s: state=%d, NO COMBAT TYPE!" % [npc_type, npc.current_state])
+				else:
+					var distance = npc.global_position.distance_to(target.global_position)
+					print("DEBUG %s: state=%d, has combat type, distance=%.1f" % [npc_type, npc.current_state, distance])
+
 			# MELEE COMBAT (Warriors, Knights, etc.)
 			if npc.current_state & NPCState.MELEE:
 				var movement_target = _get_movement_target(npc)
@@ -893,13 +889,15 @@ func _update_npc_ai(npc: Node2D) -> void:
 						npc._move_direction = Vector2.ZERO
 
 					# Set NPC to attacking state (triggers attack animation)
-					# For monsters, remove WANDERING and WALKING, add COMBAT and ATTACKING (bitwise)
+					# IMPORTANT: Preserve combat type and faction flags!
 					if "current_state" in npc:
 						if npc.current_state & NPCState.MONSTER:
+							# Monsters: remove WANDERING and WALKING, add COMBAT and ATTACKING (bitwise)
 							npc.current_state = (npc.current_state & ~NPCState.WANDERING & ~NPCState.WALKING) | NPCState.COMBAT | NPCState.ATTACKING
 							ai_state["current_state"] = npc.current_state
 						else:
-							npc.current_state = NPCState.ATTACKING  # Warriors/archers use simple state
+							# Warriors/archers: remove IDLE/WALKING, add ATTACKING, preserve combat type and faction
+							npc.current_state = (npc.current_state & ~NPCState.IDLE & ~NPCState.WALKING) | NPCState.ATTACKING
 
 					# Execute combat logic (damage calculation, state tracking)
 					CombatManager.start_melee_attack(npc, target)
@@ -1049,8 +1047,10 @@ func _update_npc_ai(npc: Node2D) -> void:
 						movement_target.stop_auto_movement()
 
 					# Set NPC to attacking state (triggers attack animation)
+					# IMPORTANT: Preserve combat type and faction flags!
 					if "current_state" in npc:
-						npc.current_state = NPCState.ATTACKING  # Use enum
+						# Remove IDLE/WALKING, add ATTACKING, preserve combat type and faction
+						npc.current_state = (npc.current_state & ~NPCState.IDLE & ~NPCState.WALKING) | NPCState.ATTACKING
 
 					# Execute combat logic (projectile firing, state tracking)
 					CombatManager.start_ranged_attack(npc, target, "arrow")
@@ -1089,10 +1089,16 @@ func _update_npc_ai(npc: Node2D) -> void:
 			if CombatManager.is_in_combat(npc):
 				CombatManager.end_combat(npc)
 
-			# Restore WANDERING state for monsters (remove COMBAT, add WANDERING)
-			if (npc.current_state & NPCState.MONSTER) and "current_state" in npc:
-				npc.current_state = (npc.current_state & ~NPCState.COMBAT) | NPCState.WANDERING
-				ai_state["current_state"] = npc.current_state
+			# Restore proper behavioral state after combat
+			if "current_state" in npc:
+				if npc.current_state & NPCState.MONSTER:
+					# Monsters: remove COMBAT/ATTACKING/WALKING, add WANDERING
+					npc.current_state = (npc.current_state & ~NPCState.COMBAT & ~NPCState.ATTACKING & ~NPCState.WALKING) | NPCState.WANDERING
+					ai_state["current_state"] = npc.current_state
+				else:
+					# Warriors/Archers: remove ATTACKING/WALKING, add IDLE
+					npc.current_state = (npc.current_state & ~NPCState.ATTACKING & ~NPCState.WALKING) | NPCState.IDLE
+					ai_state["current_state"] = npc.current_state
 
 	# "CALL FOR HELP" SYSTEM - Move toward nearby faction allies in combat to assist
 	# Works for both ALLY and MONSTER factions
@@ -1241,28 +1247,10 @@ func _update_npc_ai(npc: Node2D) -> void:
 				if "_move_direction" in npc:
 					var direction = (safe_pos - npc.global_position).normalized()
 					npc._move_direction = direction
-					npc.current_state = NPCState.WALKING
+					# Preserve combat type and faction flags
+					npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
 					ai_state["roam_target"] = safe_pos
 					ai_state["time_until_next_change"] = 5.0
-
-	# Check if NPC reached waypoint and needs to continue to final target
-	if ai_state.get("has_waypoint", false) and ai_state.get("current_state") == NPCState.WALKING:
-		var waypoint = ai_state.get("waypoint", Vector2.ZERO)
-		var distance_to_waypoint = npc.position.distance_to(waypoint)
-
-		# If close enough to waypoint (within 20px), move to final target
-		if distance_to_waypoint < 20.0:
-			var final_target = ai_state.get("final_target", Vector2.ZERO)
-			ai_state["has_waypoint"] = false  # Clear waypoint
-
-			# Move to final target (controller or direct)
-			var has_controller = "controller" in npc and npc.controller
-			var movement_target = npc.controller if has_controller else npc
-
-			if movement_target.has_method("move_to_position"):
-				movement_target.move_to_position(final_target.x)
-				_ai_tween_y_position(npc, final_target.y, ai_state)
-				# Reached waypoint, continuing to target
 
 	# Count down to next state change
 	ai_state["time_until_next_change"] -= AI_UPDATE_INTERVAL
@@ -1315,8 +1303,8 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 		if (npc.current_state & NPCState.MONSTER) and (npc.current_state & NPCState.WANDERING):
 			npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
 		else:
-			# For NPCs with controllers, use simple state
-			npc.current_state = NPCState.WALKING
+			# For NPCs with controllers (warriors, archers), preserve combat type and faction
+			npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
 
 	# Check if NPC has controller or direct movement
 	var has_controller = "controller" in npc and npc.controller
@@ -1392,14 +1380,18 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 
 ## AI: Start NPC idle
 func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
+	# Don't interrupt movement if NPC is following a waypoint
+	if "current_state" in npc and (npc.current_state & NPCState.WAYPOINT):
+		return  # Let the waypoint movement complete naturally
+
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
 		# For monsters, preserve WANDERING flag if present (bitwise)
 		if (npc.current_state & NPCState.MONSTER) and (npc.current_state & NPCState.WANDERING):
 			npc.current_state = (npc.current_state & ~NPCState.WALKING) | NPCState.IDLE
 		else:
-			# For NPCs with controllers, use simple state
-			npc.current_state = NPCState.IDLE
+			# For NPCs with controllers, preserve combat type and faction flags
+			npc.current_state = (npc.current_state & ~NPCState.WALKING) | NPCState.IDLE
 
 	# Stop movement (controller or direct)
 	var has_controller = "controller" in npc and npc.controller
@@ -1487,10 +1479,10 @@ func _on_controller_movement_completed(final_position: float, npc: Node2D) -> vo
 	var ai_state = _npc_ai_states[npc]
 	# print("NPCManager AI: Received movement_completed from %s controller (final: %s)" % [ai_state["npc_type"], final_position])
 
-	# Movement completed - update NPC state to Idle
+	# Movement completed - update NPC state to Idle, preserve combat type and faction
 	if "current_state" in npc:
-		npc.current_state = NPCState.IDLE  # Use enum
-	ai_state["current_state"] = NPCState.IDLE  # Use enum
+		npc.current_state = (npc.current_state & ~NPCState.WALKING) | NPCState.IDLE
+	ai_state["current_state"] = npc.current_state
 
 	# This enables reactive behavior (e.g., could immediately start combat if enemy nearby)
 
@@ -1503,10 +1495,10 @@ func _on_controller_movement_interrupted(npc: Node2D) -> void:
 	var ai_state = _npc_ai_states[npc]
 	# print("NPCManager AI: Received movement_interrupted from %s controller" % ai_state["npc_type"])
 
-	# Movement was stopped - update NPC state to Idle
+	# Movement was stopped - update NPC state to Idle, preserve combat type and faction
 	if "current_state" in npc:
-		npc.current_state = NPCState.IDLE  # Use enum
-	ai_state["current_state"] = NPCState.IDLE  # Use enum
+		npc.current_state = (npc.current_state & ~NPCState.WALKING) | NPCState.IDLE
+	ai_state["current_state"] = npc.current_state
 
 	# AI could react by choosing a different target - timer will handle next decision
 
@@ -1614,13 +1606,13 @@ func _initialize_persistent_pool() -> void:
 func _initialize_generic_pool() -> void:
 	generic_pool.clear()
 
-	# Pre-allocate warriors (4-8 instances)
-	var num_warriors = 6
+	# Pre-allocate warriors (reduced to 1 for debugging)
+	var num_warriors = 1
 	for i in range(num_warriors):
 		_preallocate_generic_npc("warrior", i)
 
-	# Pre-allocate archers (4-8 instances)
-	var num_archers = 6
+	# Pre-allocate archers (reduced to 0 for debugging)
+	var num_archers = 0
 	for i in range(num_archers):
 		_preallocate_generic_npc("archer", num_warriors + i)
 
@@ -1905,6 +1897,13 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	npc.process_mode = Node.PROCESS_MODE_INHERIT
 	_update_character_z_index(npc)
 
+	# CRITICAL: Set combat type and faction flags based on NPC type BEFORE AI registration
+	# This ensures the state is correct from the start
+	if npc_type == "warrior":
+		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.ALLY
+	elif npc_type == "archer":
+		npc.current_state = NPCState.IDLE | NPCState.RANGED | NPCState.ALLY
+
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
 	register_npc_ai(npc, npc_type)
 
@@ -1973,13 +1972,15 @@ func return_generic_npc(npc: Node2D) -> void:
 				stats_database.erase(ulid_key)
 				npc.stats = null
 
-			# Reset NPC state flags
-			if "current_state" in npc:
-				npc.current_state = NPCState.IDLE
-
-			# Reset monster movement direction
+			# Reset monster movement direction BEFORE resetting state
 			if (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
 				npc._move_direction = Vector2.ZERO
+
+			# Reset NPC state flags - preserve combat type and faction for re-use
+			if "current_state" in npc:
+				# Keep MELEE/RANGED/ALLY/MONSTER flags, only reset behavioral state to IDLE
+				var preserved_flags = npc.current_state & (NPCState.MELEE | NPCState.RANGED | NPCState.ALLY | NPCState.MONSTER)
+				npc.current_state = NPCState.IDLE | preserved_flags
 
 			# Clear AI state
 			if _npc_ai_states.has(npc):

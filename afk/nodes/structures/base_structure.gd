@@ -81,11 +81,6 @@ func _process(delta: float) -> void:
 
 ## Called by InputManager when this structure is clicked
 func _on_input_manager_clicked() -> void:
-	print("========================================")
-	print(structure_name.to_upper(), " CLICKED!")
-	print("Position: ", global_position)
-	print("========================================")
-
 	structure_clicked.emit()
 
 	# Add a small bounce effect when clicked

@@ -296,7 +296,6 @@ func spawn_object(object_type: String, position: Vector2, pool_type_override: in
 
 	# Emit signal for catflag spawns
 	if object_type == "catflag":
-		print("EnvironmentManager: CatFlag spawned at position (%d, %d)" % [int(position.x), int(position.y)])
 		catflag_spawned.emit(obj, position)
 
 	return obj

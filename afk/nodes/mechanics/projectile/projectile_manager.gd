@@ -82,7 +82,6 @@ func _initialize_pool(projectile_type: String) -> void:
 ## Set the container node for projectiles (e.g., Layer4Objects for parallax scrolling)
 func set_projectile_container(container: Node2D) -> void:
 	projectile_container = container
-	print("ProjectileManager: Projectile container set to %s" % container.name)
 
 	# Re-parent existing projectiles if any
 	_reparent_all_projectiles()

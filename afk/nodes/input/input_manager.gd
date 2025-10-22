@@ -155,7 +155,6 @@ func _trigger_hover_enter(obj: Node2D) -> void:
 
 			# Emit global signal
 			object_hover_started.emit(obj)
-			print("InputManager: Hover ENTER on ", obj.name)
 			break
 
 
@@ -173,7 +172,6 @@ func _trigger_hover_exit(obj: Node2D) -> void:
 
 			# Emit global signal
 			object_hover_ended.emit(obj)
-			print("InputManager: Hover EXIT on ", obj.name)
 			break
 
 
