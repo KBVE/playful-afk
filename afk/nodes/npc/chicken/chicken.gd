@@ -10,17 +10,38 @@ signal chicken_clicked
 ## Emitted when the chicken dies
 signal chicken_died
 
+## NPC Registry Data - Decentralized configuration
+const NPC_TYPE_ID: String = "chicken"
+const NPC_CATEGORY: String = "monster"
+const AI_PROFILE: Dictionary = {
+	"idle_weight": 70,      # Chickens prefer to stay idle
+	"walk_weight": 30,
+	"state_change_min": 2.0,  # Faster state changes
+	"state_change_max": 5.0,
+	"movement_speed": 0.6   # Slower movement (it's a chicken!)
+}
+
+## Create stats for this NPC type
+static func create_stats() -> NPCStats:
+	return NPCStats.new(
+		1000.0, # HP (high for testing!)
+		0.0,    # Mana (chickens don't use mana)
+		50.0,   # Energy
+		100.0,  # Hunger
+		0.0,    # Attack (passive - can't attack)
+		2.0,    # Defense (very low)
+		NPCStats.Emotion.NEUTRAL,
+		NPC_TYPE_ID
+	)
+
 
 func _init() -> void:
 	# Set chicken-specific properties
 	walk_speed = 30.0
-	combat_type = NPCManager.CombatType.NONE  # Passive, doesn't attack
 
-	# Set monster types
-	monster_types = [
-		NPCManager.MonsterType.ANIMAL,
-		NPCManager.MonsterType.PASSIVE
-	]
+	# Set state flags: PASSIVE faction (no combat type - doesn't attack)
+	# Chickens are PASSIVE (harmless, can't attack anyone)
+	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.PASSIVE
 
 	# Override state-to-animation mapping (chickens use idle for walking)
 	state_to_animation = {

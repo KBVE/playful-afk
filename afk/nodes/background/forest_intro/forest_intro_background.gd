@@ -8,4 +8,4 @@ class_name ForestIntroBackground
 
 
 func _ready() -> void:
-	print("ForestIntroBackground initialized")
+	pass

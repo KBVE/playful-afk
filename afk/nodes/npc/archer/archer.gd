@@ -7,27 +7,48 @@ class_name Archer
 ## Emitted when the archer is clicked (archer-specific signal)
 signal archer_clicked
 
+## NPC Registry Data - Decentralized configuration
+const NPC_TYPE_ID: String = "archer"
+const NPC_CATEGORY: String = "ranged"
+const AI_PROFILE: Dictionary = {
+	"idle_weight": 70,      # Prefers idle (patient archer)
+	"walk_weight": 30,
+	"state_change_min": 3.0,
+	"state_change_max": 8.0,
+	"movement_speed": 0.8   # Slightly slower movement
+}
+
+## Emoji set for archers
+const EMOJIS: Array[String] = ["🏹", "🎯", "👁️", "🌟", "🦅", "🍃", "💨", "🔭"]
+
+## Create stats for this NPC type
+static func create_stats() -> NPCStats:
+	return NPCStats.new(
+		150.0,  # HP - BUFFED (was 80.0)
+		75.0,   # Mana (more than warrior)
+		100.0,  # Energy
+		100.0,  # Hunger
+		12.0,   # Attack (ranged)
+		15.0,   # Defense - BUFFED (was 5.0)
+		NPCStats.Emotion.NEUTRAL,
+		NPC_TYPE_ID
+	)
+
 
 func _ready() -> void:
 	# Set archer-specific properties
 	walk_speed = 60.0
 	max_speed = 100.0  # Slightly slower than warrior
-	faction = NPCManager.Faction.ALLY
-	combat_type = NPCManager.CombatType.RANGED
+	attack_range = 150.0  # Optimal ranged distance for archers
+
+	# Set state flags: RANGED combat type + ALLY faction
+	# Archers are RANGED ALLY (ranged attacks for player)
+	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.RANGED | NPCManager.NPCState.ALLY
 
 	# Call parent _ready
 	super._ready()
 
 
-## Override ready complete for archer-specific initialization
-func _on_ready_complete() -> void:
-	print("Archer initialized - Current state: %s" % current_state)
-
-
 ## Override click handler to emit archer-specific signal
 func _on_input_manager_clicked() -> void:
-	print("========================================")
-	print("ARCHER CLICKED!")
-	print("Position: ", global_position)
-	print("========================================")
 	archer_clicked.emit()

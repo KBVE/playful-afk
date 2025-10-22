@@ -25,7 +25,7 @@ var auto_scroll_offset: float = 0.0
 
 
 func _ready() -> void:
-	print("SkyCloudbox initialized")
+	pass
 
 
 func _process(delta: float) -> void:

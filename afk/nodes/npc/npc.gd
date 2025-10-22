@@ -26,14 +26,17 @@ var current_state: int = NPCManager.NPCState.IDLE:
 ## Movement speed when walking
 @export var walk_speed: float = 50.0
 
+## Combat range - distance at which this NPC can attack
+## For MELEE: attack range (default ~60px)
+## For RANGED: optimal firing distance (default ~150px)
+@export var attack_range: float = 60.0
+
 ## NPC Stats reference (assigned by NPCManager)
 var stats: NPCStats = null
 
-## NPC's faction (set by subclasses)
-var faction: int = 0  # NPCManager.Faction.ALLY by default
-
-## NPC's combat type (set by subclasses)
-var combat_type: int = 0  # NPCManager.CombatType.NONE by default
+## Deprecated properties - now using NPCState bitwise flags
+## Faction and combat type are now in current_state
+## Example: MELEE | ALLY | IDLE or RANGED | ALLY | WALKING
 
 # Node references
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D

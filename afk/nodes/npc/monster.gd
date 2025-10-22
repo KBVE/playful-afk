@@ -4,6 +4,9 @@ class_name Monster
 ## Monster - Base class for all enemy NPCs
 ## Provides common functionality for monsters like taking damage, state management, and animations
 
+## Emoji set for monsters
+const EMOJIS: Array[String] = ["😈", "👹", "👻", "🐔", "🦖", "🐉", "🧟", "💀"]
+
 ## Emitted when the monster's state changes
 signal state_changed(old_state: int, new_state: int)
 
@@ -26,17 +29,17 @@ var current_state: int = NPCManager.NPCState.IDLE:
 ## Movement speed when walking
 @export var walk_speed: float = 30.0
 
+## Combat range - distance at which this monster can attack
+## For MELEE monsters: attack range (default ~50px, slightly less than warriors)
+## For RANGED monsters: optimal firing distance (default ~150px)
+@export var attack_range: float = 50.0
+
 ## NPC Stats reference (assigned by NPCManager)
 var stats: NPCStats = null
 
-## Monster's faction (MONSTER - can be attacked by allies)
-var faction: int = 1  # NPCManager.Faction.MONSTER
-
-## Monster's combat type (override in subclasses)
-var combat_type: int = 0  # NPCManager.CombatType.NONE
-
-## Monster types (override in subclasses to define behavior)
-var monster_types: Array[NPCManager.MonsterType] = []
+## Deprecated properties - now using NPCState bitwise flags
+## Faction, combat type, and monster types are now in current_state
+## Example: MELEE | MONSTER | IDLE or PASSIVE | IDLE
 
 # Node references
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
@@ -138,41 +141,13 @@ func _update_movement(delta: float) -> void:
 		# Calculate potential new position (in local coordinates relative to Layer4Objects)
 		var new_position = position + (_move_direction * walk_speed * delta)
 
-		# Check if we're moving within valid bounds
-		# Background walkable area is in screen/global space, so use global_position for checks
-		if _background_ref and _background_ref.has_method("is_position_in_walkable_area"):
-			# Convert to global position for bounds checking
-			var new_global_pos = global_position + (_move_direction * walk_speed * delta)
+		# Always move the monster - bounds checking should only affect direction, not movement
+		position = new_position
 
-			# Check if new position is in walkable area
-			if _background_ref.is_position_in_walkable_area(new_global_pos):
-				# Valid position - move there (update local position)
-				position = new_position
-
-				# Safety clamp: ensure Y stays within terrain bounds to prevent floating
-				if _background_ref.has_method("get_walkable_y_bounds"):
-					var y_bounds = _background_ref.get_walkable_y_bounds(global_position.x)
-					position.y = clamp(position.y, y_bounds.x, y_bounds.y)
-			else:
-				# Hit outer walkable bounds - redirect toward safe zone
-				if _background_ref.has_method("get_random_safe_position"):
-					var safe_target = _background_ref.get_random_safe_position()
-					# safe_target is in screen space, calculate direction using global positions
-					var current_global = global_position
-					_move_direction = (safe_target - current_global).normalized()
-				else:
-					# Fallback: move toward center
-					var viewport_size = get_viewport_rect().size
-					var center = Vector2(viewport_size.x / 2, global_position.y)
-					_move_direction = (center - global_position).normalized()
-		else:
-			# Fallback: simple screen bounds check if background not available
-			var viewport_size = get_viewport_rect().size
-			if new_position.x < 50 or new_position.x > viewport_size.x - 50:
-				_move_direction.x *= -1  # Bounce off horizontal bounds
-			if new_position.y < 200 or new_position.y > viewport_size.y - 100:
-				_move_direction.y *= -1  # Bounce off vertical bounds
-			position = new_position
+		# Safety clamp: ensure Y stays within terrain bounds to prevent floating
+		if _background_ref and _background_ref.has_method("get_walkable_y_bounds"):
+			var y_bounds = _background_ref.get_walkable_y_bounds(global_position.x)
+			position.y = clamp(position.y, y_bounds.x, y_bounds.y)
 
 
 func _update_animation() -> void:
@@ -272,7 +247,7 @@ func _on_animation_finished() -> void:
 
 ## Check if this monster is passive (doesn't deal damage to others)
 func is_passive() -> bool:
-	return NPCManager.MonsterType.PASSIVE in monster_types
+	return (current_state & NPCManager.NPCState.PASSIVE) != 0
 
 
 ## Check if this monster can attack
@@ -282,10 +257,7 @@ func can_attack() -> bool:
 
 ## Called by InputManager when clicked (override in subclasses)
 func _on_input_manager_clicked() -> void:
-	print("========================================")
-	print("%s CLICKED!" % get_class().to_upper())
-	print("Position: ", global_position)
-	print("========================================")
+	pass
 
 
 ## Called by InputManager when mouse enters

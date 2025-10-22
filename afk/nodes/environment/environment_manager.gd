@@ -66,7 +66,6 @@ func _ready() -> void:
 	# Setup cleanup timer
 	_setup_cleanup_timer()
 
-	print("EnvironmentManager initialized")
 
 
 ## Initialize object pools for all registered types
@@ -104,9 +103,6 @@ func _initialize_pools() -> void:
 			pool_flags.append("unique")
 		if pool_type_flags & PoolType.CASTABLE:
 			pool_flags.append("castable")
-		var pool_type_name = " + ".join(pool_flags) if pool_flags.size() > 0 else "unknown"
-
-		print("EnvironmentManager: Initialized %s pool for '%s' with %d objects" % [pool_type_name, object_type, pool_size])
 
 
 ## Create a new environment object

@@ -30,7 +30,6 @@ func _ready() -> void:
 	# Set viewport size to match container
 	call_deferred("_resize_viewport")
 
-	print("RedForestContainer initialized")
 
 
 func _resize_viewport() -> void:

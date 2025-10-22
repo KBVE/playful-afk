@@ -7,6 +7,33 @@ class_name Warrior
 ## Emitted when the warrior is clicked (warrior-specific signal)
 signal warrior_clicked
 
+## NPC Registry Data - Decentralized configuration
+const NPC_TYPE_ID: String = "warrior"
+const NPC_CATEGORY: String = "melee"
+const AI_PROFILE: Dictionary = {
+	"idle_weight": 60,      # Prefers action over idle
+	"walk_weight": 40,
+	"state_change_min": 3.0,  # Min seconds between state changes
+	"state_change_max": 8.0,  # Max seconds between state changes
+	"movement_speed": 1.0     # Movement speed multiplier
+}
+
+## Emoji set for warriors
+const EMOJIS: Array[String] = ["⚔️", "🛡️", "💪", "🔥", "⚡", "🎖️", "👊", "⭐"]
+
+## Create stats for this NPC type
+static func create_stats() -> NPCStats:
+	return NPCStats.new(
+		350.0,  # HP - BUFFED AGAIN (was 200.0, originally 100.0)
+		50.0,   # Mana
+		100.0,  # Energy
+		100.0,  # Hunger
+		15.0,   # Attack
+		35.0,   # Defense - BUFFED AGAIN (was 20.0, originally 10.0)
+		NPCStats.Emotion.NEUTRAL,
+		NPC_TYPE_ID
+	)
+
 
 func _ready() -> void:
 	# Set warrior-specific properties
@@ -14,16 +41,14 @@ func _ready() -> void:
 	max_speed = 120.0  # Faster than archer
 	acceleration_rate = 400.0
 	deceleration_rate = 400.0
-	faction = NPCManager.Faction.ALLY
-	combat_type = NPCManager.CombatType.MELEE
+	attack_range = 60.0  # Melee range - can attack from close range
+
+	# Set state flags: MELEE combat type + ALLY faction
+	# Warriors are MELEE ALLY (fight for player, don't attack each other)
+	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.ALLY
 
 	# Call parent _ready
 	super._ready()
-
-
-## Override ready complete for warrior-specific initialization
-func _on_ready_complete() -> void:
-	print("Warrior initialized - Current state: %s" % current_state)
 
 
 ## Override click handler to emit warrior-specific signal

@@ -80,7 +80,6 @@ func connect_to_entity(entity: Node2D) -> void:
 	if entity.has_signal("damage_taken"):
 		if not entity.damage_taken.is_connected(_on_entity_damage_taken):
 			entity.damage_taken.connect(_on_entity_damage_taken)
-			print("HealthBar: Connected to %s" % entity.name)
 
 	# Show the healthbar
 	visible = true

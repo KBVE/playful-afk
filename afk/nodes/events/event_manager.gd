@@ -205,8 +205,6 @@ var _debug_printed_process: bool = false
 
 
 func _ready() -> void:
-	print("EventManager initialized - Centralized event system ready")
-
 	# Connect to screen transition requests
 	screen_transition_requested.connect(_on_screen_transition_requested)
 
@@ -243,7 +241,6 @@ func _setup_transition_layer() -> void:
 	if transition_packed:
 		transition_scene = transition_packed.instantiate()
 		get_tree().root.add_child.call_deferred(transition_scene)
-		print("Transition layer initialized")
 	else:
 		push_error("Failed to load transition scene")
 
@@ -251,8 +248,6 @@ func _setup_transition_layer() -> void:
 ## Setup all UI elements - SINGLE SOURCE OF TRUTH
 ## All UIs are created, instantiated, and registered here
 func _setup_ui_elements() -> void:
-	print("EventManager: Setting up all UI elements...")
-
 	# Setup Modal (for structures, dialogs, etc.)
 	_setup_modal_ui()
 
@@ -264,43 +259,31 @@ func _setup_ui_elements() -> void:
 	# _setup_pause_menu_ui()
 	# _setup_settings_ui()
 
-	print("EventManager: All UI elements setup complete")
-
 
 ## Setup Modal UI
 func _setup_modal_ui() -> void:
-	print("EventManager: Setting up Modal UI...")
-
 	var modal_scene = load("res://nodes/ui/modal/modal.tscn")
 	if not modal_scene:
 		push_error("EventManager: Failed to load modal scene")
 		return
 
-	print("EventManager: Modal scene loaded, instantiating...")
 	var modal = modal_scene.instantiate()
 	if not modal:
 		push_error("EventManager: Failed to instantiate modal")
 		return
 
-	print("EventManager: Modal instantiated (type: %s), adding to tree..." % modal.get_class())
-
 	# Add to tree deferred (tree is busy during _ready)
 	get_tree().root.add_child.call_deferred(modal)
 
 	# Connect modal signals (Modal class always has modal_closed signal)
-	print("EventManager: Connecting modal signals...")
 	modal.modal_closed.connect(_on_modal_closed_internally)
 
 	# Register in UI system immediately (modal exists, just not in tree yet)
-	print("EventManager: Registering modal in UI registry...")
 	register_ui(UIType.MODAL, modal)
-
-	print("EventManager: Modal UI created and registered successfully (will be added to tree next frame)")
 
 
 ## Internal handler for modal closed (from EventManager-owned modal)
 func _on_modal_closed_internally() -> void:
-	print("EventManager: Modal closed internally, cleaning up UI stack")
 	# Remove from UI stack
 	hide_ui(UIType.MODAL)
 
@@ -309,13 +292,11 @@ func _on_modal_closed_internally() -> void:
 func _setup_chat_ui() -> void:
 	# ChatUI is part of the main scene, so we'll register it when main scene provides it
 	# This is called from main.gd's _ready() after the scene is loaded
-	print("EventManager: ChatUI will be registered by main scene")
+	pass
 
 
 ## Handle scene transitions with fade effect
 func _on_screen_transition_requested(from_scene: String, to_scene: String) -> void:
-	print("Scene transition: %s -> %s" % [from_scene, to_scene])
-
 	if not transition_scene:
 		push_error("Transition scene not available - falling back to direct transition")
 		var error = get_tree().change_scene_to_file(to_scene)
@@ -378,19 +359,15 @@ func register_bartender_scene(scene: Control) -> void:
 	# Start with bartender scene hidden
 	if bartender_scene:
 		bartender_scene.visible = false
-	print("EventManager: Bartender scene registered")
 
 
 ## Request a view state change
 func request_view_change(new_state: ViewState) -> void:
 	if current_view_state == new_state:
-		print("EventManager: Already in view state ", ViewState.keys()[new_state])
 		return
 
 	var old_state = current_view_state
 	current_view_state = new_state
-
-	print("EventManager: View state changed from ", ViewState.keys()[old_state], " to ", ViewState.keys()[new_state])
 
 	# Prepare the TARGET view (show what we're transitioning TO)
 	_prepare_view_for_transition(new_state)
@@ -409,16 +386,13 @@ func _prepare_view_for_transition(target_state: ViewState) -> void:
 			# Going TO bartender - show bartender scene, hide ChatUI (will show after pan)
 			if bartender_scene:
 				bartender_scene.visible = true
-				print("EventManager: Bartender scene shown (preparing for transition)")
 			if chat_ui:
 				chat_ui.visible = false
-				print("EventManager: ChatUI hidden (will show after pan)")
 
 		ViewState.GROUND, ViewState.SKY:
 			# Going TO ground/sky - hide ChatUI immediately, keep bartender visible during pan
 			if chat_ui:
 				chat_ui.visible = false
-				print("EventManager: ChatUI hidden (leaving bartender)")
 			# NOTE: Bartender scene stays visible during pan, will be hidden after pan completes
 
 
@@ -429,7 +403,6 @@ func get_current_view() -> ViewState:
 
 ## Notify that a view transition has completed
 func complete_view_transition(view_state: ViewState) -> void:
-	print("EventManager: View transition completed for ", ViewState.keys()[view_state])
 
 	var chat_ui = get_ui(UIType.CHAT_UI)
 
@@ -439,16 +412,13 @@ func complete_view_transition(view_state: ViewState) -> void:
 			# Arrived at bartender - fade in ChatUI
 			if chat_ui and chat_ui.has_method("fade_in"):
 				chat_ui.fade_in()
-				print("EventManager: ChatUI fading in (arrived at bartender)")
 			elif chat_ui:
 				chat_ui.visible = true
-				print("EventManager: ChatUI shown (arrived at bartender)")
 
 		ViewState.GROUND, ViewState.SKY:
 			# Arrived at ground/sky - hide bartender scene
 			if bartender_scene:
 				bartender_scene.visible = false
-				print("EventManager: Bartender scene hidden (arrived at ground/sky)")
 
 	view_transition_completed.emit(view_state)
 
@@ -466,14 +436,12 @@ func register_ui(ui_type: UIType, ui_element: Node) -> void:
 	# Ensure UI starts hidden (will be shown when needed)
 	ui_element.visible = false
 
-	print("EventManager: Registered UI - %s (%s)" % [UIType.keys()[ui_type], ui_element.name])
 
 
 ## Unregister a UI element (for cleanup)
 func unregister_ui(ui_type: UIType) -> void:
 	if ui_registry.has(ui_type):
 		ui_registry.erase(ui_type)
-		print("EventManager: Unregistered UI - %s" % UIType.keys()[ui_type])
 
 
 ## Get a UI element by type
@@ -496,7 +464,6 @@ func show_ui(ui_type: UIType) -> void:
 
 	# Check if already in stack
 	if ui_state_stack.has(ui_type):
-		print("EventManager: UI %s already visible" % UIType.keys()[ui_type])
 		return
 
 	# Add to stack and show
@@ -507,7 +474,6 @@ func show_ui(ui_type: UIType) -> void:
 	if _is_blocking_ui(ui_type):
 		InputManager.register_modal(ui_element)
 
-	print("EventManager: Showed UI - %s (stack size: %d)" % [UIType.keys()[ui_type], ui_state_stack.size()])
 
 	# Emit appropriate signal
 	match ui_type:
@@ -541,7 +507,6 @@ func hide_ui(ui_type: UIType) -> void:
 	if _is_blocking_ui(ui_type):
 		InputManager.unregister_modal(ui_element)
 
-	print("EventManager: Hid UI - %s (stack size: %d)" % [UIType.keys()[ui_type], ui_state_stack.size()])
 
 	# Emit appropriate signal
 	match ui_type:
@@ -579,7 +544,6 @@ func close_top_ui() -> void:
 		return
 
 	var top_ui = ui_state_stack.back()
-	print("EventManager: Closing top UI - %s" % UIType.keys()[top_ui])
 	hide_ui(top_ui)
 
 
@@ -607,13 +571,11 @@ func has_active_modal() -> bool:
 
 ## Request NPC dialogue (emits signal that main scene will handle)
 func request_npc_dialogue(npc: Node2D, npc_name: String, dialogue_text: String) -> void:
-	print("EventManager: NPC dialogue requested - ", npc_name)
 	npc_dialogue_requested.emit(npc, npc_name, dialogue_text)
 
 
 ## Close NPC dialogue
 func close_npc_dialogue() -> void:
-	print("EventManager: NPC dialogue closed")
 	npc_dialogue_closed.emit()
 
 
@@ -623,11 +585,6 @@ func close_npc_dialogue() -> void:
 ## Priority: Active UI > View Reset > Pause
 func handle_escape() -> void:
 	var top_ui = get_top_ui()
-	print("EventManager: ESC pressed - view: %s, top UI: %s, stack size: %d" % [
-		ViewState.keys()[current_view_state],
-		UIType.keys()[top_ui] if top_ui != -1 else "none",
-		ui_state_stack.size()
-	])
 
 	# Handle based on current context (highest priority first)
 	if has_active_ui():
@@ -645,7 +602,6 @@ func _is_away_from_ground() -> bool:
 
 ## Handle ESC when a UI is open - close the topmost UI
 func _handle_escape_from_ui(ui_type: UIType) -> void:
-	print("EventManager: ESC → Closing UI: %s" % UIType.keys()[ui_type])
 
 	# Special handling for specific UI types
 	match ui_type:
@@ -668,13 +624,11 @@ func _handle_escape_from_ui(ui_type: UIType) -> void:
 
 ## Handle ESC when away from ground - reset view to ground
 func _handle_escape_return_to_ground() -> void:
-	print("EventManager: ESC → Returning to ground from %s" % ViewState.keys()[current_view_state])
 	request_view_change(ViewState.GROUND)
 
 
 ## Handle ESC at ground level - emit signal for pause menu, etc.
 func _handle_escape_at_ground() -> void:
-	print("EventManager: ESC → Emitting escape_pressed signal (ground level)")
 	escape_pressed.emit()
 
 
@@ -686,7 +640,6 @@ func setup_spawn_system(background: Node) -> void:
 		push_error("EventManager: Cannot setup spawn system - background is null")
 		return
 	background_ref = background
-	print("EventManager: Spawn system initialized")
 
 
 ## Enable or disable spawn processing
@@ -774,5 +727,4 @@ func _check_respawns() -> void:
 
 ## Request respawn of a specific ally type
 func request_ally_respawn(ally_type: String) -> void:
-	print("EventManager: Requesting ally respawn - %s" % ally_type)
 	ally_respawn_requested.emit(ally_type)

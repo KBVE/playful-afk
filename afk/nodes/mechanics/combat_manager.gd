@@ -11,19 +11,19 @@ signal damage_dealt(attacker: Node2D, target: Node2D, damage: float)
 signal target_killed(attacker: Node2D, target: Node2D)
 
 ## Combat configuration
-const WARRIOR_MELEE_RANGE: float = 60.0  # Warriors can attack from close range (accounts for sprite size)
-const ARCHER_MIN_RANGE: float = 80.0   # Archers stay at least this far (15-20px visual)
-const ARCHER_MAX_RANGE: float = 300.0  # Archers can shoot from this far
-const ARCHER_OPTIMAL_RANGE: float = 100.0  # Archers prefer this distance
-const ARCHER_HURT_RANGE: float = 150.0  # When hurt, archers keep extra distance
+## NOTE: Combat ranges are now decentralized - each NPC defines its own attack_range property
+## - NPC base class: default 60.0 (melee allies like warriors)
+## - Monster base class: default 50.0 (melee monsters)
+## - Individual NPCs override as needed (e.g., Archer: 150.0 for ranged attacks)
 const FACING_THRESHOLD: float = 0.85  # Dot product threshold for "facing" (stricter, ~30 degrees)
 const ATTACK_COOLDOWN: float = 1.5  # Seconds between attacks
 
 ## Health thresholds for state changes
 const HURT_HEALTH_THRESHOLD: float = 0.3  # Below 30% HP triggers HURT state
 
-## NOTE: Enums (Faction, CombatType, NPCState) are defined in NPCManager
-## Access them via NPCManager.Faction, NPCManager.CombatType, NPCManager.NPCState
+## NOTE: NPCState bitwise flags are defined in NPCManager
+## Includes behavioral states, combat types, and factions - all unified in NPCState enum
+## Access via NPCManager.NPCState (e.g., NPCState.MELEE, NPCState.ALLY, NPCState.WALKING)
 
 ## Active combat tracking
 var active_combatants: Dictionary = {}  # Key: attacker Node2D, Value: combat state
@@ -41,7 +41,6 @@ var active_combatants: Dictionary = {}  # Key: attacker Node2D, Value: combat st
 func _ready() -> void:
 	# Wait for scene tree to be ready
 	await get_tree().process_frame
-	print("CombatManager initialized")
 
 
 func _process(delta: float) -> void:
@@ -60,7 +59,9 @@ func can_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 		return false
 
 	# Check if attacker is passive (can't attack)
-	if attacker.has_method("is_passive") and attacker.is_passive():
+	# Use bitwise check for PASSIVE flag
+	var attacker_state := Bitwise._ensure_int_prop(attacker, "current_state")
+	if Bitwise.has_flag(attacker_state, NPCManager.NPCState.PASSIVE):
 		return false
 
 	# Check if target is alive
@@ -80,11 +81,10 @@ func can_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 		if state_flags & NPCManager.NPCState.ATTACKING:
 			return false
 
-	# Get NPC type for range checking
-	var npc_type = _get_npc_type(attacker)
-	var required_range = WARRIOR_MELEE_RANGE
+	# Get attack range from NPC property (decentralized)
+	var required_range = attacker.attack_range if "attack_range" in attacker else 60.0
 
-	# Check proximity based on NPC type
+	# Check proximity - must be within attack range
 	var distance = attacker.global_position.distance_to(target.global_position)
 	if distance > required_range:
 		return false
@@ -147,8 +147,8 @@ func start_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 
 	# Set the NPC's current_state to ATTACKING to trigger animation
 	# Use bitwise OR to add ATTACKING flag while preserving other flags
-	if "current_state" in attacker:
-		attacker.current_state |= NPCManager.NPCState.ATTACKING
+	var current_state := Bitwise._ensure_int_prop(attacker, "current_state")
+	Bitwise._set_int_prop(attacker, "current_state", Bitwise.add_flag(current_state, NPCManager.NPCState.ATTACKING))
 
 	combat_started.emit(attacker, target)
 
@@ -186,19 +186,21 @@ func _execute_melee_attack(attacker: Node2D, target: Node2D, npc_type: String) -
 		active_combatants[attacker]["state_flags"] = state_flags & ~NPCManager.NPCState.ATTACKING
 
 	# Remove ATTACKING flag from NPC's current_state
-	if "current_state" in attacker:
-		attacker.current_state &= ~NPCManager.NPCState.ATTACKING
+	var current_state := Bitwise._ensure_int_prop(attacker, "current_state")
+	current_state = Bitwise.remove_flag(current_state, NPCManager.NPCState.ATTACKING)
 
-		# Now set appropriate state based on controller
-		if "controller" in attacker and attacker.controller:
-			if attacker.controller.is_auto_moving:
-				attacker.current_state |= NPCManager.NPCState.WALKING
-			else:
-				# Remove WALKING flag too if not moving
-				attacker.current_state &= ~NPCManager.NPCState.WALKING
+	# Now set appropriate state based on controller
+	if "controller" in attacker and attacker.controller:
+		if attacker.controller.is_auto_moving:
+			current_state = Bitwise.add_flag(current_state, NPCManager.NPCState.WALKING)
 		else:
-			# Remove WALKING flag and return to idle
-			attacker.current_state &= ~NPCManager.NPCState.WALKING
+			# Remove WALKING flag too if not moving
+			current_state = Bitwise.remove_flag(current_state, NPCManager.NPCState.WALKING)
+	else:
+		# Remove WALKING flag and return to idle
+		current_state = Bitwise.remove_flag(current_state, NPCManager.NPCState.WALKING)
+
+	Bitwise._set_int_prop(attacker, "current_state", current_state)
 
 
 ## ===== RANGED COMBAT =====
@@ -209,7 +211,9 @@ func can_ranged_attack(attacker: Node2D, target: Node2D) -> bool:
 		return false
 
 	# Check if attacker is passive (can't attack)
-	if attacker.has_method("is_passive") and attacker.is_passive():
+	# Use bitwise check for PASSIVE flag
+	var attacker_state := Bitwise._ensure_int_prop(attacker, "current_state")
+	if Bitwise.has_flag(attacker_state, NPCManager.NPCState.PASSIVE):
 		return false
 
 	# Check if target is alive
@@ -232,11 +236,16 @@ func can_ranged_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Check distance (must be in range but not too close)
 	var distance = attacker.global_position.distance_to(target.global_position)
 
+	# Get archer's attack range (optimal distance)
+	var optimal_range = attacker.attack_range if "attack_range" in attacker else 150.0
+	var min_range = optimal_range * 0.5  # Half optimal = minimum kiting distance
+	var max_range = optimal_range * 2.0  # Double optimal = maximum shooting distance
+
 	# Archers need to maintain minimum distance and be within max range
-	if distance < ARCHER_MIN_RANGE:
+	if distance < min_range:
 		return false  # Too close - need to retreat first
 
-	if distance > ARCHER_MAX_RANGE:
+	if distance > max_range:
 		return false  # Too far - need to pursue
 
 	# MUST be facing target to shoot (just like warriors)
@@ -252,13 +261,15 @@ func should_archer_retreat(attacker: Node2D, target: Node2D) -> bool:
 		return false
 
 	var distance = attacker.global_position.distance_to(target.global_position)
+	var optimal_range = attacker.attack_range if "attack_range" in attacker else 150.0
+	var min_range = optimal_range * 0.5  # Minimum kiting distance
 
 	# If hurt (low health), use extended retreat distance
 	if is_hurt(attacker):
-		return distance < ARCHER_HURT_RANGE
+		return distance < optimal_range  # Retreat to full optimal range when hurt
 
 	# Normal retreat distance
-	return distance < ARCHER_MIN_RANGE
+	return distance < min_range
 
 
 ## Check if NPC is hurt (low health - below 30%)
@@ -272,9 +283,11 @@ func is_hurt(npc: Node2D) -> bool:
 
 ## Get optimal kiting range based on NPC health state
 func get_optimal_kiting_range(npc: Node2D) -> float:
+	var optimal_range = npc.attack_range if "attack_range" in npc else 150.0
+
 	if is_hurt(npc):
-		return ARCHER_HURT_RANGE  # Hurt archers keep extra distance
-	return ARCHER_OPTIMAL_RANGE  # Normal kiting range
+		return optimal_range  # Hurt archers keep at optimal range
+	return optimal_range  # Normal kiting range is also optimal
 
 
 ## Start ranged attack (called by NPCManager after it handles movement)
@@ -284,7 +297,7 @@ func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: Stri
 
 	# CRITICAL: Only RANGED combat type NPCs can fire projectiles
 	var attacker_combat_type = _get_npc_combat_type(attacker)
-	if attacker_combat_type != NPCManager.CombatType.RANGED:
+	if attacker_combat_type != NPCManager.NPCState.RANGED:
 		return false
 
 	# Get NPC type
@@ -343,14 +356,18 @@ func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: Stri
 
 	# Update NPC animation state after attack completes
 	# Check if NPC should be walking or idle based on controller movement state
-	if "current_state" in attacker and is_instance_valid(attacker):
+	if is_instance_valid(attacker):
+		var current_state := Bitwise._ensure_int_prop(attacker, "current_state")
 		if "controller" in attacker and attacker.controller:
 			if attacker.controller.is_auto_moving:
-				attacker.current_state = "Walking"
+				current_state = Bitwise.add_flag(current_state, NPCManager.NPCState.WALKING)
 			else:
-				attacker.current_state = "Idle"
+				# Remove WALKING flag - return to idle
+				current_state = Bitwise.remove_flag(current_state, NPCManager.NPCState.WALKING)
 		else:
-			attacker.current_state = "Idle"
+			# Remove WALKING flag - return to idle
+			current_state = Bitwise.remove_flag(current_state, NPCManager.NPCState.WALKING)
+		Bitwise._set_int_prop(attacker, "current_state", current_state)
 
 	combat_started.emit(attacker, target)
 	return true
@@ -425,8 +442,12 @@ func find_nearest_target(attacker: Node2D, max_range: float = 500.0) -> Node2D:
 		if "is_friendly" in target and target.is_friendly:
 			continue
 
-		# Skip if target is same type as attacker (don't attack allies)
-		if _is_same_faction(attacker, target):
+		# Skip if target is same faction as attacker (don't attack allies)
+		# Extract faction bits and compare directly (ALLY, MONSTER, or PASSIVE)
+		var faction_mask := NPCManager.NPCState.ALLY | NPCManager.NPCState.MONSTER | NPCManager.NPCState.PASSIVE
+		var attacker_faction := Bitwise.extract_bits(Bitwise._ensure_int_prop(attacker, "current_state"), faction_mask)
+		var target_faction := Bitwise.extract_bits(Bitwise._ensure_int_prop(target, "current_state"), faction_mask)
+		if attacker_faction == target_faction and attacker_faction != 0:
 			continue
 
 		# Skip if target is dead
@@ -466,8 +487,12 @@ func find_all_valid_targets(attacker: Node2D, max_range: float = 500.0) -> Array
 		if "is_friendly" in target and target.is_friendly:
 			continue
 
-		# Skip if target is same type as attacker (don't attack allies)
-		if _is_same_faction(attacker, target):
+		# Skip if target is same faction as attacker (don't attack allies)
+		# Extract faction bits and compare directly (ALLY, MONSTER, or PASSIVE)
+		var faction_mask := NPCManager.NPCState.ALLY | NPCManager.NPCState.MONSTER | NPCManager.NPCState.PASSIVE
+		var attacker_faction := Bitwise.extract_bits(Bitwise._ensure_int_prop(attacker, "current_state"), faction_mask)
+		var target_faction := Bitwise.extract_bits(Bitwise._ensure_int_prop(target, "current_state"), faction_mask)
+		if attacker_faction == target_faction and attacker_faction != 0:
 			continue
 
 		# Skip if target is dead
@@ -481,37 +506,6 @@ func find_all_valid_targets(attacker: Node2D, max_range: float = 500.0) -> Array
 			valid_targets.append(target)
 
 	return valid_targets
-
-
-## Check if two NPCs are in the same faction (don't attack each other)
-func _is_same_faction(npc1: Node2D, npc2: Node2D) -> bool:
-	var faction1 = _get_npc_faction(npc1)
-	var faction2 = _get_npc_faction(npc2)
-
-	# NPCs in the same faction don't attack each other
-	return faction1 == faction2
-
-
-## Get NPC's faction
-func _get_npc_faction(npc: Node2D) -> NPCManager.Faction:
-	# Check if NPC explicitly defines faction
-	if "faction" in npc:
-		return npc.faction
-
-	# Check if marked as friendly (cat, companions, etc.)
-	if "is_friendly" in npc and npc.is_friendly:
-		return NPCManager.Faction.ALLY
-
-	# Otherwise, determine by type
-	var npc_type = _get_npc_type(npc)
-
-	match npc_type:
-		"warrior", "archer", "cat":
-			return NPCManager.Faction.ALLY
-		"chicken", "mushroom", "goblin", "eyebeast", "skeleton":
-			return NPCManager.Faction.MONSTER
-		_:
-			return NPCManager.Faction.NEUTRAL
 
 
 ## ===== COMBAT STATE MANAGEMENT =====
@@ -607,24 +601,21 @@ func _get_npc_name(npc: Node2D) -> String:
 	return npc.name
 
 
-## Get NPC's combat type
-func _get_npc_combat_type(npc: Node2D) -> NPCManager.CombatType:
-	# Check if NPC explicitly defines combat_type
-	if "combat_type" in npc:
-		return npc.combat_type
+## Get NPC's combat type from bitwise state flags
+func _get_npc_combat_type(npc: Node2D) -> int:
+	var state := Bitwise._ensure_int_prop(npc, "current_state")
 
-	# Otherwise, determine by type for backward compatibility
-	var npc_type = _get_npc_type(npc)
+	# Check bitwise flags for combat type
+	if Bitwise.has_flag(state, NPCManager.NPCState.MELEE):
+		return NPCManager.NPCState.MELEE
+	elif Bitwise.has_flag(state, NPCManager.NPCState.RANGED):
+		return NPCManager.NPCState.RANGED
+	elif Bitwise.has_flag(state, NPCManager.NPCState.MAGIC):
+		return NPCManager.NPCState.MAGIC
+	elif Bitwise.has_flag(state, NPCManager.NPCState.HEALER):
+		return NPCManager.NPCState.HEALER
 
-	match npc_type:
-		"warrior":
-			return NPCManager.CombatType.MELEE
-		"archer":
-			return NPCManager.CombatType.RANGED
-		"cat", "chicken":
-			return NPCManager.CombatType.NONE
-		_:
-			return NPCManager.CombatType.NONE
+	return 0  # No combat type (passive)
 
 
 ## Update HURT state flag based on NPC health

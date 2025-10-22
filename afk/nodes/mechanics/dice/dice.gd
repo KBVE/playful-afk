@@ -44,15 +44,12 @@ func _ready() -> void:
 		else:
 			push_error("Failed to load dice texture: ", texture_path)
 
-	print("Loaded ", dice_textures.size(), " dice textures")
-
 	if sprite:
 		# Set to a random starting dice face
 		current_dice_value = randi_range(0, 20)
 		_set_dice_texture(current_dice_value)
 		# Store original position for shake effect
 		original_position = sprite.position
-		print("Dice initialized to value: ", current_dice_value)
 
 
 func _process(delta: float) -> void:

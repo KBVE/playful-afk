@@ -16,7 +16,7 @@ var scroll_offset: float = 0.0
 
 
 func _ready() -> void:
-	print("RedForestSimple initialized")
+	pass
 
 
 ## Scroll all layers based on an offset

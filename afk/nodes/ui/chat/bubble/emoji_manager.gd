@@ -18,10 +18,8 @@ const STATE_EMOJIS: Dictionary = {
 	NPCManager.NPCState.PURSUING: "😠",   # Angry face (chasing)
 }
 
-## Entity-type specific emoji sets (used when no state emoji matches)
-const WARRIOR_EMOJIS: Array[String] = ["⚔️", "🛡️", "💪", "🔥", "⚡", "🎖️", "👊", "⭐"]
-const ARCHER_EMOJIS: Array[String] = ["🏹", "🎯", "👁️", "🌟", "🦅", "🍃", "💨", "🔭"]
-const MONSTER_EMOJIS: Array[String] = ["😈", "👹", "👻", "🐔", "🦖", "🐉", "🧟", "💀"]
+## Default emoji set (fallback if NPC doesn't have EMOJIS constant)
+const DEFAULT_EMOJIS: Array[String] = ["😊", "🎯", "⭐", "💫"]
 
 ## Emoji bubble pool (4 reusable bubbles)
 const POOL_SIZE: int = 8
@@ -35,7 +33,6 @@ var bubble_scene: PackedScene = preload("res://nodes/ui/chat/bubble/chat_bubble.
 func _ready() -> void:
 	# Pre-allocate emoji bubble pool
 	_initialize_bubble_pool()
-	print("EmojiManager: Initialized with %d pooled emoji bubbles" % POOL_SIZE)
 
 
 ## Initialize the emoji bubble pool
@@ -50,8 +47,6 @@ func _initialize_bubble_pool() -> void:
 			get_tree().root.add_child.call_deferred(bubble)
 
 		emoji_bubble_pool.append(bubble)
-
-	print("EmojiManager: Created %d pooled emoji bubbles" % emoji_bubble_pool.size())
 
 
 ## Show emoji for NPC based on state change
@@ -124,15 +119,18 @@ func _get_emoji_for_state(npc: Node2D, state: int) -> String:
 
 ## Get emoji based on NPC type
 func _get_emoji_for_entity_type(npc: Node2D) -> String:
-	var emoji_set: Array[String] = MONSTER_EMOJIS  # Default
+	var emoji_set: Array[String] = DEFAULT_EMOJIS  # Default
 
-	# Determine emoji set based on NPC type
-	if npc is Warrior:
-		emoji_set = WARRIOR_EMOJIS
-	elif npc is Archer:
-		emoji_set = ARCHER_EMOJIS
-	elif npc is Monster:
-		emoji_set = MONSTER_EMOJIS
+	# Try to get EMOJIS constant from NPC's script
+	if npc and "EMOJIS" in npc:
+		emoji_set = npc.EMOJIS
+	elif npc and npc.get_script():
+		# Fallback: try to get it from the script's constants
+		var script = npc.get_script()
+		if script and script.has_script_method("get_script_constant_map"):
+			var constants = script.get_script_constant_map()
+			if "EMOJIS" in constants:
+				emoji_set = constants["EMOJIS"]
 
 	# Random emoji from set
 	return emoji_set[randi() % emoji_set.size()]

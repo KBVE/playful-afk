@@ -10,16 +10,38 @@ signal goblin_clicked
 ## Emitted when the goblin dies
 signal goblin_died
 
+## NPC Registry Data - Decentralized configuration
+const NPC_TYPE_ID: String = "goblin"
+const NPC_CATEGORY: String = "monster"
+const AI_PROFILE: Dictionary = {
+	"idle_weight": 40,      # Goblins are aggressive
+	"walk_weight": 60,      # Move around more than mushrooms
+	"state_change_min": 1.0,  # Very quick state changes
+	"state_change_max": 3.0,
+	"movement_speed": 0.8   # Faster than mushrooms
+}
+
+## Create stats for this NPC type
+static func create_stats() -> NPCStats:
+	return NPCStats.new(
+		100.0,  # HP (medium - glass cannon)
+		0.0,    # Mana (goblins don't use mana)
+		80.0,   # Energy (high - very active)
+		100.0,  # Hunger
+		12.0,   # Attack (high melee damage - hits harder than mushrooms)
+		5.0,    # Defense (low - fragile)
+		NPCStats.Emotion.NEUTRAL,
+		NPC_TYPE_ID
+	)
+
 
 func _init() -> void:
 	# Set goblin-specific properties
 	walk_speed = 30.0  # Slightly faster than mushroom
-	combat_type = NPCManager.CombatType.MELEE  # Melee attacker
 
-	# Set monster types
-	monster_types = [
-		NPCManager.MonsterType.AGGRESSIVE
-	]
+	# Set state flags: MELEE combat type + MONSTER faction
+	# Goblins are MELEE MONSTER (aggressive, attacks allies)
+	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.MONSTER
 
 	# State-to-animation mapping (goblin has all 5 animations)
 	state_to_animation = {

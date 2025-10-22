@@ -72,7 +72,6 @@ func _ready() -> void:
 	# Auto-register all structures with StructureManager
 	_register_structures()
 
-	print("RollingHillsBackground initialized")
 	print("Walkable check mode: ", WalkableCheckMode.keys()[walkable_check_mode])
 
 

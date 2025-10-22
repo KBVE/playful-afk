@@ -178,7 +178,6 @@ func _handle_idle_animations(delta: float) -> void:
 
 		# Tell controller to move to target
 		NPCManager.cat.controller.move_to_position(target_x)
-		print("Cat moving to: %s" % ("right edge" if not move_right else "left edge"))
 
 
 func _cycle_cat_animation() -> void:
@@ -188,8 +187,3 @@ func _cycle_cat_animation() -> void:
 
 	# Play the animation
 	NPCManager.cat.controller.play_state(new_state)
-
-	print("Testing animation: %s (combo: %s)" % [
-		new_state,
-		NPCManager.cat.controller.get_animation_sequence(new_state)
-	])

@@ -76,8 +76,6 @@ func _initialize_pool(projectile_type: String) -> void:
 
 		_projectile_pools[projectile_type].append(projectile)
 
-	print("ProjectileManager: Initialized pool for '%s' with %d instances" % [projectile_type, pool_size])
-
 
 ## ===== PROJECTILE CONTAINER SETUP =====
 

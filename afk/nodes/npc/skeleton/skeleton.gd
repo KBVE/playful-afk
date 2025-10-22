@@ -10,16 +10,38 @@ signal skeleton_clicked
 ## Emitted when the skeleton dies
 signal skeleton_died
 
+## NPC Registry Data - Decentralized configuration
+const NPC_TYPE_ID: String = "skeleton"
+const NPC_CATEGORY: String = "monster"
+const AI_PROFILE: Dictionary = {
+	"idle_weight": 35,      # Skeletons are aggressive
+	"walk_weight": 65,      # Move around steadily
+	"state_change_min": 1.2,  # Medium state changes
+	"state_change_max": 3.5,
+	"movement_speed": 0.75  # Medium speed
+}
+
+## Create stats for this NPC type
+static func create_stats() -> NPCStats:
+	return NPCStats.new(
+		110.0,  # HP (medium-high - undead durability)
+		0.0,    # Mana (skeletons don't use mana)
+		75.0,   # Energy (medium - steady movement)
+		100.0,  # Hunger
+		10.0,   # Attack (medium melee damage - balanced)
+		6.0,    # Defense (medium - bony armor)
+		NPCStats.Emotion.NEUTRAL,
+		NPC_TYPE_ID
+	)
+
 
 func _init() -> void:
 	# Set skeleton-specific properties
 	walk_speed = 28.0  # Medium speed (between mushroom and goblin)
-	combat_type = NPCManager.CombatType.MELEE  # Melee attacker
 
-	# Set monster types
-	monster_types = [
-		NPCManager.MonsterType.AGGRESSIVE
-	]
+	# Set state flags: MELEE combat type + MONSTER faction
+	# Skeletons are MELEE MONSTER (undead warriors, attacks allies)
+	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.MONSTER
 
 	# State-to-animation mapping (skeleton has all 5 animations)
 	state_to_animation = {

@@ -20,7 +20,6 @@ func _ready() -> void:
 	# Scale the sprites to be larger and fill the viewport
 	call_deferred("_scale_background_layers")
 
-	print("Red Forest Background initialized with %d layers" % get_child_count())
 
 	# The parallax scrolling is now handled automatically by the Camera2D
 	# Each layer's motion_scale determines how fast it scrolls relative to camera

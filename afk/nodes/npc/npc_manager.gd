@@ -4,75 +4,80 @@ extends Node
 ## Provides centralized access to all NPCs in the game, especially the virtual pet
 ## Access via: NPCManager.cat anywhere in your code
 
-## ===== NPC TYPE SYSTEMS =====
-## Core enums that define NPC behavior and combat
-
-## Faction enum - determines who can attack whom
-enum Faction {
-	ALLY,      # Player's allies (warriors, archers, cat, etc.) - don't attack each other
-	MONSTER,   # Hostile creatures (chickens, etc.) - attack allies
-	NEUTRAL    # Neutral NPCs that don't participate in combat
-}
-
-## Combat Type enum - determines how an NPC fights
-enum CombatType {
-	NONE,      # Non-combatant (cat, passive NPCs)
-	MELEE,     # Close-range physical attacks (warriors, knights)
-	RANGED,    # Long-range projectile attacks (archers, crossbowmen)
-	MAGIC      # Spell-based attacks (mages, wizards)
-}
+## ===== NPC STATE SYSTEM =====
+## Unified bitwise flag system for ALL NPC states, types, and behaviors
+## Consolidates behavioral states, combat types, and factions into one performant system
 
 ## NPC State enum (using bitwise flags for easy combinations)
-## Can combine states: e.g., WALKING | COMBAT | PURSUING | HURT
-## NOTE: Some states are behavioral (COMBAT, PURSUING), others are visual (ATTACKING, DAMAGED, DEAD)
+## Can combine states: e.g., WALKING | COMBAT | MELEE | ALLY
+##
+## State Categories:
+##   - Behavioral: IDLE, WALKING, WANDERING, COMBAT, PURSUING, RETREATING, SPAWN
+##   - Visual: ATTACKING, DAMAGED, DEAD, HURT
+##   - Combat Types: MELEE, RANGED, MAGIC, HEALER
+##   - Factions: ALLY, MONSTER, PASSIVE
+##
+## Usage Examples:
+##   Warrior:  IDLE | MELEE | ALLY
+##   Goblin:   WALKING | WANDERING | MELEE | MONSTER
+##   Chicken:  IDLE | PASSIVE
+##   Archer:   IDLE | RANGED | ALLY
 enum NPCState {
-	IDLE = 1 << 0,        # 1:   Idle (not moving, not attacking)
-	WALKING = 1 << 1,     # 2:   Walking/moving
-	ATTACKING = 1 << 2,   # 4:   Currently attacking (animation playing)
-	WANDERING = 1 << 3,   # 8:   Normal wandering/idle behavior (no combat)
-	COMBAT = 1 << 4,      # 16:  Engaged in combat
-	RETREATING = 1 << 5,  # 32:  Retreating from enemy (archer kiting)
-	PURSUING = 1 << 6,    # 64:  Moving towards enemy
-	HURT = 1 << 7,        # 128: Low health - triggers defensive behavior (not the same as DAMAGED animation)
-	DAMAGED = 1 << 8,     # 256: Taking damage - plays hurt/damage animation
-	DEAD = 1 << 9         # 512: Dead - plays death animation
-}
+	# Behavioral States (0-10)
+	IDLE = 1 << 0,        # 1:     Idle (not moving, not attacking)
+	WALKING = 1 << 1,     # 2:     Walking/moving
+	ATTACKING = 1 << 2,   # 4:     Currently attacking (animation playing)
+	WANDERING = 1 << 3,   # 8:     Normal wandering/idle behavior (no combat)
+	COMBAT = 1 << 4,      # 16:    Engaged in combat
+	RETREATING = 1 << 5,  # 32:    Retreating from enemy (archer kiting)
+	PURSUING = 1 << 6,    # 64:    Moving towards enemy
+	HURT = 1 << 7,        # 128:   Low health - triggers defensive behavior
+	DAMAGED = 1 << 8,     # 256:   Taking damage - plays hurt/damage animation
+	DEAD = 1 << 9,        # 512:   Dead - plays death animation
+	SPAWN = 1 << 10,      # 1024:  Just spawned - routing to safe zone
 
-## Monster Type enum - additional categorization for monsters
-enum MonsterType {
-	ANIMAL,      # Animal creatures (chicken, rabbit, etc.)
-	DEMON,       # Demonic/evil creatures
-	PASSIVE,     # Doesn't attack/do damage (can be combined with other types)
-	AGGRESSIVE   # Actively seeks combat and attacks
+	# Combat Types (11-14) - Each NPC has exactly ONE combat type
+	MELEE = 1 << 11,      # 2048:  Melee attacker (warriors, knights, goblins)
+	RANGED = 1 << 12,     # 4096:  Ranged attacker (archers, crossbowmen)
+	MAGIC = 1 << 13,      # 8192:  Magic attacker (mages, wizards)
+	HEALER = 1 << 14,     # 16384: Healer/support (clerics, druids)
+
+	# Factions (15-17) - Determines who can attack whom
+	ALLY = 1 << 15,       # 32768:  Player's allies - don't attack each other
+	MONSTER = 1 << 16,    # 65536:  Hostile creatures - attack allies
+	PASSIVE = 1 << 17     # 131072: Doesn't attack/do damage (chickens, critters)
 }
 
 ## ===== FACTION HELPERS =====
 
-## Get NPC's faction - determines who they can/cannot attack
-static func get_faction(npc: Node2D) -> Faction:
+## DEPRECATED: Use bitwise checks directly instead
+## Example: if npc.current_state & NPCState.ALLY
+## Or to check same faction: (npc1.current_state & faction_mask) == (npc2.current_state & faction_mask)
+## where faction_mask = (NPCState.ALLY | NPCState.MONSTER | NPCState.PASSIVE)
+##
+## Get NPC's faction from bitwise state flags - determines who they can/cannot attack
+## Returns the faction bitwise flag (ALLY, MONSTER, or PASSIVE)
+static func get_faction(npc: Node2D) -> int:
 	if not is_instance_valid(npc):
-		return Faction.NEUTRAL
+		return 0  # No faction
 
-	# Check if NPC explicitly defines faction property
-	if "faction" in npc:
-		return npc.faction
+	# Read faction from current_state bitwise flags
+	if "current_state" in npc:
+		var state = npc.current_state
 
-	# Check if marked as friendly (cat, companions, etc.)
+		# Check bitwise flags for faction
+		if state & NPCState.ALLY:
+			return NPCState.ALLY
+		elif state & NPCState.MONSTER:
+			return NPCState.MONSTER
+		elif state & NPCState.PASSIVE:
+			return NPCState.PASSIVE
+
+	# Check if marked as friendly (cat, companions, etc.) - legacy support
 	if "is_friendly" in npc and npc.is_friendly:
-		return Faction.ALLY
+		return NPCState.ALLY
 
-	# Determine faction by NPC type (stats.npc_type)
-	var npc_type = ""
-	if "stats" in npc and npc.stats and "npc_type" in npc.stats:
-		npc_type = npc.stats.npc_type
-
-	match npc_type:
-		"warrior", "archer", "cat":
-			return Faction.ALLY
-		"chicken", "mushroom", "goblin", "eyebeast", "skeleton":
-			return Faction.MONSTER
-		_:
-			return Faction.NEUTRAL
+	return 0  # No faction
 
 # Virtual Pet Reference
 var cat: Cat = null
@@ -111,7 +116,6 @@ const NPC_REGISTRY: Dictionary = {
 		"scene": "res://nodes/npc/chicken/chicken.tscn",
 		"class_name": "Chicken",
 		"category": "monster",
-		"monster_types": [MonsterType.ANIMAL, MonsterType.PASSIVE],
 		"ai_profile": {
 			"idle_weight": 70,      # Chickens prefer to stay idle
 			"walk_weight": 30,
@@ -124,7 +128,6 @@ const NPC_REGISTRY: Dictionary = {
 		"scene": "res://nodes/npc/mushroom/mushroom.tscn",
 		"class_name": "Mushroom",
 		"category": "monster",
-		"monster_types": [MonsterType.AGGRESSIVE],
 		"ai_profile": {
 			"idle_weight": 50,      # Mushrooms are more active
 			"walk_weight": 50,
@@ -137,7 +140,6 @@ const NPC_REGISTRY: Dictionary = {
 		"scene": "res://nodes/npc/goblin/goblin.tscn",
 		"class_name": "Goblin",
 		"category": "monster",
-		"monster_types": [MonsterType.AGGRESSIVE],
 		"ai_profile": {
 			"idle_weight": 40,      # Goblins are aggressive
 			"walk_weight": 60,      # Move around more than mushrooms
@@ -150,7 +152,6 @@ const NPC_REGISTRY: Dictionary = {
 		"scene": "res://nodes/npc/eyebeast/eyebeast.tscn",
 		"class_name": "Eyebeast",
 		"category": "monster",
-		"monster_types": [MonsterType.AGGRESSIVE],
 		"ai_profile": {
 			"idle_weight": 30,      # Eyebeasts are very aggressive
 			"walk_weight": 70,      # Constantly moving (flying)
@@ -163,7 +164,6 @@ const NPC_REGISTRY: Dictionary = {
 		"scene": "res://nodes/npc/skeleton/skeleton.tscn",
 		"class_name": "Skeleton",
 		"category": "monster",
-		"monster_types": [MonsterType.AGGRESSIVE],
 		"ai_profile": {
 			"idle_weight": 35,      # Skeletons are aggressive
 			"walk_weight": 65,      # Move around steadily
@@ -369,10 +369,8 @@ func _on_cat_call_for_help(enemy: Node2D) -> void:
 		if npc_type not in ["warrior", "archer"]:
 			continue
 
-		# Check if NPC is idle (not already moving to a target)
-		var combat_type = CombatType.NONE
-		if "combat_type" in npc:
-			combat_type = npc.combat_type
+		# Check NPC's combat type from bitwise state (unused in this context, keeping for consistency)
+		# Combat type is determined by NPCState flags (MELEE, RANGED, etc.)
 
 		# Send this ally to engage the enemy
 		var movement_target = _get_movement_target(npc)
@@ -698,13 +696,23 @@ func play_release_effect(position: Vector2, on_midpoint: Callable) -> void:
 ## Register NPC for AI control
 ## Y position is now dynamically queried from background heightmap based on X
 func register_npc_ai(npc: Node2D, npc_type: String) -> void:
+	# Read AI profile and category from NPC instance (decentralized)
+	var ai_profile: Dictionary = {}
+	var npc_category: String = ""
 
-	if not NPC_REGISTRY.has(npc_type):
-		push_error("NPCManager: Cannot register AI for unknown NPC type: %s" % npc_type)
-		return
+	if "AI_PROFILE" in npc:
+		ai_profile = npc.AI_PROFILE
+	else:
+		# Fallback to registry if NPC doesn't have AI_PROFILE constant
+		if NPC_REGISTRY.has(npc_type):
+			ai_profile = NPC_REGISTRY[npc_type].get("ai_profile", {})
 
-	var ai_profile = NPC_REGISTRY[npc_type].get("ai_profile", {})
-	var npc_category = NPC_REGISTRY[npc_type].get("category", "")
+	if "NPC_CATEGORY" in npc:
+		npc_category = npc.NPC_CATEGORY
+	else:
+		# Fallback to registry if NPC doesn't have NPC_CATEGORY constant
+		if NPC_REGISTRY.has(npc_type):
+			npc_category = NPC_REGISTRY[npc_type].get("category", "")
 
 	# Determine initial state based on NPC category
 	# Monsters start in IDLE | WANDERING (bitwise) for natural movement
@@ -727,8 +735,10 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 	}
 
 	# Sync initial state to NPC's current_state property (important for bitwise checks!)
+	# But don't overwrite if NPC already has a state (e.g., SPAWN state set during spawning)
 	if "current_state" in npc:
-		npc.current_state = initial_state
+		if npc.current_state == 0 or npc.current_state == NPCState.IDLE:
+			npc.current_state = initial_state
 
 	# Connect to movement signals for bidirectional communication
 	# Try controller first (warrior), then direct NPC signals (archer)
@@ -762,6 +772,11 @@ func unregister_npc_ai(npc: Node2D) -> void:
 		_npc_ai_states.erase(npc)
 
 
+## Check if NPC is registered with AI system
+func is_npc_registered(npc: Node2D) -> bool:
+	return _npc_ai_states.has(npc)
+
+
 ## Called when NPC takes damage - sets combat target for counter-attack
 func on_npc_damaged(victim: Node2D, attacker: Node2D) -> void:
 	if not is_instance_valid(victim) or not is_instance_valid(attacker):
@@ -778,22 +793,21 @@ func on_npc_damaged(victim: Node2D, attacker: Node2D) -> void:
 	var ai_state = _npc_ai_states[victim]
 
 	# Check if victim can actually attack (not passive)
-	var combat_type = ai_state.get("combat_type", CombatType.NONE)
-	if combat_type == CombatType.NONE:
-		return
+	# Check bitwise state for PASSIVE flag
+	if victim.current_state & NPCState.PASSIVE:
+		return  # Passive NPCs don't counter-attack
 
 	# Set attacker as combat target for counter-attack
+	# NPCManager's AI system will automatically call start_melee_attack() or start_ranged_attack()
+	# based on the victim's combat type (MELEE, RANGED, etc.)
 	ai_state["combat_target"] = attacker
 	ai_state["time_until_next_change"] = 0.1  # Immediate response
 
-	# If not already in combat, start combat
-	if not CombatManager.is_in_combat(victim):
-		CombatManager.start_combat(victim, attacker)
-
 	# For monsters, immediately set movement direction and combat state
-	if victim is Monster and "_move_direction" in victim:
-		var direction = (attacker.global_position - victim.global_position).normalized()
-		victim._move_direction = direction
+	if victim.current_state & NPCState.MONSTER:
+		if "_move_direction" in victim:
+			var direction = (attacker.global_position - victim.global_position).normalized()
+			victim._move_direction = direction
 
 		# Remove WANDERING, add COMBAT and WALKING flags (bitwise)
 		victim.current_state = (victim.current_state & ~NPCState.WANDERING) | NPCState.COMBAT | NPCState.WALKING
@@ -851,13 +865,14 @@ func _update_npc_ai(npc: Node2D) -> void:
 		var target = CombatManager.find_nearest_target(npc, 300.0)
 
 		if target:
-			# Get NPC's combat type directly from property (use enum instead of string comparison for performance)
-			var combat_type = npc.combat_type if "combat_type" in npc else CombatType.NONE
+			# Get NPC's combat type from bitwise state flags
+			var has_combat_type = npc.current_state & (NPCState.MELEE | NPCState.RANGED | NPCState.MAGIC | NPCState.HEALER)
 
 			# MELEE COMBAT (Warriors, Knights, etc.)
-			if combat_type == NPCManager.CombatType.MELEE:
+			if npc.current_state & NPCState.MELEE:
 				var movement_target = _get_movement_target(npc)
 				var distance_to_target = npc.global_position.distance_to(target.global_position)
+				var melee_range = npc.attack_range if "attack_range" in npc else 60.0
 
 				# IMPORTANT: Flip sprite to face target BEFORE checking can_melee_attack
 				# The facing check happens inside can_melee_attack, so we need to face first
@@ -874,13 +889,13 @@ func _update_npc_ai(npc: Node2D) -> void:
 						movement_target.stop_auto_movement()
 
 					# Stop monster movement (clear direction)
-					if npc is Monster and "_move_direction" in npc:
+					if (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
 						npc._move_direction = Vector2.ZERO
 
 					# Set NPC to attacking state (triggers attack animation)
 					# For monsters, remove WANDERING and WALKING, add COMBAT and ATTACKING (bitwise)
 					if "current_state" in npc:
-						if npc is Monster:
+						if npc.current_state & NPCState.MONSTER:
 							npc.current_state = (npc.current_state & ~NPCState.WANDERING & ~NPCState.WALKING) | NPCState.COMBAT | NPCState.ATTACKING
 							ai_state["current_state"] = npc.current_state
 						else:
@@ -892,7 +907,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 					ai_state["time_until_next_change"] = 2.0
 					return
 				# Check if warrior is in combat range but on cooldown - STAY IN POSITION
-				elif distance_to_target <= CombatManager.WARRIOR_MELEE_RANGE:
+				elif distance_to_target <= melee_range:
 					# Warrior is close enough to attack but on cooldown
 					# Stop movement and wait for cooldown
 					if movement_target.has_method("stop_auto_movement"):
@@ -926,7 +941,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 							ai_state["last_combat_target_pos"] = target.global_position
 							ai_state["time_until_next_change"] = 2.0
 						# Monsters without controllers - use direct movement
-						elif npc is Monster and "_move_direction" in npc:
+						elif (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
 							var direction = (target.global_position - npc.global_position).normalized()
 							npc._move_direction = direction
 
@@ -940,9 +955,11 @@ func _update_npc_ai(npc: Node2D) -> void:
 					return
 
 			# RANGED COMBAT + KITING (Archers, Crossbowmen, etc.)
-			elif combat_type == NPCManager.CombatType.RANGED:
+			elif npc.current_state & NPCState.RANGED:
 				var movement_target = _get_movement_target(npc)
 				var distance_to_target = npc.global_position.distance_to(target.global_position)
+				var ranged_range = npc.attack_range if "attack_range" in npc else 150.0
+				var max_range = ranged_range * 2.0  # Double optimal = maximum shooting distance
 
 				# Flip sprite to face target
 				if "animated_sprite" in npc and npc.animated_sprite:
@@ -1041,7 +1058,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 					return
 
 				# Too far - move closer
-				elif distance_to_target > CombatManager.ARCHER_MAX_RANGE:
+				elif distance_to_target > max_range:
 					# Only move if not already pursuing or target moved significantly
 					var should_pursue = false
 					var last_target = ai_state.get("combat_target")
@@ -1073,7 +1090,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 				CombatManager.end_combat(npc)
 
 			# Restore WANDERING state for monsters (remove COMBAT, add WANDERING)
-			if npc is Monster and "current_state" in npc:
+			if (npc.current_state & NPCState.MONSTER) and "current_state" in npc:
 				npc.current_state = (npc.current_state & ~NPCState.COMBAT) | NPCState.WANDERING
 				ai_state["current_state"] = npc.current_state
 
@@ -1091,8 +1108,9 @@ func _update_npc_ai(npc: Node2D) -> void:
 		var is_passive = npc.has_method("is_passive") and npc.call("is_passive")
 
 		if is_available and not is_passive:
-			# Get this NPC's faction
-			var my_faction = get_faction(npc)
+			# Get this NPC's faction bitwise flags
+			var my_state = npc.current_state
+			var my_faction_flags = my_state & (NPCState.ALLY | NPCState.MONSTER | NPCState.PASSIVE)
 
 			# Look for nearby faction allies that are in combat (within 400px radius)
 			var help_radius = 400.0
@@ -1105,9 +1123,12 @@ func _update_npc_ai(npc: Node2D) -> void:
 				if not is_instance_valid(other_npc) or other_npc == npc:
 					continue
 
-				# Check if same faction
-				var other_faction = get_faction(other_npc)
-				if other_faction != my_faction or other_faction == Faction.NEUTRAL:
+				# Check if same faction using bitwise comparison
+				if not "current_state" in other_npc:
+					continue
+
+				var other_faction_flags = other_npc.current_state & (NPCState.ALLY | NPCState.MONSTER | NPCState.PASSIVE)
+				if other_faction_flags != my_faction_flags or my_faction_flags == 0:
 					continue
 
 				# Check if ally is in combat
@@ -1123,7 +1144,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 			# If found ally in combat, move toward them to assist
 			if nearest_combat_distance < INF:
 				# For monsters with direct movement
-				if npc is Monster and "_move_direction" in npc:
+				if (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
 					var direction = (nearest_combat_location - npc.global_position).normalized()
 					npc._move_direction = direction
 					npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
@@ -1142,9 +1163,43 @@ func _update_npc_ai(npc: Node2D) -> void:
 					# Responding to call for help silently
 					return  # Skip normal behavior this frame
 
+	# SPAWN STATE ROUTING - Priority handling for newly spawned monsters
+	# Route monsters from spawn edge to safe zone before normal AI takes over
+	var npc_state = ai_state.get("current_state", NPCState.IDLE)
+	if (npc.current_state & NPCState.MONSTER) and (npc_state & NPCState.SPAWN):
+		# Check if we have a spawn target to route to
+		if ai_state.has("spawn_target"):
+			var spawn_target = ai_state["spawn_target"]
+			var distance_to_target = npc.global_position.distance_to(spawn_target)
+
+			# If we've reached the spawn target or entered safe zone, remove SPAWN state
+			var in_safe_zone = false
+			if background_reference and background_reference.has_method("is_in_safe_rectangle"):
+				in_safe_zone = background_reference.is_in_safe_rectangle(npc.global_position)
+
+			if distance_to_target < 50.0 or in_safe_zone:
+				# Remove SPAWN state, keep WALKING + WANDERING
+				npc.current_state = (npc.current_state & ~NPCState.SPAWN) | NPCState.WANDERING
+				ai_state["current_state"] = npc.current_state
+				ai_state.erase("spawn_target")
+				# Will transition to normal roaming behavior next frame
+				return
+
+			# Still in SPAWN state - continue routing to spawn target
+			if "_move_direction" in npc:
+				var direction = (spawn_target - npc.global_position).normalized()
+				npc._move_direction = direction
+				npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
+				# Keep spawn_target and time_until_next_change from spawn setup
+				return  # Skip normal behavior while in SPAWN state
+		else:
+			# No spawn target but has SPAWN state - remove it and proceed to normal behavior
+			npc.current_state = (npc.current_state & ~NPCState.SPAWN) | NPCState.WANDERING
+			ai_state["current_state"] = npc.current_state
+
 	# MONSTER ROAMING BEHAVIOR - All monsters roam with bounds checking (passive and aggressive)
 	# Passive monsters (chickens) roam but don't attack, aggressive monsters (mushrooms) attack + roam
-	if npc is Monster:
+	if npc.current_state & NPCState.MONSTER:
 		# Check if already has combat target (handled above)
 		if not ai_state.get("combat_target"):
 			var movement_target = _get_movement_target(npc)
@@ -1257,7 +1312,7 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
 		# For monsters, preserve WANDERING flag if present (bitwise)
-		if npc is Monster and (npc.current_state & NPCState.WANDERING):
+		if (npc.current_state & NPCState.MONSTER) and (npc.current_state & NPCState.WANDERING):
 			npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
 		else:
 			# For NPCs with controllers, use simple state
@@ -1316,7 +1371,7 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 				# Walking directly to target
 
 	# Monsters without controllers - use direct movement direction
-	elif npc is Monster and "_move_direction" in npc:
+	elif (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
 		# Pick random target position within safe bounds
 		var target_x = randf_range(movement_bounds_x.x, movement_bounds_x.y)
 		var target_y = get_safe_y_for_x(target_x, npc.global_position.y)
@@ -1340,7 +1395,7 @@ func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
 		# For monsters, preserve WANDERING flag if present (bitwise)
-		if npc is Monster and (npc.current_state & NPCState.WANDERING):
+		if (npc.current_state & NPCState.MONSTER) and (npc.current_state & NPCState.WANDERING):
 			npc.current_state = (npc.current_state & ~NPCState.WALKING) | NPCState.IDLE
 		else:
 			# For NPCs with controllers, use simple state
@@ -1355,7 +1410,7 @@ func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 		# print("NPCManager AI: %s idling" % ai_state["npc_type"])
 
 	# Monsters without controllers - stop direct movement
-	elif npc is Monster and "_move_direction" in npc:
+	elif (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
 		npc._move_direction = Vector2.ZERO
 		# Clear wander target
 		if ai_state.has("wander_target"):
@@ -1509,88 +1564,32 @@ func _update_all_characters_z_index() -> void:
 ## ===== STATS CREATION =====
 
 ## Create stats for a specific NPC type with configured values
+## Now reads from decentralized NPC class static methods
 func _create_stats_for_type(npc_type: String) -> NPCStats:
-	match npc_type:
-		"warrior":
-			return NPCStats.new(
-				100.0,  # HP
-				50.0,   # Mana
-				100.0,  # Energy
-				100.0,  # Hunger
-				15.0,   # Attack
-				10.0,   # Defense
-				NPCStats.Emotion.NEUTRAL,
-				npc_type
-			)
-		"archer":
-			return NPCStats.new(
-				80.0,   # HP (less than warrior)
-				75.0,   # Mana (more than warrior)
-				100.0,  # Energy
-				100.0,  # Hunger
-				12.0,   # Attack (ranged)
-				5.0,    # Defense (low)
-				NPCStats.Emotion.NEUTRAL,
-				npc_type
-			)
-		"chicken":
-			return NPCStats.new(
-				1000.0, # HP (high for testing!)
-				0.0,    # Mana (chickens don't use mana)
-				50.0,   # Energy
-				100.0,  # Hunger
-				0.0,    # Attack (passive - can't attack)
-				2.0,    # Defense (very low)
-				NPCStats.Emotion.NEUTRAL,
-				npc_type
-			)
-		"mushroom":
-			return NPCStats.new(
-				120.0,  # HP (high - needs to survive against multiple enemies)
-				0.0,    # Mana (mushrooms don't use mana)
-				75.0,   # Energy
-				100.0,  # Hunger
-				8.0,    # Attack (melee damage)
-				8.0,    # Defense (medium)
-				NPCStats.Emotion.NEUTRAL,
-				npc_type
-			)
-		"goblin":
-			return NPCStats.new(
-				100.0,  # HP (medium - glass cannon)
-				0.0,    # Mana (goblins don't use mana)
-				80.0,   # Energy (high - very active)
-				100.0,  # Hunger
-				12.0,   # Attack (high melee damage - hits harder than mushrooms)
-				5.0,    # Defense (low - fragile)
-				NPCStats.Emotion.NEUTRAL,
-				npc_type
-			)
-		"eyebeast":
-			return NPCStats.new(
-				80.0,   # HP (low - flying glass cannon)
-				0.0,    # Mana (eyebeasts don't use mana)
-				90.0,   # Energy (very high - constantly flying)
-				100.0,  # Hunger
-				15.0,   # Attack (very high ranged damage - eye beam)
-				3.0,    # Defense (very low - extremely fragile)
-				NPCStats.Emotion.NEUTRAL,
-				npc_type
-			)
-		"skeleton":
-			return NPCStats.new(
-				110.0,  # HP (medium-high - undead durability)
-				0.0,    # Mana (skeletons don't use mana)
-				75.0,   # Energy (medium - steady movement)
-				100.0,  # Hunger
-				10.0,   # Attack (medium melee damage - balanced)
-				6.0,    # Defense (medium - bony armor)
-				NPCStats.Emotion.NEUTRAL,
-				npc_type
-			)
-		_:
-			# Default stats for unknown NPCs
-			return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
+	# Get the NPC class from registry
+	if not NPC_REGISTRY.has(npc_type):
+		push_error("NPCManager: Cannot create stats for unknown NPC type: %s" % npc_type)
+		return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
+
+	# Load the scene and get the script
+	var scene_path = NPC_REGISTRY[npc_type]["scene"]
+	var npc_scene = load(scene_path) as PackedScene
+	if not npc_scene:
+		push_error("NPCManager: Failed to load scene for NPC type: %s" % npc_type)
+		return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
+
+	# Get the script from the scene's root node
+	var temp_instance = npc_scene.instantiate()
+	var npc_script = temp_instance.get_script()
+	temp_instance.free()
+
+	# Call the static create_stats() method if it exists
+	if npc_script and npc_script.has_method("create_stats"):
+		return npc_script.create_stats()
+
+	# Fallback to default stats
+	push_error("NPCManager: NPC type '%s' missing create_stats() method" % npc_type)
+	return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
 
 
 ## ===== DUAL POOL MANAGEMENT =====
@@ -1910,20 +1909,21 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	register_npc_ai(npc, npc_type)
 
 	# Set initial movement direction for monsters spawned with a target
-	if initial_target != Vector2.ZERO and npc is Monster and "_move_direction" in npc:
+	if initial_target != Vector2.ZERO and (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
 		var direction = (initial_target - position).normalized()
 		npc._move_direction = direction
 
-		# Preserve WANDERING flag, remove IDLE, add WALKING (bitwise)
-		npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
+		# Set SPAWN state + WALKING, remove IDLE (bitwise)
+		npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING | NPCState.SPAWN
 
-		# Update AI state to match
+		# Update AI state to match AND store the spawn target
 		var ai_state = get_npc_ai_state(npc)
 		if ai_state:
 			ai_state["current_state"] = npc.current_state
-			ai_state["time_until_next_change"] = randf_range(3.0, 6.0)  # Will wander after reaching target
-
-		# Monster spawned with initial target
+			ai_state["spawn_target"] = initial_target  # Store target for SPAWN state routing
+			ai_state["time_until_next_change"] = randf_range(5.0, 10.0)  # Longer time to reach safe zone
+		else:
+			push_error("NPCManager: Could not get AI state for spawned monster")
 
 	# Assign healthbar to NPC (from pool)
 	get_healthbar_for_npc(npc)
@@ -1938,7 +1938,6 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 		# Check if already connected to avoid duplicate connections
 		if not npc.npc_died.is_connected(_on_npc_died):
 			npc.npc_died.connect(_on_npc_died.bind(npc))
-
 
 	return npc
 
@@ -1979,7 +1978,7 @@ func return_generic_npc(npc: Node2D) -> void:
 				npc.current_state = NPCState.IDLE
 
 			# Reset monster movement direction
-			if npc is Monster and "_move_direction" in npc:
+			if (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
 				npc._move_direction = Vector2.ZERO
 
 			# Clear AI state
@@ -2143,7 +2142,6 @@ func _initialize_ui_sprite_cache() -> void:
 		if cat_sprite:
 			var cat_ui_sprite = cat_sprite.duplicate() as AnimatedSprite2D
 			ui_sprite_cache["cat"] = cat_ui_sprite
-			print("NPCManager: Cat UI sprite cached")
 
 	# Create UI sprites for all registered NPCs (data-driven)
 	for npc_type in NPC_REGISTRY:
@@ -2153,7 +2151,6 @@ func _initialize_ui_sprite_cache() -> void:
 
 		await _cache_npc_ui_sprite(npc_type)
 
-	print("NPCManager: UI sprite cache initialized with %d types" % ui_sprite_cache.size())
 
 
 ## Helper: Cache UI sprite for a single NPC type
@@ -2171,7 +2168,6 @@ func _cache_npc_ui_sprite(npc_type: String) -> void:
 		if npc_sprite:
 			var npc_ui_sprite = npc_sprite.duplicate() as AnimatedSprite2D
 			ui_sprite_cache[npc_type] = npc_ui_sprite
-			print("NPCManager: %s UI sprite cached" % npc_type.capitalize())
 
 	# Unregister from InputManager before freeing
 	if InputManager:

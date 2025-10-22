@@ -10,16 +10,39 @@ signal eyebeast_clicked
 ## Emitted when the eyebeast dies
 signal eyebeast_died
 
+## NPC Registry Data - Decentralized configuration
+const NPC_TYPE_ID: String = "eyebeast"
+const NPC_CATEGORY: String = "monster"
+const AI_PROFILE: Dictionary = {
+	"idle_weight": 30,      # Eyebeasts are very aggressive
+	"walk_weight": 70,      # Constantly moving (flying)
+	"state_change_min": 0.8,  # Very quick state changes (agile flyer)
+	"state_change_max": 2.5,
+	"movement_speed": 0.9   # Fastest monster (flying)
+}
+
+## Create stats for this NPC type
+static func create_stats() -> NPCStats:
+	return NPCStats.new(
+		80.0,   # HP (low - flying glass cannon)
+		0.0,    # Mana (eyebeasts don't use mana)
+		90.0,   # Energy (very high - constantly flying)
+		100.0,  # Hunger
+		15.0,   # Attack (very high ranged damage - eye beam)
+		3.0,    # Defense (very low - extremely fragile)
+		NPCStats.Emotion.NEUTRAL,
+		NPC_TYPE_ID
+	)
+
 
 func _init() -> void:
 	# Set eyebeast-specific properties
 	walk_speed = 35.0  # Faster than goblin (flies)
-	combat_type = NPCManager.CombatType.MELEE  # Melee attacker for now (TODO: add ranged support for monsters)
 
-	# Set monster types
-	monster_types = [
-		NPCManager.MonsterType.AGGRESSIVE
-	]
+	# Set state flags: MELEE combat type + MONSTER faction
+	# Eyebeasts are MELEE MONSTER (aggressive flyers, melee attacks for now)
+	# TODO: Change to RANGED when ranged monster attacks are implemented
+	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.MONSTER
 
 	# State-to-animation mapping (eyebeast has all 5 animations)
 	state_to_animation = {

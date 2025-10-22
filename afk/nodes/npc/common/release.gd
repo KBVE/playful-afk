@@ -37,12 +37,10 @@ func _on_frame_changed() -> void:
 		if animated_sprite.frame == 5:
 			_has_reached_midpoint = true
 			midpoint_reached.emit()
-			print("ReleaseEffect: Midpoint reached - entity should be removed now")
 
 
 ## Called when animation finishes
 func _on_animation_finished() -> void:
-	print("ReleaseEffect: Animation finished")
 	animation_finished.emit()
 	# Clean up after animation
 	queue_free()

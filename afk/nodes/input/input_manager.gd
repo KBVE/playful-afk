@@ -26,7 +26,7 @@ var time_since_last_check: float = 0.0
 
 
 func _ready() -> void:
-	print("InputManager initialized")
+	pass
 
 
 ## Register an object for click and hover detection
@@ -44,7 +44,6 @@ func register_interactive_object(object: Node2D, radius: float, callback_node: N
 	}
 
 	interactive_objects.append(data)
-	print("InputManager: Registered ", object.name, " with radius ", radius)
 
 
 ## Unregister an object (call this when the object is freed)
@@ -52,7 +51,6 @@ func unregister_interactive_object(object: Node2D) -> void:
 	for i in range(interactive_objects.size() - 1, -1, -1):
 		if interactive_objects[i]["object"] == object:
 			interactive_objects.remove_at(i)
-			print("InputManager: Unregistered ", object.name)
 			break
 
 

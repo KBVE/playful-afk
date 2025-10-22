@@ -93,17 +93,8 @@ func _ready() -> void:
 	# Connect to EventManager for feeding
 	EventManager.pet_fed.connect(_on_pet_fed)
 
-	print("Cat initialized - Current state: %s, Danger detection range: %.0fpx (checks every %.1fs)" % [current_state, DANGER_RANGE, DANGER_CHECK_INTERVAL])
-
-
-# Track if we've logged the first process
-var _first_process_logged = false
 
 func _process(delta: float) -> void:
-	# Log once to confirm process is running
-	if not _first_process_logged:
-		print("Cat: _process is running! Will check for danger every %.1fs" % DANGER_CHECK_INTERVAL)
-		_first_process_logged = true
 
 	# Check for nearby enemies periodically
 	_danger_check_timer += delta
@@ -227,23 +218,12 @@ func _on_pet_fed(food_item: Dictionary) -> void:
 ## Check for nearby enemies and call for help if found
 func _check_for_danger() -> void:
 	if not CombatManager:
-		print("Cat: Danger check skipped - CombatManager not available")
 		return
 
 	# Find nearest enemy within danger range
 	var nearest_enemy = CombatManager.find_nearest_target(self, DANGER_RANGE)
 
-	# Also check for nearest enemy beyond range (for debugging)
-	var nearest_any_enemy = CombatManager.find_nearest_target(self, 2000.0)  # Much larger range for debug
-
 	if nearest_enemy and is_instance_valid(nearest_enemy):
-		var distance = global_position.distance_to(nearest_enemy.global_position)
-		print("Cat: ⚠️ ENEMY DETECTED! Type: %s, Distance: %.1fpx (Detection range: %.1fpx)" % [
-			nearest_enemy.get_class() if nearest_enemy else "Unknown",
-			distance,
-			DANGER_RANGE
-		])
-
 		# Enemy detected! Spawn catflag rally point near the enemy (with bounds checking)
 		# The flag itself will call for help (CASTABLE behavior)
 		if EnvironmentManager:
@@ -255,20 +235,7 @@ func _check_for_danger() -> void:
 				flag_pos = NPCManager.clamp_to_safe_bounds(flag_pos)
 
 			var flag = EnvironmentManager.spawn_object("catflag", flag_pos)
-			if flag:
-				print("Cat: ✓ Placed rally flag at (%d, %d) near enemy - Flag will call allies" % [int(flag_pos.x), int(flag_pos.y)])
-			else:
-				print("Cat: ✗ WARNING - Failed to place rally flag (flag may already be on map)")
+			if not flag:
+				push_warning("Cat: Failed to place rally flag (flag may already be on map)")
 		else:
-			print("Cat: ✗ ERROR - EnvironmentManager not available!")
-	else:
-		# Show nearest enemy distance even if out of range
-		if nearest_any_enemy and is_instance_valid(nearest_any_enemy):
-			var distance = global_position.distance_to(nearest_any_enemy.global_position)
-			print("Cat: No danger (Nearest enemy: %s at %.0fpx, outside %.0fpx detection range)" % [
-				nearest_any_enemy.get_class(),
-				distance,
-				DANGER_RANGE
-			])
-		else:
-			print("Cat: Scanning for danger... No enemies found anywhere on map")
+			push_error("Cat: EnvironmentManager not available!")

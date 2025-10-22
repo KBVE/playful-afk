@@ -10,16 +10,38 @@ signal mushroom_clicked
 ## Emitted when the mushroom dies
 signal mushroom_died
 
+## NPC Registry Data - Decentralized configuration
+const NPC_TYPE_ID: String = "mushroom"
+const NPC_CATEGORY: String = "monster"
+const AI_PROFILE: Dictionary = {
+	"idle_weight": 50,      # Mushrooms are more active
+	"walk_weight": 50,
+	"state_change_min": 1.5,  # Quick state changes
+	"state_change_max": 4.0,
+	"movement_speed": 0.7   # Medium speed
+}
+
+## Create stats for this NPC type
+static func create_stats() -> NPCStats:
+	return NPCStats.new(
+		120.0,  # HP (high - needs to survive against multiple enemies)
+		0.0,    # Mana (mushrooms don't use mana)
+		75.0,   # Energy
+		100.0,  # Hunger
+		8.0,    # Attack (melee damage)
+		8.0,    # Defense (medium)
+		NPCStats.Emotion.NEUTRAL,
+		NPC_TYPE_ID
+	)
+
 
 func _init() -> void:
 	# Set mushroom-specific properties
 	walk_speed = 25.0  # Slightly slower than chicken
-	combat_type = NPCManager.CombatType.MELEE  # Melee attacker
 
-	# Set monster types
-	monster_types = [
-		NPCManager.MonsterType.AGGRESSIVE
-	]
+	# Set state flags: MELEE combat type + MONSTER faction
+	# Mushrooms are MELEE MONSTER (aggressive, attacks allies)
+	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.MONSTER
 
 	# State-to-animation mapping (mushroom has all 5 animations)
 	state_to_animation = {

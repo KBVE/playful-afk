@@ -18,7 +18,6 @@ func _ready() -> void:
 	# Connect chat UI signals
 	if chat_ui:
 		chat_ui.dialogue_closed.connect(_on_dialogue_closed)
-	print("Bartender scene initialized")
 
 
 ## Show the bartender scene with an NPC for conversation

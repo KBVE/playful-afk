@@ -314,28 +314,12 @@ static func format(ulid: PackedByteArray) -> String:
 ## Print ULID information
 static func debug_ulid(ulid: PackedByteArray) -> void:
 	if not is_valid(ulid):
-		print("Invalid ULID: size=%d (expected %d)" % [ulid.size(), TOTAL_BYTES])
 		return
 
 	var timestamp = decode_time(ulid)
 	var age = get_age_ms(ulid)
 	var datetime = to_datetime(ulid)
 	var ulid_str = to_str(ulid)
-
-	print("=== ULID Debug ===")
-	print("  Binary size: %d bytes" % ulid.size())
-	print("  String: %s" % ulid_str)
-	print("  Formatted: %s" % format(ulid))
-	print("  Timestamp: %d ms" % timestamp)
-	print("  Age: %d ms (%.2f seconds)" % [age, age / 1000.0])
-	print("  Created: %04d-%02d-%02d %02d:%02d:%02d" % [
-		datetime.year,
-		datetime.month,
-		datetime.day,
-		datetime.hour,
-		datetime.minute,
-		datetime.second
-	])
 
 
 ## ===== BATCH GENERATION =====

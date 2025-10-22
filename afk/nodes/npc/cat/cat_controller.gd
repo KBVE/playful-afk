@@ -94,14 +94,12 @@ func play_animation(row_name: String, loop: bool = true) -> void:
 ## Add a custom animation sequence
 func add_animation_sequence(state_name: String, animation_rows: Array) -> void:
 	animation_sequences[state_name] = animation_rows
-	print("Added animation sequence '%s': %s" % [state_name, animation_rows])
 
 
 ## Update an existing animation sequence
 func update_animation_sequence(state_name: String, animation_rows: Array) -> void:
 	if animation_sequences.has(state_name):
 		animation_sequences[state_name] = animation_rows
-		print("Updated animation sequence '%s': %s" % [state_name, animation_rows])
 	else:
 		push_warning("Cannot update '%s' - sequence doesn't exist. Use add_animation_sequence() instead." % state_name)
 
@@ -227,9 +225,6 @@ func move_to_position(target_x: float) -> void:
 	movement_state = MovementState.ACCELERATING
 	current_speed = 0.0
 
-	print("Starting auto-move to position: %s" % target_x)
-
-
 ## Update movement (call this from _process or _physics_process)
 func update_movement(delta: float) -> void:
 	if not cat or not is_auto_moving:
@@ -309,7 +304,6 @@ func _handle_movement_deceleration(delta: float) -> void:
 			movement_state = MovementState.IDLE
 			is_auto_moving = false
 			play_state("idle")
-			print("Reached target position")
 		return
 
 	# Normal deceleration
@@ -325,7 +319,6 @@ func _handle_movement_deceleration(delta: float) -> void:
 		movement_state = MovementState.IDLE
 		is_auto_moving = false
 		play_state("idle")
-		print("Stopped before reaching target")
 
 
 ## Stop automatic movement

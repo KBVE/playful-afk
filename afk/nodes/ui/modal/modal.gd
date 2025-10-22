@@ -58,8 +58,6 @@ func _ready() -> void:
 		modal_container.scale = Vector2(0.8, 0.8)
 		modal_container.modulate.a = 0.0  # Start transparent
 
-	print("Modal initialized: ", name)
-
 
 ## Open the modal with animation
 func open() -> void:
@@ -95,7 +93,6 @@ func open() -> void:
 	is_animating = false
 	is_open = true
 	modal_opened.emit()
-	print("Modal opened: ", name)
 
 
 ## Close the modal with animation
@@ -133,7 +130,6 @@ func close() -> void:
 	is_animating = false
 	is_open = false
 	modal_closed.emit()
-	print("Modal closed: ", name)
 
 
 ## Toggle the modal open/closed
@@ -163,7 +159,6 @@ func set_content(content_node: Control) -> void:
 
 	# Add new content
 	content_container.add_child(content_node)
-	print("Modal content set")
 
 
 ## Clear all content from the modal
@@ -190,7 +185,6 @@ func set_structure_sprite(structure_name: String, cached_sprite: Sprite2D) -> vo
 		# Add cached sprite to modal (will be removed, not freed, when modal closes)
 		if cached_sprite:
 			structure_sprite_container.add_child(cached_sprite)
-			print("Modal: Using cached structure sprite for ", structure_name)
 
 
 ## Handle overlay clicks
