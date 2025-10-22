@@ -14,6 +14,8 @@ signal movement_completed(final_position: float)
 signal movement_interrupted()
 
 ## NPC's current state (uses NPCManager.NPCState enum)
+## ONLY contains behavioral/dynamic states (IDLE, WALKING, ATTACKING, etc.)
+## Combat type and faction are now in static_state (immutable)
 var current_state: int = NPCManager.NPCState.IDLE:
 	set(value):
 		if current_state != value:
@@ -22,6 +24,10 @@ var current_state: int = NPCManager.NPCState.IDLE:
 			_update_animation()
 			# Emit state change signal for NPCManager
 			state_changed.emit(old_state, current_state)
+
+## Static/immutable NPC properties (combat type + faction)
+## Set once during initialization, NEVER modified during gameplay
+var static_state: int = 0
 
 ## Movement speed when walking
 @export var walk_speed: float = 50.0
@@ -45,9 +51,6 @@ var stats: NPCStats = null
 var _move_direction: Vector2 = Vector2.ZERO
 var _is_player_controlled: bool = false
 
-# Cached background reference for bounds checking
-var _background_ref: Control = null
-
 # Animation mapping - maps NPCManager.NPCState enum to animation names
 var state_to_animation: Dictionary = {}
 
@@ -61,9 +64,6 @@ var deceleration_distance: float = 50.0
 
 
 func _ready() -> void:
-	# Cache background reference for performance
-	_background_ref = get_tree().get_first_node_in_group("background")
-
 	# Initialize state-to-animation mapping (can be overridden by subclasses)
 	_initialize_animation_mapping()
 

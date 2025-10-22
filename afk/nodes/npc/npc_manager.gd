@@ -51,9 +51,37 @@ enum NPCState {
 	WAYPOINT = 1 << 18
 }
 
+## Static/Immutable NPC properties (set once, never change)
+## These should NEVER be modified during gameplay - only read
+enum NPCStaticState {
+	# Combat Types (0-3) - Each NPC has exactly ONE combat type (immutable)
+	MELEE = 1 << 0,      # 1:   Melee attacker (warriors, knights, goblins)
+	RANGED = 1 << 1,     # 2:   Ranged attacker (archers, crossbowmen)
+	MAGIC = 1 << 2,      # 4:   Magic attacker (mages, wizards)
+	HEALER = 1 << 3,     # 8:   Healer/support (clerics, druids)
+
+	# Factions (4-6) - Determines who can attack whom (immutable)
+	ALLY = 1 << 4,       # 16:  Player's allies - don't attack each other
+	MONSTER = 1 << 5,    # 32:  Hostile creatures - attack allies
+	PASSIVE = 1 << 6,    # 64:  Doesn't attack/do damage (chickens, critters)
+}
+
 # Virtual Pet Reference
 var cat: Cat = null
 var cat_scene: PackedScene = preload("res://nodes/npc/cat/cat.tscn")
+
+## ===== STATE HISTORY SYSTEM =====
+## Centralized state tracking for all NPCs
+## Maps ULID -> Single state entry with 3-state history
+## Entry: { "timestamp": int, "historic_state": int, "current_state": int, "new_state": int, "reason": String }
+## This gives us: historic_state (last known), current_state (before this change), new_state (after this change)
+## Only stores ONE entry per NPC - memory usage = O(active NPCs)
+## Cleaned up when NPC returns to pool
+var historic_state: Dictionary = {}
+
+## Signal for requesting state changes from other systems
+## Other systems should emit this instead of directly modifying NPC state
+signal request_state_change(npc: Node2D, new_state: int, reason: String)
 
 ## ===== NPC REGISTRY SYSTEM =====
 ## Central registry for all NPC types - add new NPCs here!
@@ -257,6 +285,91 @@ func _ready() -> void:
 	# Connect to EnvironmentManager events
 	if EnvironmentManager and EnvironmentManager.has_signal("catflag_spawned"):
 		EnvironmentManager.catflag_spawned.connect(_on_catflag_spawned)
+
+	# Connect to our own state change signal
+	request_state_change.connect(_handle_state_change_request)
+
+	# Connect to EventManager for bidirectional communication
+	if EventManager:
+		# Listen to state change requests from EventManager (debounced pathway)
+		EventManager.npc_state_change_requested.connect(_handle_state_change_request)
+
+	# Connect to CombatManager for bidirectional communication
+	if CombatManager:
+		# Listen to combat events from CombatManager
+		CombatManager.combat_started.connect(_on_combat_started)
+		CombatManager.combat_ended.connect(_on_combat_ended)
+		CombatManager.damage_dealt.connect(_on_damage_dealt)
+		CombatManager.target_killed.connect(_on_target_killed)
+
+
+## ===== STATE HISTORY SYSTEM FUNCTIONS =====
+
+## Handle state change requests from other systems (CombatManager, AnimationManager, etc.)
+## This is the ONLY way external systems should modify NPC state
+## Maintains historic_state, previous_state, and current_state
+func _handle_state_change_request(npc: Node2D, new_state: int, reason: String) -> void:
+	_change_npc_state(npc, new_state, reason)
+
+
+## Internal helper to change NPC state with reason tracking
+## Called by both external signal handlers and internal NPCManager functions
+## NOTE: History tracking happens in _on_npc_state_changed() via the state_changed signal
+## This function just tags the reason for the NEXT state change
+func _change_npc_state(npc: Node2D, new_state: int, reason: String) -> void:
+	if not is_instance_valid(npc):
+		return
+
+	# Tag the reason for this state change (will be picked up by signal handler)
+	# Store reason in NPC's AI state so _on_npc_state_changed can use it
+	if _npc_ai_states.has(npc):
+		_npc_ai_states[npc]["last_state_change_reason"] = reason
+
+	# Apply the state change (triggers state_changed signal → _on_npc_state_changed)
+	npc.current_state = new_state
+
+
+## Get state entry for an NPC by reference
+## Returns dictionary with 3-state tracking, or null if not found
+## Entry: { "timestamp": int, "historic_state": int, "current_state": int, "new_state": int, "reason": String }
+func get_npc_state_entry(npc: Node2D) -> Dictionary:
+	if not npc or not npc.stats or not npc.stats.ulid:
+		return {}
+
+	var ulid_key = ULID.to_hex(npc.stats.ulid)
+	return historic_state.get(ulid_key, {})
+
+
+## Get state entry for an NPC by ULID hex string
+## Returns dictionary with 3-state tracking, or null if not found
+func get_state_entry_by_ulid(ulid_hex: String) -> Dictionary:
+	return historic_state.get(ulid_hex, {})
+
+
+## ===== COMBAT EVENT HANDLERS (from CombatManager) =====
+
+func _on_combat_started(attacker: Node2D, target: Node2D) -> void:
+	# Forward to EventManager for other systems to react
+	if EventManager:
+		EventManager.combat_started.emit(attacker, target)
+
+
+func _on_combat_ended(attacker: Node2D, target: Node2D) -> void:
+	# Forward to EventManager for other systems to react
+	if EventManager:
+		EventManager.combat_ended.emit(attacker, target)
+
+
+func _on_damage_dealt(attacker: Node2D, target: Node2D, damage: float) -> void:
+	# Forward to EventManager for other systems to react
+	if EventManager:
+		EventManager.damage_dealt.emit(attacker, target, damage)
+
+
+func _on_target_killed(attacker: Node2D, target: Node2D) -> void:
+	# Forward to EventManager for other systems to react
+	if EventManager:
+		EventManager.target_killed.emit(attacker, target)
 
 
 ## ===== NPC REGISTRY HELPER FUNCTIONS =====
@@ -893,11 +1006,13 @@ func _update_npc_ai(npc: Node2D) -> void:
 					if "current_state" in npc:
 						if npc.current_state & NPCState.MONSTER:
 							# Monsters: remove WANDERING and WALKING, add COMBAT and ATTACKING (bitwise)
-							npc.current_state = (npc.current_state & ~NPCState.WANDERING & ~NPCState.WALKING) | NPCState.COMBAT | NPCState.ATTACKING
+							var new_state = (npc.current_state & ~NPCState.WANDERING & ~NPCState.WALKING) | NPCState.COMBAT | NPCState.ATTACKING
+							_change_npc_state(npc, new_state, "monster_start_attack")
 							ai_state["current_state"] = npc.current_state
 						else:
 							# Warriors/archers: remove IDLE/WALKING, add ATTACKING, preserve combat type and faction
-							npc.current_state = (npc.current_state & ~NPCState.IDLE & ~NPCState.WALKING) | NPCState.ATTACKING
+							var new_state = (npc.current_state & ~NPCState.IDLE & ~NPCState.WALKING) | NPCState.ATTACKING
+							_change_npc_state(npc, new_state, "ally_start_attack")
 
 					# Execute combat logic (damage calculation, state tracking)
 					CombatManager.start_melee_attack(npc, target)
@@ -944,7 +1059,8 @@ func _update_npc_ai(npc: Node2D) -> void:
 							npc._move_direction = direction
 
 							# Remove WANDERING, add COMBAT and WALKING flags (bitwise)
-							npc.current_state = (npc.current_state & ~NPCState.WANDERING) | NPCState.COMBAT | NPCState.WALKING
+							var new_state = (npc.current_state & ~NPCState.WANDERING) | NPCState.COMBAT | NPCState.WALKING
+							_change_npc_state(npc, new_state, "monster_move_to_combat")
 							ai_state["current_state"] = npc.current_state
 
 							ai_state["combat_target"] = target
@@ -1050,7 +1166,8 @@ func _update_npc_ai(npc: Node2D) -> void:
 					# IMPORTANT: Preserve combat type and faction flags!
 					if "current_state" in npc:
 						# Remove IDLE/WALKING, add ATTACKING, preserve combat type and faction
-						npc.current_state = (npc.current_state & ~NPCState.IDLE & ~NPCState.WALKING) | NPCState.ATTACKING
+						var new_state = (npc.current_state & ~NPCState.IDLE & ~NPCState.WALKING) | NPCState.ATTACKING
+						_change_npc_state(npc, new_state, "ranged_start_attack")
 
 					# Execute combat logic (projectile firing, state tracking)
 					CombatManager.start_ranged_attack(npc, target, "arrow")
@@ -1093,11 +1210,13 @@ func _update_npc_ai(npc: Node2D) -> void:
 			if "current_state" in npc:
 				if npc.current_state & NPCState.MONSTER:
 					# Monsters: remove COMBAT/ATTACKING/WALKING, add WANDERING
-					npc.current_state = (npc.current_state & ~NPCState.COMBAT & ~NPCState.ATTACKING & ~NPCState.WALKING) | NPCState.WANDERING
+					var new_state = (npc.current_state & ~NPCState.COMBAT & ~NPCState.ATTACKING & ~NPCState.WALKING) | NPCState.WANDERING
+					_change_npc_state(npc, new_state, "monster_end_combat")
 					ai_state["current_state"] = npc.current_state
 				else:
 					# Warriors/Archers: remove ATTACKING/WALKING, add IDLE
-					npc.current_state = (npc.current_state & ~NPCState.ATTACKING & ~NPCState.WALKING) | NPCState.IDLE
+					var new_state = (npc.current_state & ~NPCState.ATTACKING & ~NPCState.WALKING) | NPCState.IDLE
+					_change_npc_state(npc, new_state, "ally_end_combat")
 					ai_state["current_state"] = npc.current_state
 
 	# "CALL FOR HELP" SYSTEM - Move toward nearby faction allies in combat to assist
@@ -1513,6 +1632,53 @@ func _on_npc_state_changed(old_state: int, new_state: int, npc: Node2D) -> void:
 
 	# Track the state change in AI system
 	ai_state["current_state"] = new_state
+
+	# Track state change in historic_state (3-state system)
+	# This captures ALL state changes from any source (animation, combat, movement, etc.)
+	if npc.stats and npc.stats.ulid:
+		var ulid_key = ULID.to_hex(npc.stats.ulid)
+
+		# Get the reason (if set by _change_npc_state), otherwise use generic
+		var reason = ai_state.get("last_state_change_reason", "unknown")
+
+		# Clear the reason after using it
+		if ai_state.has("last_state_change_reason"):
+			ai_state.erase("last_state_change_reason")
+
+		# Get existing entry to preserve historic_state
+		var existing_entry = historic_state.get(ulid_key, null)
+		var previous_historic_state = 0
+
+		if existing_entry:
+			# If we have a previous entry, the old "new_state" becomes our "historic_state"
+			previous_historic_state = existing_entry.get("new_state", 0)
+
+		# VALIDATION: Ensure states are unique (detect bugs where same state is stored in multiple slots)
+		# Only update if the new_state is actually different from old_state
+		if old_state == new_state:
+			push_error("NPCManager: State change bug detected for %s - old_state == new_state (%d). Ignoring duplicate state change." % [ai_state.get("npc_type", "unknown"), old_state])
+			return
+
+		# Also check if we're creating a situation where all 3 states are the same
+		if previous_historic_state != 0 and previous_historic_state == old_state and old_state == new_state:
+			push_error("NPCManager: State uniqueness violation for %s - all states are identical (%d). This indicates a state management bug!" % [ai_state.get("npc_type", "unknown"), old_state])
+			return
+
+		# Update/create the single state entry with 3-state tracking
+		# historic_state: the state before current_state (last known state)
+		# current_state: the state before this change (old_state parameter)
+		# new_state: the state after this change (new_state parameter)
+		historic_state[ulid_key] = {
+			"timestamp": Time.get_ticks_msec(),
+			"historic_state": previous_historic_state,
+			"current_state": old_state,
+			"new_state": new_state,
+			"reason": reason
+		}
+
+		# Emit state change to EventManager for other systems to react
+		if EventManager:
+			EventManager.npc_state_changed.emit(npc, old_state, new_state, reason)
 
 	# Try to show state-based emoji (10% chance)
 	if emoji_manager:
@@ -1970,6 +2136,8 @@ func return_generic_npc(npc: Node2D) -> void:
 				npc.stats.reset_to_full()
 				var ulid_key = ULID.to_hex(npc.stats.ulid)
 				stats_database.erase(ulid_key)
+				# Clean up historic_state entry for this NPC
+				historic_state.erase(ulid_key)
 				npc.stats = null
 
 			# Reset monster movement direction BEFORE resetting state

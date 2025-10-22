@@ -42,6 +42,17 @@ func _ready() -> void:
 	# Wait for scene tree to be ready
 	await get_tree().process_frame
 
+	# Connect to EventManager for bidirectional communication
+	if EventManager:
+		# Listen to combat events from EventManager (debounced pathway)
+		EventManager.combat_started.connect(_on_event_combat_started)
+		EventManager.combat_ended.connect(_on_event_combat_ended)
+
+	# Connect to NPCManager for bidirectional communication
+	if NPCManager:
+		# Listen to NPC state changes that might affect combat
+		NPCManager.request_state_change.connect(_on_npc_state_change_requested)
+
 
 func _process(delta: float) -> void:
 	# Update cooldown timers for all active combatants
@@ -736,3 +747,26 @@ func print_combat_status() -> void:
 			state["type"],
 			state["cooldown_timer"]
 		])
+
+
+## ===== BIDIRECTIONAL SIGNAL HANDLERS =====
+
+## Handle combat started events from EventManager (debounced pathway)
+func _on_event_combat_started(attacker: Node2D, target: Node2D) -> void:
+	# EventManager is broadcasting combat start - can react if needed
+	pass
+
+
+## Handle combat ended events from EventManager (debounced pathway)
+func _on_event_combat_ended(attacker: Node2D, target: Node2D) -> void:
+	# EventManager is broadcasting combat end - can react if needed
+	pass
+
+
+## Handle NPC state change requests from NPCManager
+func _on_npc_state_change_requested(npc: Node2D, new_state: int, reason: String) -> void:
+	# NPCManager is requesting a state change - can react if it affects combat
+	# For example, if NPC enters DEAD state, end all combat involving this NPC
+	if new_state & NPCManager.NPCState.DEAD:
+		if is_in_combat(npc):
+			end_combat(npc)

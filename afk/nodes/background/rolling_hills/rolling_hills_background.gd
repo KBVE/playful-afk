@@ -62,6 +62,10 @@ func _ready() -> void:
 	# Calculate safe rectangle for fast checks
 	_calculate_safe_rectangle()
 
+	# Register with BackgroundManager
+	if BackgroundManager:
+		BackgroundManager.register_background(self)
+
 	# Pre-calculate common waypoint paths
 	_precalculate_waypoint_cache()
 

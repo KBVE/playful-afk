@@ -1,0 +1,18 @@
+[package]
+name = "godo"
+version = "0.1.0"
+edition = "2021"
+resolver = "2"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+bevy = { version = "0.17.2", default-features = false, features = [
+    "bevy_asset",
+    "bevy_state",
+] }
+godot = { version = "0.3.5", features = [
+    "experimental-wasm",
+    "lazy-function-tables",
+] }

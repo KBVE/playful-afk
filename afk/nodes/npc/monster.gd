@@ -52,9 +52,6 @@ var controller = null
 var _move_direction: Vector2 = Vector2.ZERO
 var _is_hurt: bool = false
 
-# Cached background reference for bounds checking (performance optimization)
-var _background_ref: Control = null
-
 # State-to-animation mapping (override in subclasses if needed)
 var state_to_animation: Dictionary = {
 	NPCManager.NPCState.IDLE: "idle",
@@ -66,9 +63,6 @@ var state_to_animation: Dictionary = {
 
 
 func _ready() -> void:
-	# Cache background reference for performance
-	_background_ref = get_tree().get_first_node_in_group("background")
-
 	# Set up state timer for automatic state changes
 	if state_timer:
 		state_timer.timeout.connect(_on_state_timer_timeout)
@@ -111,14 +105,14 @@ func _update_movement(delta: float) -> void:
 	# Check if WALKING flag is set (bitwise AND, not equality)
 	if current_state & NPCManager.NPCState.WALKING:
 		# Update movement direction to follow terrain slope for natural hill climbing
-		if _background_ref and _background_ref.has_method("get_walkable_y_bounds"):
+		if BackgroundManager:
 			# Sample terrain height at current position and slightly ahead
 			var sample_distance = 20.0  # Look ahead 20px
 			var current_x = global_position.x
 			var ahead_x = current_x + (_move_direction.x * sample_distance)
 
-			var current_y_bounds = _background_ref.get_walkable_y_bounds(current_x)
-			var ahead_y_bounds = _background_ref.get_walkable_y_bounds(ahead_x)
+			var current_y_bounds = BackgroundManager.get_walkable_y_bounds(current_x)
+			var ahead_y_bounds = BackgroundManager.get_walkable_y_bounds(ahead_x)
 
 			# Use midpoint of bounds as terrain surface height
 			var current_terrain_y = (current_y_bounds.x + current_y_bounds.y) / 2.0
@@ -141,12 +135,23 @@ func _update_movement(delta: float) -> void:
 		# Calculate potential new position (in local coordinates relative to Layer4Objects)
 		var new_position = position + (_move_direction * walk_speed * delta)
 
-		# Always move the monster - bounds checking should only affect direction, not movement
+		# Apply X bounds checking to prevent monsters from leaving the safe zone
+		if BackgroundManager:
+			var test_global_pos = global_position + (_move_direction * walk_speed * delta)
+
+			# If new position would be out of bounds, stop movement and clear direction
+			if not BackgroundManager.is_in_safe_zone(test_global_pos):
+				# Stop moving and return to idle
+				_move_direction = Vector2.ZERO
+				current_state = (current_state & ~NPCManager.NPCState.WALKING) | NPCManager.NPCState.IDLE
+				return
+
+		# Move the monster
 		position = new_position
 
 		# Safety clamp: ensure Y stays within terrain bounds to prevent floating
-		if _background_ref and _background_ref.has_method("get_walkable_y_bounds"):
-			var y_bounds = _background_ref.get_walkable_y_bounds(global_position.x)
+		if BackgroundManager:
+			var y_bounds = BackgroundManager.get_walkable_y_bounds(global_position.x)
 			position.y = clamp(position.y, y_bounds.x, y_bounds.y)
 
 
@@ -173,9 +178,10 @@ func _update_animation() -> void:
 	elif current_state & NPCManager.NPCState.IDLE:
 		animation_name = state_to_animation.get(NPCManager.NPCState.IDLE, "idle")
 
-	# Play animation if it exists
+	# Play animation if it exists and has changed (don't restart same animation)
 	if animated_sprite.sprite_frames.has_animation(animation_name):
-		animated_sprite.play(animation_name)
+		if animated_sprite.animation != animation_name:
+			animated_sprite.play(animation_name)
 
 
 func _on_state_timer_timeout() -> void:

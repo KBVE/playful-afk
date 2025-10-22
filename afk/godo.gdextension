@@ -1,0 +1,16 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.1
+reloadable = true
+
+[libraries]
+linux.debug.x86_64 =     "res://../rust/target/debug/libgodo.so"
+linux.release.x86_64 =   "res://../rust/target/release/libgodo.so"
+windows.debug.x86_64 =   "res://../rust/target/debug/godo.dll"
+windows.release.x86_64 = "res://../rust/target/release/godo.dll"
+macos.debug =            "res://../rust/target/debug/libgodo.dylib"
+macos.release =          "res://../rust/target/release/libgodo.dylib"
+macos.debug.arm64 =      "res://../rust/target/debug/libgodo.dylib"
+macos.release.arm64 =    "res://../rust/target/release/libgodo.dylib"
+web.debug.wasm32 = "res://../rust/target/wasm32-unknown-emscripten/debug/godo.wasm"
+web.release.wasm32 = "res://../rust/target/wasm32-unknown-emscripten/release/godo.wasm"

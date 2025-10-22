@@ -36,13 +36,12 @@ static func create_stats() -> NPCStats:
 
 
 func _ready() -> void:
-	# IMPORTANT: Set state flags FIRST, before parent _ready() which triggers AI registration
-	# MELEE combat type + ALLY faction
-	# Warriors are MELEE ALLY (fight for player, don't attack each other)
-	var desired_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.ALLY
-	print("DEBUG Warrior _ready: Setting state from %d to %d" % [current_state, desired_state])
-	current_state = desired_state
-	print("DEBUG Warrior _ready: State is now %d" % current_state)
+	# Set static/immutable properties FIRST (combat type + faction)
+	# These NEVER change during gameplay
+	static_state = NPCManager.NPCStaticState.MELEE | NPCManager.NPCStaticState.ALLY
+
+	# Set initial behavioral state (just IDLE - no combat type/faction needed)
+	current_state = NPCManager.NPCState.IDLE
 
 	# Set warrior-specific properties
 	walk_speed = 50.0

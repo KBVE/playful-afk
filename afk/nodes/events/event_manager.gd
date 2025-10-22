@@ -88,6 +88,25 @@ signal game_loaded(load_success)
 ## Emitted when game data is reset
 signal game_reset()
 
+# ===== NPC & Combat Events =====
+## Emitted when an NPC's state should change. Parameters: (npc: Node2D, new_state: int, reason: String)
+signal npc_state_change_requested(npc, new_state, reason)
+
+## Emitted when an NPC's state has changed. Parameters: (npc: Node2D, old_state: int, new_state: int, reason: String)
+signal npc_state_changed(npc, old_state, new_state, reason)
+
+## Emitted when combat starts. Parameters: (attacker: Node2D, target: Node2D)
+signal combat_started(attacker, target)
+
+## Emitted when combat ends. Parameters: (attacker: Node2D, target: Node2D)
+signal combat_ended(attacker, target)
+
+## Emitted when damage is dealt. Parameters: (attacker: Node2D, target: Node2D, damage: float)
+signal damage_dealt(attacker, target, damage)
+
+## Emitted when an NPC/target is killed. Parameters: (attacker: Node2D, target: Node2D)
+signal target_killed(attacker, target)
+
 # ===== View State Events =====
 ## View states for camera navigation
 enum ViewState {
