@@ -1,0 +1,11 @@
+[gd_scene load_steps=3 format=3 uid="uid://cqg7yxm8k8wyx"]
+
+[ext_resource type="Script" path="res://nodes/environment/catflag/catflag.gd" id="1_catflag_script"]
+[ext_resource type="Texture2D" uid="uid://doq0bwxkxhcsd" path="res://nodes/environment/catflag/catflag.png" id="2_catflag_sprite"]
+
+[node name="CatFlag" type="Node2D"]
+script = ExtResource("1_catflag_script")
+
+[node name="Sprite2D" type="Sprite2D" parent="."]
+texture = ExtResource("2_catflag_sprite")
+centered = true

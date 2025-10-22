@@ -209,6 +209,10 @@ func _ready() -> void:
 	EventManager.game_saved.connect(_on_game_saved)
 	EventManager.game_loaded.connect(_on_game_loaded)
 
+	# Connect to EnvironmentManager events
+	if EnvironmentManager and EnvironmentManager.has_signal("catflag_spawned"):
+		EnvironmentManager.catflag_spawned.connect(_on_catflag_spawned)
+
 
 ## ===== NPC REGISTRY HELPER FUNCTIONS =====
 
@@ -258,9 +262,90 @@ func _initialize_cat() -> void:
 		cat = cat_scene.instantiate()
 		add_child(cat)
 
+		# Connect cat's call for help signal
+		if cat.has_signal("call_for_help"):
+			cat.call_for_help.connect(_on_cat_call_for_help)
+
 		# Load saved data if available
 		if npc_save_data.has("cat"):
 			_load_cat_data(npc_save_data["cat"])
+
+
+## Handle cat calling for help when enemies are nearby
+func _on_cat_call_for_help(enemy: Node2D) -> void:
+	if not is_instance_valid(enemy):
+		return
+
+	# Find idle allies (warriors, archers) to send to help
+	for npc in _npc_ai_states.keys():
+		if not is_instance_valid(npc):
+			continue
+
+		# Skip if NPC is already in combat
+		var ai_state = _npc_ai_states.get(npc)
+		if ai_state.get("combat_target"):
+			continue
+
+		# Check if NPC is an ally (warrior or archer)
+		var npc_type = ai_state.get("npc_type", "")
+		if npc_type not in ["warrior", "archer"]:
+			continue
+
+		# Check if NPC is idle (not already moving to a target)
+		var combat_type = CombatManager.CombatType.NONE
+		if "combat_type" in npc:
+			combat_type = npc.combat_type
+
+		# Send this ally to engage the enemy
+		var movement_target = _get_movement_target(npc)
+		if movement_target.has_method("move_to_position"):
+			# Set the enemy as combat target
+			ai_state["combat_target"] = enemy
+			ai_state["time_until_next_change"] = 2.0
+
+			# Move toward the enemy
+			movement_target.move_to_position(enemy.global_position.x)
+			_ai_tween_y_position(npc, enemy.global_position.y, ai_state)
+
+			# Set NPC to walking state
+			if "current_state" in npc:
+				npc.current_state = NPCState.WALKING
+
+
+## Handle catflag being spawned - send idle NPCs to flag location
+func _on_catflag_spawned(flag: Node2D, flag_position: Vector2) -> void:
+	if not is_instance_valid(flag):
+		return
+
+	# Find idle allies (warriors, archers) to send to flag
+	for npc in _npc_ai_states.keys():
+		if not is_instance_valid(npc):
+			continue
+
+		# Skip if NPC is already in combat
+		var ai_state = _npc_ai_states.get(npc)
+		if ai_state.get("combat_target"):
+			continue
+
+		# Check if NPC is an ally (warrior or archer)
+		var npc_type = ai_state.get("npc_type", "")
+		if npc_type not in ["warrior", "archer"]:
+			continue
+
+		# Send this ally to the flag location
+		var movement_target = _get_movement_target(npc)
+		if movement_target.has_method("move_to_position"):
+			# Move toward the flag position
+			movement_target.move_to_position(flag_position.x)
+			_ai_tween_y_position(npc, flag_position.y, ai_state)
+
+			# Set NPC to walking state
+			if "current_state" in npc:
+				npc.current_state = NPCState.WALKING
+
+			# Store flag as rally point (not combat target)
+			ai_state["rally_point"] = flag_position
+			ai_state["time_until_next_change"] = 2.0
 
 
 ## Save cat data to dictionary
@@ -635,8 +720,29 @@ func _update_npc_ai(npc: Node2D) -> void:
 
 				# Too close! RETREAT (kiting behavior)
 				if CombatManager.should_archer_retreat(npc, target):
-					# Calculate retreat direction (away from enemy)
-					var retreat_direction = (npc.global_position - target.global_position).normalized()
+					# Calculate retreat direction considering ALL nearby enemies (not just one)
+					var retreat_direction = Vector2.ZERO
+					var nearby_enemies: Array[Node2D] = []
+
+					# Find all enemies within threat range (150px)
+					var all_potential_targets = CombatManager.find_all_valid_targets(npc, 150.0)
+					for enemy in all_potential_targets:
+						if is_instance_valid(enemy):
+							nearby_enemies.append(enemy)
+
+					# Calculate weighted retreat direction away from all threats
+					if nearby_enemies.size() > 0:
+						for enemy in nearby_enemies:
+							var to_enemy = npc.global_position - enemy.global_position
+							var distance = to_enemy.length()
+							# Closer enemies have more weight (inverse distance)
+							var weight = 1.0 / max(distance, 1.0)
+							retreat_direction += to_enemy.normalized() * weight
+						retreat_direction = retreat_direction.normalized()
+					else:
+						# Fallback: just move away from primary target
+						retreat_direction = (npc.global_position - target.global_position).normalized()
+
 					# Use health-based kiting range (extends range when hurt)
 					var retreat_distance = CombatManager.get_optimal_kiting_range(npc)
 					var retreat_pos = npc.global_position + (retreat_direction * retreat_distance)
@@ -737,16 +843,28 @@ func _update_npc_ai(npc: Node2D) -> void:
 					needs_new_target = true
 				elif not ai_state.has("roam_target"):
 					needs_new_target = true
-				elif not is_moving:
-					# Reached target, pick a new one
-					needs_new_target = true
+				elif ai_state.has("roam_target"):
+					# Check if reached target (within 30 pixels)
+					var roam_target = ai_state.get("roam_target", Vector2.ZERO)
+					var distance_to_target = npc.global_position.distance_to(roam_target)
+					if distance_to_target < 30.0:
+						needs_new_target = true
 
 			# Pick a random position in safe rectangle and move there
 			if needs_new_target and background_reference and background_reference.has_method("get_random_safe_position"):
 				var safe_pos = background_reference.get_random_safe_position()
+
+				# Check if monster has controller-based movement
 				if movement_target.has_method("move_to_position"):
 					movement_target.move_to_position(safe_pos.x)
 					_ai_tween_y_position(npc, safe_pos.y, ai_state)
+					ai_state["roam_target"] = safe_pos
+					ai_state["time_until_next_change"] = 5.0
+				# Otherwise use direct _move_direction for monsters without controllers
+				elif "_move_direction" in npc:
+					var direction = (safe_pos - npc.global_position).normalized()
+					npc._move_direction = direction
+					npc.current_state = NPCState.WALKING
 					ai_state["roam_target"] = safe_pos
 					ai_state["time_until_next_change"] = 5.0
 
@@ -1123,8 +1241,19 @@ func _initialize_generic_pool() -> void:
 	for i in range(num_archers):
 		_preallocate_generic_npc("archer", num_warriors + i)
 
+	# Pre-allocate chickens (monsters)
+	var num_chickens = 8
+	for i in range(num_chickens):
+		_preallocate_generic_npc("chicken", num_warriors + num_archers + i)
+
+	# Pre-allocate mushrooms (aggressive monsters)
+	var num_mushrooms = 6
+	for i in range(num_mushrooms):
+		_preallocate_generic_npc("mushroom", num_warriors + num_archers + num_chickens + i)
+
 	# Fill remaining slots with empty entries
-	for i in range(num_warriors + num_archers, MAX_GENERIC_POOL_SIZE):
+	var total_preallocated = num_warriors + num_archers + num_chickens + num_mushrooms
+	for i in range(total_preallocated, MAX_GENERIC_POOL_SIZE):
 		generic_pool.append({
 			"character": null,
 			"is_active": false,
@@ -1132,7 +1261,7 @@ func _initialize_generic_pool() -> void:
 			"npc_type": ""
 		})
 
-	print("NPCManager: Generic pool initialized with %d warriors, %d archers" % [num_warriors, num_archers])
+	print("NPCManager: Generic pool initialized with %d warriors, %d archers, %d chickens, %d mushrooms" % [num_warriors, num_archers, num_chickens, num_mushrooms])
 
 
 ## Pre-allocate a generic NPC instance (but don't activate it yet)
@@ -1233,6 +1362,14 @@ func add_persistent_npc(
 ## Get a generic NPC from pool (creates fresh stats each time)
 ## Y bounds are now dynamically queried from background heightmap based on movement
 func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
+	# Validate NPC type exists in registry
+	if not NPC_REGISTRY.has(npc_type):
+		push_error("NPCManager: Cannot spawn unknown NPC type '%s'. Valid types: %s" % [npc_type, str(NPC_REGISTRY.keys())])
+		return null
+
+	# Check pool health BEFORE attempting to get NPC (warns if >80% utilized)
+	check_pool_health(npc_type)
+
 	# Find inactive NPC in generic pool
 	var slot_index = -1
 	for i in range(generic_pool.size()):
@@ -1242,8 +1379,28 @@ func get_generic_npc(npc_type: String, position: Vector2) -> Node2D:
 			break
 
 	if slot_index == -1:
-		push_error("NPCManager: No available generic NPCs of type %s" % npc_type)
-		return null
+		# Pool exhausted - check if we can expand
+		var stats = get_pool_stats(npc_type)
+
+		# Check if we have room to expand
+		if generic_pool.size() >= MAX_GENERIC_POOL_SIZE:
+			push_error("NPCManager: Pool exhausted for '%s' and MAX_GENERIC_POOL_SIZE (%d) reached! Cannot expand further." % [npc_type, MAX_GENERIC_POOL_SIZE])
+			print_pool_stats()
+			return null
+
+		# Dynamically expand the pool for this type
+		push_warning("NPCManager: Pool exhausted for '%s' (%d/%d active). Auto-expanding pool by 1 slot..." % [
+			npc_type,
+			stats["active"],
+			stats["total"]
+		])
+
+		# Add a new slot and allocate it
+		var new_slot_index = generic_pool.size()
+		_preallocate_generic_npc(npc_type, new_slot_index)
+		slot_index = new_slot_index
+
+		print("NPCManager: Pool expanded! '%s' now has %d total slots." % [npc_type, get_pool_stats(npc_type)["total"]])
 
 	var slot = generic_pool[slot_index]
 
@@ -1336,6 +1493,77 @@ func return_generic_npc(npc: Node2D) -> void:
 			return
 
 	push_warning("NPCManager: NPC not found in generic pool")
+
+
+## Get pool statistics for a specific NPC type
+func get_pool_stats(npc_type: String) -> Dictionary:
+	var total = 0
+	var active = 0
+	var inactive = 0
+
+	for slot in generic_pool:
+		if slot["npc_type"] == npc_type:
+			total += 1
+			if slot["is_active"]:
+				active += 1
+			else:
+				inactive += 1
+
+	return {
+		"type": npc_type,
+		"total": total,
+		"active": active,
+		"inactive": inactive,
+		"utilization": (float(active) / float(total) * 100.0) if total > 0 else 0.0
+	}
+
+
+## Check if pool is near exhaustion (>80% utilized) and warn
+func check_pool_health(npc_type: String) -> bool:
+	var stats = get_pool_stats(npc_type)
+	var is_healthy = stats["utilization"] < 80.0
+
+	if not is_healthy:
+		push_warning("NPCManager: Pool for '%s' is %d%% utilized (%d/%d active). Consider increasing pool size!" % [
+			npc_type,
+			int(stats["utilization"]),
+			stats["active"],
+			stats["total"]
+		])
+
+	return is_healthy
+
+
+## Print all pool statistics (for debugging)
+func print_pool_stats() -> void:
+	print("=== NPCManager Pool Statistics ===")
+
+	# Count by type
+	var type_counts = {}
+	for slot in generic_pool:
+		var npc_type = slot["npc_type"]
+		if npc_type == "":
+			continue
+
+		if not type_counts.has(npc_type):
+			type_counts[npc_type] = {"total": 0, "active": 0}
+
+		type_counts[npc_type]["total"] += 1
+		if slot["is_active"]:
+			type_counts[npc_type]["active"] += 1
+
+	# Print stats for each type
+	for npc_type in type_counts.keys():
+		var stats = type_counts[npc_type]
+		var utilization = float(stats["active"]) / float(stats["total"]) * 100.0
+		print("  %s: %d/%d active (%.1f%% utilized)" % [
+			npc_type,
+			stats["active"],
+			stats["total"],
+			utilization
+		])
+
+	print("==================================")
 
 
 ## Get NPC stats by binary ULID

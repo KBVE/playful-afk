@@ -443,6 +443,46 @@ func find_nearest_target(attacker: Node2D, max_range: float = 500.0) -> Node2D:
 	return nearest_target
 
 
+## Find all valid targets within range (for multi-enemy awareness)
+func find_all_valid_targets(attacker: Node2D, max_range: float = 500.0) -> Array[Node2D]:
+	var valid_targets: Array[Node2D] = []
+
+	if not attacker:
+		return valid_targets
+
+	# Check if attacker is passive (can't attack)
+	if attacker.has_method("is_passive") and attacker.is_passive():
+		return valid_targets
+
+	# Get all NPCs from NPCManager pools
+	var potential_targets = _get_all_npcs()
+
+	for target in potential_targets:
+		# Skip self
+		if target == attacker:
+			continue
+
+		# Skip friendly NPCs (like the cat - should never be targeted)
+		if "is_friendly" in target and target.is_friendly:
+			continue
+
+		# Skip if target is same type as attacker (don't attack allies)
+		if _is_same_faction(attacker, target):
+			continue
+
+		# Skip if target is dead
+		if "stats" in target and target.stats:
+			if not target.stats.is_alive():
+				continue
+
+		# Check distance
+		var distance = attacker.global_position.distance_to(target.global_position)
+		if distance <= max_range:
+			valid_targets.append(target)
+
+	return valid_targets
+
+
 ## Check if two NPCs are in the same faction (don't attack each other)
 func _is_same_faction(npc1: Node2D, npc2: Node2D) -> bool:
 	var faction1 = _get_npc_faction(npc1)

@@ -104,26 +104,26 @@ func _process(delta: float) -> void:
 
 
 func _update_movement(delta: float) -> void:
-	# Skip movement for aggressive monsters - they're controlled by NPCManager's roaming AI
-	if not is_passive():
-		return
-
-	# Simple movement for passive monsters only
+	# Simple movement for monsters
 	if current_state == NPCManager.NPCState.WALKING:
 		# Calculate potential new position
 		var new_position = position + (_move_direction * walk_speed * delta)
 
-		# Check if new position is within walkable bounds
-		if _background_ref and _background_ref.has_method("is_position_in_walkable_area"):
-			if _background_ref.is_position_in_walkable_area(new_position):
+		# Check if new position is within safe rectangle bounds (stricter than walkable area)
+		if _background_ref and _background_ref.has_method("is_in_safe_rectangle"):
+			if _background_ref.is_in_safe_rectangle(new_position):
 				position = new_position
 			else:
-				# Hit bounds - pick a new random direction towards center
-				var viewport_size = get_viewport_rect().size
-				var center = Vector2(viewport_size.x / 2, position.y)
-				var to_center = (center - position).normalized()
-				# Add randomness to avoid straight line
-				_move_direction = (to_center + Vector2(randf_range(-0.3, 0.3), randf_range(-0.3, 0.3))).normalized()
+				# Hit bounds - pick a random safe direction
+				if _background_ref.has_method("get_random_safe_position"):
+					var safe_target = _background_ref.get_random_safe_position()
+					_move_direction = (safe_target - global_position).normalized()
+				else:
+					# Fallback: move toward center
+					var viewport_size = get_viewport_rect().size
+					var center = Vector2(viewport_size.x / 2, position.y)
+					var to_center = (center - position).normalized()
+					_move_direction = (to_center + Vector2(randf_range(-0.3, 0.3), randf_range(-0.3, 0.3))).normalized()
 		else:
 			# Fallback: simple screen bounds check if background not available
 			var viewport_size = get_viewport_rect().size

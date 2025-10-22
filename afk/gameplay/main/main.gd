@@ -114,6 +114,10 @@ func _setup_character_pool() -> void:
 		# Set projectile container for arrows and other projectiles (reparents existing arrows)
 		if ProjectileManager:
 			ProjectileManager.set_projectile_container(background.layer4_objects)
+
+		# Set environment container for flags and other environment objects
+		if EnvironmentManager:
+			EnvironmentManager.set_environment_container(background.layer4_objects)
 	else:
 		push_error("Layer4Objects not found in background!")
 		return

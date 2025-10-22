@@ -57,6 +57,9 @@ var combat_type: int = 0  # NPCManager.CombatType.NONE
 ## Cat is a friendly pet, not a monster (should never be targeted in combat)
 var is_friendly: bool = true
 
+## Signal emitted when cat sees enemies and calls for help
+signal call_for_help(enemy: Node2D)
+
 # Node references
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var state_timer: Timer = $StateTimer
@@ -67,6 +70,11 @@ var controller: CatController
 # Internal state
 var _move_direction: Vector2 = Vector2.ZERO
 var _is_player_controlled: bool = false
+
+# Danger detection
+var _danger_check_timer: float = 0.0
+const DANGER_CHECK_INTERVAL: float = 2.0  # Check for enemies every 2 seconds
+const DANGER_RANGE: float = 200.0  # Range at which cat detects danger
 
 
 func _ready() -> void:
@@ -94,6 +102,12 @@ func _physics_process(delta: float) -> void:
 		if controller:
 			controller.move_cat(_move_direction, true)
 		move_and_slide()
+
+	# Check for nearby enemies periodically
+	_danger_check_timer += delta
+	if _danger_check_timer >= DANGER_CHECK_INTERVAL:
+		_danger_check_timer = 0.0
+		_check_for_danger()
 
 
 func _update_animation() -> void:
@@ -198,3 +212,20 @@ func set_player_controlled(controlled: bool) -> void:
 func _on_pet_fed(food_item: Dictionary) -> void:
 	# React to being fed (from EventManager)
 	pass
+
+
+## Check for nearby enemies and call for help if found
+func _check_for_danger() -> void:
+	if not CombatManager:
+		return
+
+	# Find nearest enemy within danger range
+	var nearest_enemy = CombatManager.find_nearest_target(self, DANGER_RANGE)
+
+	if nearest_enemy and is_instance_valid(nearest_enemy):
+		# Enemy detected! Spawn catflag to signal for help
+		if EnvironmentManager:
+			EnvironmentManager.spawn_object("catflag", global_position)
+
+		# Emit signal for NPCs to respond
+		call_for_help.emit(nearest_enemy)
