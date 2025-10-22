@@ -319,6 +319,44 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for goblin %d" % g)
 
+	# Spawn 2-3 initial eyebeasts
+	for e in range(3):
+		var eyebeast_spawn_pos = Vector2.ZERO
+		var eyebeast_is_valid = false
+		var eyebeast_attempts = 0
+
+		while eyebeast_attempts < 20 and not eyebeast_is_valid:
+			# Spawn spread across the screen (offset from goblins)
+			var x_pos = viewport_size.x * (0.3 + (e * 0.25)) + randf_range(-50.0, 50.0)
+			var y_bounds = background.get_walkable_y_bounds(x_pos)
+			var random_y = randf_range(y_bounds.x, y_bounds.y)
+
+			eyebeast_spawn_pos = Vector2(x_pos, random_y)
+
+			# Check if position is inside walkable area
+			if background.has_method("is_position_in_walkable_area"):
+				eyebeast_is_valid = background.is_position_in_walkable_area(eyebeast_spawn_pos)
+			else:
+				eyebeast_is_valid = true
+
+			eyebeast_attempts += 1
+
+		if eyebeast_is_valid:
+			var eyebeast = NPCManager.get_generic_npc("eyebeast", eyebeast_spawn_pos)
+			if eyebeast:
+				eyebeast.scale = Vector2(1, 1)
+				eyebeast.set_physics_process(false)
+				if eyebeast.has_signal("eyebeast_died"):
+					if not eyebeast.eyebeast_died.is_connected(_on_monster_died):
+						eyebeast.eyebeast_died.connect(_on_monster_died.bind(eyebeast))
+				if eyebeast.has_signal("eyebeast_clicked"):
+					if not eyebeast.eyebeast_clicked.is_connected(_on_npc_clicked):
+						eyebeast.eyebeast_clicked.connect(func(): _on_npc_clicked(eyebeast))
+				active_monsters.append(eyebeast)
+			print("Spawned eyebeast #%d at %s" % [e + 1, eyebeast_spawn_pos])
+		else:
+			push_warning("Could not find valid spawn position for eyebeast %d" % e)
+
 
 func _start_cat_movement() -> void:
 	# Disable the cat's built-in random state timer

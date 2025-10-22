@@ -117,6 +117,19 @@ const NPC_REGISTRY: Dictionary = {
 			"state_change_max": 3.0,
 			"movement_speed": 0.8   # Faster than mushrooms
 		}
+	},
+	"eyebeast": {
+		"scene": "res://nodes/npc/eyebeast/eyebeast.tscn",
+		"class_name": "Eyebeast",
+		"category": "monster",
+		"monster_types": [MonsterType.AGGRESSIVE],
+		"ai_profile": {
+			"idle_weight": 30,      # Eyebeasts are very aggressive
+			"walk_weight": 70,      # Constantly moving (flying)
+			"state_change_min": 0.8,  # Very quick state changes (agile flyer)
+			"state_change_max": 2.5,
+			"movement_speed": 0.9   # Fastest monster (flying)
+		}
 	}
 	# Future NPCs: Add here! Example:
 	# "mage": {
@@ -151,8 +164,8 @@ var persistent_pool: Array[Dictionary] = []  # Each entry: {character, ulid, is_
 ## GENERIC POOL - Temporary NPCs with fresh stats each spawn (enemies, random NPCs)
 ## Pool recycles character instances, new stats generated per spawn
 ## Example: "Goblin", "Bandit", "Wolf"
-## Current allocation: 6 warriors + 6 archers + 6 monsters = 18 total
-const MAX_GENERIC_POOL_SIZE: int = 20
+## Current allocation: 6 warriors + 6 archers + 8 chickens + 6 mushrooms + 6 goblins + 6 eyebeasts = 38 total
+const MAX_GENERIC_POOL_SIZE: int = 40
 var generic_pool: Array[Dictionary] = []  # Each entry: {character, is_active, npc_type, ...}
 
 ## STATS DATABASE - All NPC stats indexed by ULID
@@ -1305,6 +1318,17 @@ func _create_stats_for_type(npc_type: String) -> NPCStats:
 				NPCStats.Emotion.NEUTRAL,
 				npc_type
 			)
+		"eyebeast":
+			return NPCStats.new(
+				80.0,   # HP (low - flying glass cannon)
+				0.0,    # Mana (eyebeasts don't use mana)
+				90.0,   # Energy (very high - constantly flying)
+				100.0,  # Hunger
+				15.0,   # Attack (very high ranged damage - eye beam)
+				3.0,    # Defense (very low - extremely fragile)
+				NPCStats.Emotion.NEUTRAL,
+				npc_type
+			)
 		_:
 			# Default stats for unknown NPCs
 			return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
@@ -1357,8 +1381,13 @@ func _initialize_generic_pool() -> void:
 	for i in range(num_goblins):
 		_preallocate_generic_npc("goblin", num_warriors + num_archers + num_chickens + num_mushrooms + i)
 
+	# Pre-allocate eyebeasts (aggressive flying monsters - ranged glass cannons)
+	var num_eyebeasts = 6
+	for i in range(num_eyebeasts):
+		_preallocate_generic_npc("eyebeast", num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + i)
+
 	# Fill remaining slots with empty entries
-	var total_preallocated = num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins
+	var total_preallocated = num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + num_eyebeasts
 	for i in range(total_preallocated, MAX_GENERIC_POOL_SIZE):
 		generic_pool.append({
 			"character": null,
@@ -1367,7 +1396,7 @@ func _initialize_generic_pool() -> void:
 			"npc_type": ""
 		})
 
-	print("NPCManager: Generic pool initialized with %d warriors, %d archers, %d chickens, %d mushrooms" % [num_warriors, num_archers, num_chickens, num_mushrooms])
+	print("NPCManager: Generic pool initialized with %d warriors, %d archers, %d chickens, %d mushrooms, %d goblins, %d eyebeasts" % [num_warriors, num_archers, num_chickens, num_mushrooms, num_goblins, num_eyebeasts])
 
 
 ## Pre-allocate a generic NPC instance (but don't activate it yet)
