@@ -61,8 +61,6 @@ func _on_continue_pressed() -> void:
 		if welcome_text:
 			welcome_text.visible_characters = -1  # Show all text immediately
 
-	print("Continue pressed - transitioning to main game...")
-
 	# Fade out the panel, then transition to main game
 	var tween = create_tween()
 	tween.tween_property(welcome_panel, "modulate:a", 0.0, 0.3)

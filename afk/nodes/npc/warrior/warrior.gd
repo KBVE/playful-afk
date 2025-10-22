@@ -28,8 +28,4 @@ func _on_ready_complete() -> void:
 
 ## Override click handler to emit warrior-specific signal
 func _on_input_manager_clicked() -> void:
-	print("========================================")
-	print("WARRIOR CLICKED!")
-	print("Position: ", global_position)
-	print("========================================")
 	warrior_clicked.emit()

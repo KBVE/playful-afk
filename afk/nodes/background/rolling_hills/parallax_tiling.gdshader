@@ -19,7 +19,8 @@ void fragment() {
 	uv.x *= screen_size.x / (texture_size.x * scale);
 
 	// Add scroll offset for horizontal parallax
-	uv.x += scroll_offset / 1000.0;
+	// Divide by tile width (640 * 1.6875 = 1080) to convert pixels to UV units
+	uv.x += scroll_offset / 1080.0;
 
 	// Wrap only X coordinate for horizontal tiling
 	uv.x = fract(uv.x);

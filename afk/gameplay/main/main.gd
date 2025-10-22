@@ -34,13 +34,11 @@ var cat_is_hovered: bool = false
 var cat_normal_scale: Vector2 = Vector2(1.5, 1.5)
 var cat_hover_scale: Vector2 = Vector2(3, 3)
 
-# Monster spawning system
-var monster_spawn_timer: Timer = null
-const MONSTER_SPAWN_INTERVAL: float = 4.0  # Spawn every 4 seconds (2x faster)
-const MAX_ACTIVE_MONSTERS: int = 6  # Maximum monsters at once
+# Monster tracking (spawning managed by EventManager)
+const MAX_ACTIVE_MONSTERS: int = 20  # Maximum monsters at once (to accommodate waves of 4-10)
 var active_monsters: Array[Node2D] = []
 
-# Ally respawn system
+# Ally tracking and respawn system
 var ally_respawn_timer: Timer = null
 const ALLY_RESPAWN_INTERVAL: float = 3.0  # Check every 3 seconds for dead allies
 const MAX_WARRIORS: int = 6  # Always maintain 6 warriors
@@ -77,11 +75,19 @@ func _ready() -> void:
 		EventManager.register_ui(EventManager.UIType.CHAT_UI, chat_ui)
 		chat_ui.dialogue_closed.connect(_on_chat_ui_closed)
 
-	# Setup monster spawning system
-	_setup_monster_spawner()
+	# Setup EventManager spawn system with background reference
+	EventManager.setup_spawn_system(background)
 
-	# Setup ally respawn system
-	_setup_ally_respawner()
+	# Connect to spawn event signals
+	EventManager.ally_spawn_requested.connect(_on_ally_spawn_requested)
+	EventManager.monster_spawn_requested.connect(_on_monster_spawn_requested)
+	EventManager.ally_respawn_requested.connect(_on_ally_respawn_requested)
+
+	# Enable spawn processing after initial setup
+	EventManager.set_spawn_enabled(true)
+
+	# Setup ally respawn timer (still handled locally for counting)
+	_setup_ally_respawn_checker()
 
 
 func _setup_pet() -> void:
@@ -159,7 +165,11 @@ func _setup_character_pool() -> void:
 
 			# Get Y bounds at this X position
 			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			var random_y = randf_range(y_bounds.x, y_bounds.y)
+			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+			var min_y = y_bounds.x
+			var max_y = y_bounds.y
+			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+			var random_y = randf_range(bottom_70_percent, max_y)
 
 			spawn_pos = Vector2(x_pos, random_y)
 
@@ -172,7 +182,12 @@ func _setup_character_pool() -> void:
 			attempts += 1
 
 		if is_valid:
-			var warrior = NPCManager.get_generic_npc("warrior", spawn_pos)
+			# Convert global spawn position to Layer4Objects local coordinates
+			var spawn_pos_local = spawn_pos
+			if background.layer4_objects:
+				spawn_pos_local = background.layer4_objects.to_local(spawn_pos)
+
+			var warrior = NPCManager.get_generic_npc("warrior", spawn_pos_local)
 			if warrior:
 				warrior.scale = Vector2(1, 1)  # Normal size for better collision/combat
 				warrior.set_physics_process(false)
@@ -207,7 +222,11 @@ func _setup_character_pool() -> void:
 
 			# Get Y bounds at this X position
 			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			var random_y = randf_range(y_bounds.x, y_bounds.y)
+			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+			var min_y = y_bounds.x
+			var max_y = y_bounds.y
+			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+			var random_y = randf_range(bottom_70_percent, max_y)
 
 			spawn_pos = Vector2(x_pos, random_y)
 
@@ -220,7 +239,12 @@ func _setup_character_pool() -> void:
 			attempts += 1
 
 		if is_valid:
-			var archer = NPCManager.get_generic_npc("archer", spawn_pos)
+			# Convert global spawn position to Layer4Objects local coordinates
+			var spawn_pos_local = spawn_pos
+			if background.layer4_objects:
+				spawn_pos_local = background.layer4_objects.to_local(spawn_pos)
+
+			var archer = NPCManager.get_generic_npc("archer", spawn_pos_local)
 			if archer:
 				archer.scale = Vector2(1, 1)  # Normal size for better collision/combat
 				archer.set_physics_process(false)
@@ -245,7 +269,11 @@ func _setup_character_pool() -> void:
 		# Spawn in center of screen
 		var x_pos = viewport_size.x / 2 + randf_range(-100.0, 100.0)
 		var y_bounds = background.get_walkable_y_bounds(x_pos)
-		var random_y = randf_range(y_bounds.x, y_bounds.y)
+		# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+		var min_y = y_bounds.x
+		var max_y = y_bounds.y
+		var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+		var random_y = randf_range(bottom_70_percent, max_y)
 
 		chicken_spawn_pos = Vector2(x_pos, random_y)
 
@@ -258,7 +286,12 @@ func _setup_character_pool() -> void:
 		chicken_attempts += 1
 
 	if chicken_is_valid:
-		var chicken = NPCManager.get_generic_npc("chicken", chicken_spawn_pos)
+		# Convert global spawn position to Layer4Objects local coordinates
+		var chicken_spawn_pos_local = chicken_spawn_pos
+		if background.layer4_objects:
+			chicken_spawn_pos_local = background.layer4_objects.to_local(chicken_spawn_pos)
+
+		var chicken = NPCManager.get_generic_npc("chicken", chicken_spawn_pos_local)
 		if chicken:
 			chicken.scale = Vector2(1, 1)  # Normal size to match warriors/archers
 			chicken.set_physics_process(false)
@@ -268,8 +301,8 @@ func _setup_character_pool() -> void:
 	else:
 		push_warning("Could not find valid spawn position for chicken")
 
-	# Spawn 3 initial mushrooms
-	for m in range(3):
+	# Spawn 1 initial mushroom
+	for m in range(1):
 		var mushroom_spawn_pos = Vector2.ZERO
 		var mushroom_is_valid = false
 		var mushroom_attempts = 0
@@ -278,7 +311,11 @@ func _setup_character_pool() -> void:
 			# Spawn spread across the screen
 			var x_pos = viewport_size.x * (0.3 + (m * 0.2)) + randf_range(-50.0, 50.0)
 			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			var random_y = randf_range(y_bounds.x, y_bounds.y)
+			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+			var min_y = y_bounds.x
+			var max_y = y_bounds.y
+			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+			var random_y = randf_range(bottom_70_percent, max_y)
 
 			mushroom_spawn_pos = Vector2(x_pos, random_y)
 
@@ -291,7 +328,12 @@ func _setup_character_pool() -> void:
 			mushroom_attempts += 1
 
 		if mushroom_is_valid:
-			var mushroom = NPCManager.get_generic_npc("mushroom", mushroom_spawn_pos)
+			# Convert global spawn position to Layer4Objects local coordinates
+			var mushroom_spawn_pos_local = mushroom_spawn_pos
+			if background.layer4_objects:
+				mushroom_spawn_pos_local = background.layer4_objects.to_local(mushroom_spawn_pos)
+
+			var mushroom = NPCManager.get_generic_npc("mushroom", mushroom_spawn_pos_local)
 			if mushroom:
 				mushroom.scale = Vector2(1, 1)
 				mushroom.set_physics_process(false)
@@ -306,8 +348,8 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for mushroom %d" % m)
 
-	# Spawn 2-3 initial goblins
-	for g in range(3):
+	# Spawn 1 initial goblin
+	for g in range(1):
 		var goblin_spawn_pos = Vector2.ZERO
 		var goblin_is_valid = false
 		var goblin_attempts = 0
@@ -316,7 +358,11 @@ func _setup_character_pool() -> void:
 			# Spawn spread across the screen (offset from mushrooms)
 			var x_pos = viewport_size.x * (0.4 + (g * 0.2)) + randf_range(-50.0, 50.0)
 			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			var random_y = randf_range(y_bounds.x, y_bounds.y)
+			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+			var min_y = y_bounds.x
+			var max_y = y_bounds.y
+			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+			var random_y = randf_range(bottom_70_percent, max_y)
 
 			goblin_spawn_pos = Vector2(x_pos, random_y)
 
@@ -329,7 +375,12 @@ func _setup_character_pool() -> void:
 			goblin_attempts += 1
 
 		if goblin_is_valid:
-			var goblin = NPCManager.get_generic_npc("goblin", goblin_spawn_pos)
+			# Convert global spawn position to Layer4Objects local coordinates
+			var goblin_spawn_pos_local = goblin_spawn_pos
+			if background.layer4_objects:
+				goblin_spawn_pos_local = background.layer4_objects.to_local(goblin_spawn_pos)
+
+			var goblin = NPCManager.get_generic_npc("goblin", goblin_spawn_pos_local)
 			if goblin:
 				goblin.scale = Vector2(1, 1)
 				goblin.set_physics_process(false)
@@ -344,8 +395,8 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for goblin %d" % g)
 
-	# Spawn 2-3 initial eyebeasts
-	for e in range(3):
+	# Spawn 1 initial eyebeast
+	for e in range(1):
 		var eyebeast_spawn_pos = Vector2.ZERO
 		var eyebeast_is_valid = false
 		var eyebeast_attempts = 0
@@ -354,7 +405,11 @@ func _setup_character_pool() -> void:
 			# Spawn spread across the screen (offset from goblins)
 			var x_pos = viewport_size.x * (0.3 + (e * 0.25)) + randf_range(-50.0, 50.0)
 			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			var random_y = randf_range(y_bounds.x, y_bounds.y)
+			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+			var min_y = y_bounds.x
+			var max_y = y_bounds.y
+			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+			var random_y = randf_range(bottom_70_percent, max_y)
 
 			eyebeast_spawn_pos = Vector2(x_pos, random_y)
 
@@ -367,7 +422,12 @@ func _setup_character_pool() -> void:
 			eyebeast_attempts += 1
 
 		if eyebeast_is_valid:
-			var eyebeast = NPCManager.get_generic_npc("eyebeast", eyebeast_spawn_pos)
+			# Convert global spawn position to Layer4Objects local coordinates
+			var eyebeast_spawn_pos_local = eyebeast_spawn_pos
+			if background.layer4_objects:
+				eyebeast_spawn_pos_local = background.layer4_objects.to_local(eyebeast_spawn_pos)
+
+			var eyebeast = NPCManager.get_generic_npc("eyebeast", eyebeast_spawn_pos_local)
 			if eyebeast:
 				eyebeast.scale = Vector2(1, 1)
 				eyebeast.set_physics_process(false)
@@ -382,8 +442,8 @@ func _setup_character_pool() -> void:
 		else:
 			push_warning("Could not find valid spawn position for eyebeast %d" % e)
 
-	# Spawn 2-3 initial skeletons
-	for s in range(3):
+	# Spawn 1 initial skeleton
+	for s in range(1):
 		var skeleton_spawn_pos = Vector2.ZERO
 		var skeleton_is_valid = false
 		var skeleton_attempts = 0
@@ -392,7 +452,11 @@ func _setup_character_pool() -> void:
 			# Spawn spread across the screen (offset from eyebeasts)
 			var x_pos = viewport_size.x * (0.25 + (s * 0.3)) + randf_range(-50.0, 50.0)
 			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			var random_y = randf_range(y_bounds.x, y_bounds.y)
+			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+			var min_y = y_bounds.x
+			var max_y = y_bounds.y
+			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+			var random_y = randf_range(bottom_70_percent, max_y)
 
 			skeleton_spawn_pos = Vector2(x_pos, random_y)
 
@@ -405,7 +469,12 @@ func _setup_character_pool() -> void:
 			skeleton_attempts += 1
 
 		if skeleton_is_valid:
-			var skeleton = NPCManager.get_generic_npc("skeleton", skeleton_spawn_pos)
+			# Convert global spawn position to Layer4Objects local coordinates
+			var skeleton_spawn_pos_local = skeleton_spawn_pos
+			if background.layer4_objects:
+				skeleton_spawn_pos_local = background.layer4_objects.to_local(skeleton_spawn_pos)
+
+			var skeleton = NPCManager.get_generic_npc("skeleton", skeleton_spawn_pos_local)
 			if skeleton:
 				skeleton.scale = Vector2(1, 1)
 				skeleton.set_physics_process(false)
@@ -532,59 +601,27 @@ func _on_escape_pressed() -> void:
 	EventManager.game_paused.emit(not is_paused)
 
 
-## Setup monster spawning system
-func _setup_monster_spawner() -> void:
-	monster_spawn_timer = Timer.new()
-	monster_spawn_timer.wait_time = MONSTER_SPAWN_INTERVAL
-	monster_spawn_timer.one_shot = false
-	monster_spawn_timer.timeout.connect(_on_monster_spawn_timer_timeout)
-	add_child(monster_spawn_timer)
-	monster_spawn_timer.start()
-	print("Monster spawner initialized - spawning every %0.1fs" % MONSTER_SPAWN_INTERVAL)
-
-
-## Called when monster spawn timer times out
-func _on_monster_spawn_timer_timeout() -> void:
+## Handle monster spawn requests from EventManager
+func _on_monster_spawn_requested(monster_type: String, spawn_pos_global: Vector2, initial_target_global: Vector2) -> void:
 	# Don't spawn if at max capacity
 	if active_monsters.size() >= MAX_ACTIVE_MONSTERS:
-		print("Max monsters reached (%d/%d) - skipping spawn" % [active_monsters.size(), MAX_ACTIVE_MONSTERS])
 		return
 
-	# Get available monster types from the pool dynamically
-	var monster_types = NPCManager.get_available_monster_types()
-	if monster_types.is_empty():
-		push_warning("No monster types available in pool!")
-		return
-
-	var monster_type = monster_types[randi() % monster_types.size()]
-
-	# Randomly choose left or right edge - spawn OUTSIDE safe rectangle
-	var viewport_size = get_viewport_rect().size
-	var spawn_from_left = randf() > 0.5
-
-	# Get safe rectangle bounds to spawn inside at the edges
-	var safe_rect = background.safe_rectangle if background and "safe_rectangle" in background else Rect2(-100, 0, viewport_size.x + 200, viewport_size.y)
-
-	# Spawn inside the safe zone, well inside from edges (150-250px inside from edge)
-	var spawn_x = 0.0
-	if spawn_from_left:
-		spawn_x = safe_rect.position.x + randf_range(150.0, 250.0)  # Left side, well inside safe zone
+	# Convert global spawn position to Layer4Objects local coordinates
+	var spawn_pos_local = spawn_pos_global
+	if background.layer4_objects:
+		spawn_pos_local = background.layer4_objects.to_local(spawn_pos_global)
 	else:
-		spawn_x = safe_rect.position.x + safe_rect.size.x - randf_range(150.0, 250.0)  # Right side, well inside safe zone
+		push_error("main.gd: Cannot spawn monster - background.layer4_objects is null")
+		return
 
-	# Get Y bounds for this X position
-	var y_bounds = background.get_walkable_y_bounds(spawn_x)
-	var spawn_y = randf_range(y_bounds.x, y_bounds.y)
-	var spawn_pos = Vector2(spawn_x, spawn_y)
+	# Convert target to Layer4Objects local coordinates
+	var initial_target_local = initial_target_global
+	if background.layer4_objects:
+		initial_target_local = background.layer4_objects.to_local(initial_target_global)
 
-	# Validate position
-	if background.has_method("is_position_in_walkable_area"):
-		if not background.is_position_in_walkable_area(spawn_pos):
-			print("Invalid spawn position, trying again next cycle")
-			return
-
-	# Spawn the monster (NPCManager handles AI state initialization)
-	var monster = NPCManager.get_generic_npc(monster_type, spawn_pos)
+	# Spawn the monster with initial target (NPCManager handles AI state initialization)
+	var monster = NPCManager.get_generic_npc(monster_type, spawn_pos_local, initial_target_local)
 	if monster:
 		monster.scale = Vector2(1, 1)
 		monster.set_physics_process(false)
@@ -608,6 +645,52 @@ func _on_monster_spawn_timer_timeout() -> void:
 				click_signal.connect(func(): _on_npc_clicked(monster))
 
 		active_monsters.append(monster)
+	else:
+		push_error("main.gd: Failed to spawn monster - NPCManager.get_generic_npc returned null for type: %s" % monster_type)
+
+
+## Handle ally spawn requests from EventManager
+func _on_ally_spawn_requested(ally_type: String, spawn_pos_global: Vector2, _initial_target_global: Vector2) -> void:
+	# Convert global spawn position to Layer4Objects local coordinates
+	var spawn_pos_local = spawn_pos_global
+	if background.layer4_objects:
+		spawn_pos_local = background.layer4_objects.to_local(spawn_pos_global)
+	else:
+		push_error("main.gd: Cannot spawn ally - background.layer4_objects is null")
+		return
+
+	# Get the ally from pool
+	var ally = NPCManager.get_generic_npc(ally_type, spawn_pos_local)
+	if ally:
+		ally.scale = Vector2(1, 1)
+		ally.set_physics_process(false)
+
+		# Connect death signal
+		var death_signal_name = ally_type + "_died"
+		if ally.has_signal(death_signal_name):
+			var death_signal = ally.get(death_signal_name)
+			if not death_signal.is_connected(_on_ally_died):
+				death_signal.connect(_on_ally_died.bind(ally, ally_type))
+
+		# Connect click signal
+		var click_signal_name = ally_type + "_clicked"
+		if ally.has_signal(click_signal_name):
+			var click_signal = ally.get(click_signal_name)
+			if not click_signal.is_connected(_on_npc_clicked):
+				click_signal.connect(func(): _on_npc_clicked(ally))
+
+		# Track the ally
+		if ally_type == "warrior":
+			active_warriors.append(ally)
+		elif ally_type == "archer":
+			active_archers.append(ally)
+	else:
+		push_error("main.gd: Failed to spawn ally - NPCManager.get_generic_npc returned null for type: %s" % ally_type)
+
+
+## Handle ally respawn requests from EventManager
+func _on_ally_respawn_requested(ally_type: String) -> void:
+	_respawn_ally(ally_type)
 
 
 ## Handle monster death - remove from active list
@@ -617,7 +700,7 @@ func _on_monster_died(monster: Node2D) -> void:
 
 
 ## Setup ally respawn system
-func _setup_ally_respawner() -> void:
+func _setup_ally_respawn_checker() -> void:
 	ally_respawn_timer = Timer.new()
 	ally_respawn_timer.wait_time = ALLY_RESPAWN_INTERVAL
 	ally_respawn_timer.one_shot = false
@@ -665,7 +748,11 @@ func _respawn_ally(ally_type: String) -> void:
 
 		# Get Y bounds at this X position
 		var y_bounds = background.get_walkable_y_bounds(x_pos)
-		var random_y = randf_range(y_bounds.x, y_bounds.y)
+		# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+		var min_y = y_bounds.x
+		var max_y = y_bounds.y
+		var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+		var random_y = randf_range(bottom_70_percent, max_y)
 
 		spawn_pos = Vector2(x_pos, random_y)
 
@@ -681,8 +768,13 @@ func _respawn_ally(ally_type: String) -> void:
 		push_warning("Could not find valid spawn position for %s respawn" % ally_type)
 		return
 
+	# Convert global spawn position to Layer4Objects local coordinates
+	var spawn_pos_local = spawn_pos
+	if background.layer4_objects:
+		spawn_pos_local = background.layer4_objects.to_local(spawn_pos)
+
 	# Spawn the ally
-	var ally = NPCManager.get_generic_npc(ally_type, spawn_pos)
+	var ally = NPCManager.get_generic_npc(ally_type, spawn_pos_local)
 	if not ally:
 		push_warning("Failed to spawn %s from pool" % ally_type)
 		return

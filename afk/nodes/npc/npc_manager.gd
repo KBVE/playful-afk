@@ -46,6 +46,34 @@ enum MonsterType {
 	AGGRESSIVE   # Actively seeks combat and attacks
 }
 
+## ===== FACTION HELPERS =====
+
+## Get NPC's faction - determines who they can/cannot attack
+static func get_faction(npc: Node2D) -> Faction:
+	if not is_instance_valid(npc):
+		return Faction.NEUTRAL
+
+	# Check if NPC explicitly defines faction property
+	if "faction" in npc:
+		return npc.faction
+
+	# Check if marked as friendly (cat, companions, etc.)
+	if "is_friendly" in npc and npc.is_friendly:
+		return Faction.ALLY
+
+	# Determine faction by NPC type (stats.npc_type)
+	var npc_type = ""
+	if "stats" in npc and npc.stats and "npc_type" in npc.stats:
+		npc_type = npc.stats.npc_type
+
+	match npc_type:
+		"warrior", "archer", "cat":
+			return Faction.ALLY
+		"chicken", "mushroom", "goblin", "eyebeast", "skeleton":
+			return Faction.MONSTER
+		_:
+			return Faction.NEUTRAL
+
 # Virtual Pet Reference
 var cat: Cat = null
 var cat_scene: PackedScene = preload("res://nodes/npc/cat/cat.tscn")
@@ -434,7 +462,7 @@ func _load_cat_data(data: Dictionary) -> void:
 		var pos = data["position"]
 		cat.position = Vector2(pos.get("x", 0), pos.get("y", 0))
 
-	print("Cat data loaded successfully")
+	# Cat data loaded silently
 
 
 ## Reset cat to default state
@@ -457,7 +485,7 @@ func _on_game_saved(success: bool) -> void:
 	if success:
 		npc_save_data["cat"] = save_cat_data()
 		# Warrior save removed - now handled by pool system
-		print("NPC data saved")
+		# NPC data saved silently
 
 
 ## Handle game load event
@@ -466,7 +494,7 @@ func _on_game_loaded(success: bool) -> void:
 		if npc_save_data.has("cat"):
 			_load_cat_data(npc_save_data["cat"])
 		# Warrior load removed - now handled by pool system
-		print("NPC data loaded")
+		# NPC data loaded silently
 
 
 ## Get all NPC data for saving to file
@@ -600,14 +628,14 @@ func _initialize_ai_system() -> void:
 	add_child(_z_index_timer)
 	_z_index_timer.start()
 
-	print("NPCManager: AI system initialized with %0.1fs update interval" % AI_UPDATE_INTERVAL)
+	# AI system initialized silently
 
 
 ## Initialize Emoji Manager for chat bubbles
 func _initialize_emoji_manager() -> void:
 	emoji_manager = EmojiManager.new()
 	add_child(emoji_manager)
-	print("NPCManager: Emoji Manager initialized for chat bubbles")
+	# Emoji Manager initialized silently
 
 
 ## Initialize Release Effect Pool for death animations
@@ -617,6 +645,7 @@ func _initialize_release_effect_pool() -> void:
 		var effect = release_effect_scene.instantiate()
 		effect.visible = false
 		effect.scale = Vector2(0.5, 0.5)  # Scale down to 80%
+		effect.modulate.a = 0.5  # Set transparency to 50% so death animation shows through
 
 		# Add to foreground container if available, otherwise add to NPCManager
 		if foreground_container:
@@ -626,7 +655,7 @@ func _initialize_release_effect_pool() -> void:
 
 		release_effect_pool.append(effect)
 
-	print("NPCManager: Release Effect Pool initialized with %d effects" % RELEASE_POOL_SIZE)
+	# Release Effect Pool initialized silently
 
 
 ## Get available release effect from pool (or create new if all busy)
@@ -640,13 +669,14 @@ func _get_release_effect() -> Node2D:
 	release_effect_pool = release_effect_pool.filter(func(effect): return is_instance_valid(effect))
 
 	# All busy - create a new one and add to pool
-	print("NPCManager: All release effects busy, creating new one")
 	var new_effect = release_effect_scene.instantiate()
 	new_effect.scale = Vector2(0.5, 0.5)  # Scale down to 80%
+	new_effect.modulate.a = 0.5  # Set transparency to 50% so death animation shows through
 
 	if foreground_container:
 		foreground_container.add_child(new_effect)
 	else:
+		push_error("NPCManager: Cannot add release effect - foreground_container is null")
 		add_child(new_effect)
 
 	release_effect_pool.append(new_effect)
@@ -772,7 +802,7 @@ func on_npc_damaged(victim: Node2D, attacker: Node2D) -> void:
 	# Log counter-attack initiation
 	var victim_type = ai_state.get("npc_type", "unknown")
 	var attacker_type = get_npc_type(attacker)
-	print("NPCManager: %s damaged by %s - counter-attacking!" % [victim_type, attacker_type])
+	# Counter-attack initiated silently
 
 
 ## AI timer callback - update all NPC AI states
@@ -1047,6 +1077,71 @@ func _update_npc_ai(npc: Node2D) -> void:
 				npc.current_state = (npc.current_state & ~NPCState.COMBAT) | NPCState.WANDERING
 				ai_state["current_state"] = npc.current_state
 
+	# "CALL FOR HELP" SYSTEM - Move toward nearby faction allies in combat to assist
+	# Works for both ALLY and MONSTER factions
+	# Only NPCs that are idle/wandering (not already in combat) can respond
+	if not ai_state.get("combat_target"):
+		# Check if NPC is available to respond (idle or wandering state)
+		var is_available = false
+		if "current_state" in npc:
+			# Check for IDLE or WANDERING flag (bitwise)
+			is_available = (npc.current_state & NPCState.IDLE) or (npc.current_state & NPCState.WANDERING)
+
+		# Skip passive NPCs (like chickens) - they don't fight
+		var is_passive = npc.has_method("is_passive") and npc.call("is_passive")
+
+		if is_available and not is_passive:
+			# Get this NPC's faction
+			var my_faction = get_faction(npc)
+
+			# Look for nearby faction allies that are in combat (within 400px radius)
+			var help_radius = 400.0
+			var nearest_combat_distance = INF
+			var nearest_combat_location = Vector2.ZERO
+			var nearest_ally_name = ""
+
+			# Check all NPCs to find faction allies in combat
+			for other_npc in _npc_ai_states.keys():
+				if not is_instance_valid(other_npc) or other_npc == npc:
+					continue
+
+				# Check if same faction
+				var other_faction = get_faction(other_npc)
+				if other_faction != my_faction or other_faction == Faction.NEUTRAL:
+					continue
+
+				# Check if ally is in combat
+				if CombatManager and CombatManager.is_in_combat(other_npc):
+					var distance = npc.global_position.distance_to(other_npc.global_position)
+
+					# Found nearby faction ally in combat - move to assist
+					if distance < help_radius and distance < nearest_combat_distance:
+						nearest_combat_distance = distance
+						nearest_combat_location = other_npc.global_position
+						nearest_ally_name = _npc_ai_states[other_npc].get("npc_type", "unknown")
+
+			# If found ally in combat, move toward them to assist
+			if nearest_combat_distance < INF:
+				# For monsters with direct movement
+				if npc is Monster and "_move_direction" in npc:
+					var direction = (nearest_combat_location - npc.global_position).normalized()
+					npc._move_direction = direction
+					npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
+					ai_state["roam_target"] = nearest_combat_location
+					ai_state["time_until_next_change"] = 2.0
+					# Responding to call for help silently
+					return  # Skip normal behavior this frame
+
+				# For NPCs with controllers (warriors/archers)
+				var movement_target = _get_movement_target(npc)
+				if movement_target.has_method("move_to_position"):
+					movement_target.move_to_position(nearest_combat_location.x)
+					_ai_tween_y_position(npc, nearest_combat_location.y, ai_state)
+					ai_state["roam_target"] = nearest_combat_location
+					ai_state["time_until_next_change"] = 2.0
+					# Responding to call for help silently
+					return  # Skip normal behavior this frame
+
 	# MONSTER ROAMING BEHAVIOR - All monsters roam with bounds checking (passive and aggressive)
 	# Passive monsters (chickens) roam but don't attack, aggressive monsters (mushrooms) attack + roam
 	if npc is Monster:
@@ -1112,7 +1207,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 			if movement_target.has_method("move_to_position"):
 				movement_target.move_to_position(final_target.x)
 				_ai_tween_y_position(npc, final_target.y, ai_state)
-				print("NPCManager AI: %s reached waypoint, continuing to final target (%.0f, %.0f)" % [ai_state["npc_type"], final_target.x, final_target.y])
+				# Reached waypoint, continuing to target
 
 	# Count down to next state change
 	ai_state["time_until_next_change"] -= AI_UPDATE_INTERVAL
@@ -1212,13 +1307,13 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 				# Move to waypoint first
 				movement_target.move_to_position(waypoint_pos.x)
 				_ai_tween_y_position(npc, waypoint_pos.y, ai_state)
-				print("NPCManager AI: %s moving to waypoint (%.0f, %.0f) then to target (%.0f, %.0f)" % [ai_state["npc_type"], waypoint_pos.x, waypoint_pos.y, target_pos.x, target_pos.y])
+				# Moving to waypoint then target
 			else:
 				# Direct movement (no waypoint needed)
 				ai_state["has_waypoint"] = false
 				movement_target.move_to_position(target_pos.x)
 				_ai_tween_y_position(npc, target_pos.y, ai_state)
-				print("NPCManager AI: %s walking directly to (%.0f, %.0f)" % [ai_state["npc_type"], target_pos.x, target_pos.y])
+				# Walking directly to target
 
 	# Monsters without controllers - use direct movement direction
 	elif npc is Monster and "_move_direction" in npc:
@@ -1237,7 +1332,7 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 		# Store target in AI state for when monster gets close
 		ai_state["wander_target"] = target_pos
 
-		print("NPCManager AI: Monster %s wandering to (%.0f, %.0f)" % [ai_state["npc_type"], target_pos.x, target_pos.y])
+		# Monster wandering to random position
 
 
 ## AI: Start NPC idle
@@ -1513,7 +1608,7 @@ func _initialize_persistent_pool() -> void:
 			"npc_name": "",  # Display name (e.g., "Warrior Companion")
 			"movement_bounds": Vector2(100.0, 1052.0)
 		})
-	print("NPCManager: Persistent pool initialized with %d slots" % MAX_PERSISTENT_POOL_SIZE)
+	# Persistent pool initialized silently
 
 
 ## Initialize the generic pool with pre-allocated NPCs
@@ -1565,7 +1660,7 @@ func _initialize_generic_pool() -> void:
 			"npc_type": ""
 		})
 
-	print("NPCManager: Generic pool initialized with %d warriors, %d archers, %d chickens, %d mushrooms, %d goblins, %d eyebeasts, %d skeletons" % [num_warriors, num_archers, num_chickens, num_mushrooms, num_goblins, num_eyebeasts, num_skeletons])
+	# Generic pool initialized silently
 
 	# NOTE: Healthbar pool will be initialized when set_layer4_container is called
 
@@ -1594,7 +1689,7 @@ func _initialize_healthbar_pool() -> void:
 			"npc": null
 		})
 
-	print("NPCManager: Healthbar pool initialized with %d healthbars" % MAX_HEALTHBAR_POOL_SIZE)
+	# Healthbar pool initialized silently
 
 
 ## Get an available healthbar from the pool and assign it to an NPC
@@ -1727,10 +1822,7 @@ func add_persistent_npc(
 			register_npc_ai(npc, npc_type)
 
 
-	print("NPCManager: Added persistent NPC '%s' (%s) to slot %d (ULID: %s)" % [
-		npc_name, npc_type, slot_index, npc_stats.ulid
-	])
-
+	# Added persistent NPC silently
 	return npc
 
 
@@ -1775,7 +1867,7 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 		_preallocate_generic_npc(npc_type, new_slot_index)
 		slot_index = new_slot_index
 
-		print("NPCManager: Pool expanded! '%s' now has %d total slots." % [npc_type, get_pool_stats(npc_type)["total"]])
+		# Pool expanded silently
 
 	var slot = generic_pool[slot_index]
 
@@ -1831,7 +1923,7 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 			ai_state["current_state"] = npc.current_state
 			ai_state["time_until_next_change"] = randf_range(3.0, 6.0)  # Will wander after reaching target
 
-		print("NPCManager: Monster %s spawned at (%.0f, %.0f), moving toward (%.0f, %.0f)" % [npc_type, position.x, position.y, initial_target.x, initial_target.y])
+		# Monster spawned with initial target
 
 	# Assign healthbar to NPC (from pool)
 	get_healthbar_for_npc(npc)
@@ -1851,13 +1943,12 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	return npc
 
 
-## Handle NPC death - play release animation and return to pool
+## Handle NPC death - play release effect immediately
 func _on_npc_died(npc: Node2D) -> void:
 	if not is_instance_valid(npc):
 		return
 
-
-	# Play release effect at NPC's position
+	# Play release effect immediately at NPC's position
 	# On midpoint (frame 5), return NPC to pool
 	play_release_effect(npc.global_position, func():
 		return_generic_npc(npc)
@@ -1895,10 +1986,10 @@ func return_generic_npc(npc: Node2D) -> void:
 			if _npc_ai_states.has(npc):
 				_npc_ai_states.erase(npc)
 
-			print("NPCManager: Returned generic NPC to pool")
+			# NPC returned to pool silently
 			return
 
-	push_warning("NPCManager: NPC not found in generic pool")
+	push_error("NPCManager: NPC not found in generic pool - cannot return")
 
 
 ## Get all available monster types from the generic pool

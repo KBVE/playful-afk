@@ -157,6 +157,19 @@ signal sfx_play_requested(sfx_name)
 ## Emitted when audio settings change. Parameters: (setting: String, value: float)
 signal audio_settings_changed(setting, value)
 
+# ===== Spawn Events =====
+## Emitted when an ally should spawn. Parameters: (ally_type: String, position: Vector2, initial_target: Vector2)
+signal ally_spawn_requested(ally_type, position, initial_target)
+
+## Emitted when a monster should spawn. Parameters: (monster_type: String, position: Vector2, initial_target: Vector2)
+signal monster_spawn_requested(monster_type, position, initial_target)
+
+## Emitted when an ally respawn is needed. Parameters: (ally_type: String)
+signal ally_respawn_requested(ally_type)
+
+## Emitted when a spawn wave starts. Parameters: (wave_number: int)
+signal spawn_wave_started(wave_number)
+
 
 var transition_scene: CanvasLayer = null
 
@@ -174,6 +187,22 @@ var ui_state_stack: Array[UIType] = []
 ## Bartender scene reference (background scene, not a UI element)
 var bartender_scene: Control = null
 
+# ===== Spawn Management =====
+## Reference to the background for terrain queries
+var background_ref: Node = null
+
+## Spawn timing configuration
+const MONSTER_SPAWN_INTERVAL: float = 5.0  # Spawn a wave every 5 seconds (faster waves!)
+const RESPAWN_CHECK_INTERVAL: float = 3.0  # Check for respawns every 3 seconds
+const MIN_WAVE_SIZE: int = 4  # Minimum monsters per wave
+const MAX_WAVE_SIZE: int = 10  # Maximum monsters per wave
+
+## Spawn state
+var monster_spawn_timer: float = 0.0
+var respawn_check_timer: float = 0.0
+var spawn_enabled: bool = false
+var _debug_printed_process: bool = false
+
 
 func _ready() -> void:
 	print("EventManager initialized - Centralized event system ready")
@@ -186,6 +215,26 @@ func _ready() -> void:
 
 	# Load and add transition scene (deferred to avoid blocking)
 	call_deferred("_setup_transition_layer")
+
+
+func _process(delta: float) -> void:
+	# Only process spawns if enabled
+	if not spawn_enabled or not background_ref:
+		return
+
+	# Update monster spawn timer
+	monster_spawn_timer += delta
+	if monster_spawn_timer >= MONSTER_SPAWN_INTERVAL:
+		monster_spawn_timer = 0.0
+		var wave_size = randi_range(MIN_WAVE_SIZE, MAX_WAVE_SIZE)
+		for i in range(wave_size):
+			_request_random_monster_spawn()
+
+	# Update respawn check timer
+	respawn_check_timer += delta
+	if respawn_check_timer >= RESPAWN_CHECK_INTERVAL:
+		respawn_check_timer = 0.0
+		_check_respawns()
 
 
 ## Setup the transition layer
@@ -627,3 +676,103 @@ func _handle_escape_return_to_ground() -> void:
 func _handle_escape_at_ground() -> void:
 	print("EventManager: ESC → Emitting escape_pressed signal (ground level)")
 	escape_pressed.emit()
+
+
+# ===== Spawn Management Functions =====
+
+## Initialize spawn system with background reference
+func setup_spawn_system(background: Node) -> void:
+	if not background:
+		push_error("EventManager: Cannot setup spawn system - background is null")
+		return
+	background_ref = background
+	print("EventManager: Spawn system initialized")
+
+
+## Enable or disable spawn processing
+func set_spawn_enabled(enabled: bool) -> void:
+	spawn_enabled = enabled
+
+
+## Calculate a safe spawn position in the lower 70% of walkable area
+func calculate_spawn_position(x_position: float) -> Vector2:
+	if not background_ref or not background_ref.has_method("get_walkable_y_bounds"):
+		push_error("EventManager: Cannot calculate spawn position - background not available")
+		return Vector2.ZERO
+
+	var y_bounds = background_ref.get_walkable_y_bounds(x_position)
+	# Spawn in lower 70% of walkable area to avoid floating appearance on hills
+	var min_y = y_bounds.x
+	var max_y = y_bounds.y
+	var bottom_70_percent = min_y + (max_y - min_y) * 0.3
+	var spawn_y = randf_range(bottom_70_percent, max_y)
+
+	return Vector2(x_position, spawn_y)
+
+
+## Request spawn of an ally at a specific position
+func request_ally_spawn(ally_type: String, spawn_pos: Vector2, initial_target: Vector2 = Vector2.ZERO) -> void:
+	ally_spawn_requested.emit(ally_type, spawn_pos, initial_target)
+
+
+## Request spawn of a monster at a specific position
+func request_monster_spawn(monster_type: String, spawn_pos: Vector2, initial_target: Vector2 = Vector2.ZERO) -> void:
+	monster_spawn_requested.emit(monster_type, spawn_pos, initial_target)
+
+
+## Internal: Request a random monster spawn at edge of screen
+func _request_random_monster_spawn() -> void:
+	if not background_ref:
+		push_error("EventManager: Cannot spawn monster - background_ref is null")
+		return
+
+	# Random monster type
+	var monster_types = ["mushroom", "goblin", "eyebeast", "skeleton"]
+	var monster_type = monster_types[randi() % monster_types.size()]
+
+	# Get safe rect from background
+	var safe_rect: Rect2
+	if "safe_rectangle" in background_ref:
+		safe_rect = background_ref.safe_rectangle
+	else:
+		# Fallback to viewport size
+		var viewport_size = GameplayCache.get_viewport_rect().size
+		safe_rect = Rect2(-100, 0, viewport_size.x + 200, viewport_size.y)
+		push_error("EventManager: Background missing safe_rectangle property - using fallback rect")
+
+	# Spawn on left or right edge
+	var spawn_x: float
+	if randf() < 0.5:
+		spawn_x = safe_rect.position.x + randf_range(150.0, 250.0)  # Left side
+	else:
+		spawn_x = safe_rect.position.x + safe_rect.size.x - randf_range(150.0, 250.0)  # Right side
+
+	# Calculate spawn position in lower 70%
+	var spawn_pos = calculate_spawn_position(spawn_x)
+
+	# Validate position
+	if background_ref.has_method("is_position_in_walkable_area"):
+		if not background_ref.is_position_in_walkable_area(spawn_pos):
+			# Silently skip invalid positions - this is expected behavior
+			return
+
+	# Calculate initial target toward center (using GameplayCache for viewport)
+	var viewport_size = GameplayCache.get_viewport_rect().size
+	var target_x = viewport_size.x / 2 + randf_range(-200.0, 200.0)
+	var initial_target = calculate_spawn_position(target_x)
+
+	# Emit spawn request
+	request_monster_spawn(monster_type, spawn_pos, initial_target)
+
+
+## Internal: Check if respawns are needed
+func _check_respawns() -> void:
+	# This will be triggered as an event that main.gd listens to
+	# Main.gd will check its active ally counts and emit respawn requests
+	pass
+
+
+## Request respawn of a specific ally type
+func request_ally_respawn(ally_type: String) -> void:
+	print("EventManager: Requesting ally respawn - %s" % ally_type)
+	ally_respawn_requested.emit(ally_type)

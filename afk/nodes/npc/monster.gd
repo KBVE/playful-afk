@@ -107,6 +107,27 @@ func _update_movement(delta: float) -> void:
 	# Simple movement for monsters
 	# Check if WALKING flag is set (bitwise AND, not equality)
 	if current_state & NPCManager.NPCState.WALKING:
+		# Update movement direction to follow terrain slope for natural hill climbing
+		if _background_ref and _background_ref.has_method("get_walkable_y_bounds"):
+			# Sample terrain height at current position and slightly ahead
+			var sample_distance = 20.0  # Look ahead 20px
+			var current_x = global_position.x
+			var ahead_x = current_x + (_move_direction.x * sample_distance)
+
+			var current_y_bounds = _background_ref.get_walkable_y_bounds(current_x)
+			var ahead_y_bounds = _background_ref.get_walkable_y_bounds(ahead_x)
+
+			# Use midpoint of bounds as terrain surface height
+			var current_terrain_y = (current_y_bounds.x + current_y_bounds.y) / 2.0
+			var ahead_terrain_y = (ahead_y_bounds.x + ahead_y_bounds.y) / 2.0
+
+			# Calculate terrain slope
+			var terrain_slope = (ahead_terrain_y - current_terrain_y) / sample_distance
+
+			# Adjust movement direction to match terrain slope (preserve horizontal speed)
+			_move_direction.y = terrain_slope * _move_direction.x
+			_move_direction = _move_direction.normalized()
+
 		# Flip sprite based on movement direction (only if not in combat)
 		# Combat code in NPCManager handles flipping to face target
 		# Only flip if significant horizontal movement (threshold prevents flickering during vertical movement)
@@ -114,25 +135,35 @@ func _update_movement(delta: float) -> void:
 			if animated_sprite:
 				animated_sprite.flip_h = _move_direction.x < 0
 
-		# Calculate potential new position
+		# Calculate potential new position (in local coordinates relative to Layer4Objects)
 		var new_position = position + (_move_direction * walk_speed * delta)
-		var new_global_position = global_position + (_move_direction * walk_speed * delta)
 
 		# Check if we're moving within valid bounds
+		# Background walkable area is in screen/global space, so use global_position for checks
 		if _background_ref and _background_ref.has_method("is_position_in_walkable_area"):
+			# Convert to global position for bounds checking
+			var new_global_pos = global_position + (_move_direction * walk_speed * delta)
+
 			# Check if new position is in walkable area
-			if _background_ref.is_position_in_walkable_area(new_global_position):
-				# Valid position - move there
+			if _background_ref.is_position_in_walkable_area(new_global_pos):
+				# Valid position - move there (update local position)
 				position = new_position
+
+				# Safety clamp: ensure Y stays within terrain bounds to prevent floating
+				if _background_ref.has_method("get_walkable_y_bounds"):
+					var y_bounds = _background_ref.get_walkable_y_bounds(global_position.x)
+					position.y = clamp(position.y, y_bounds.x, y_bounds.y)
 			else:
 				# Hit outer walkable bounds - redirect toward safe zone
 				if _background_ref.has_method("get_random_safe_position"):
 					var safe_target = _background_ref.get_random_safe_position()
-					_move_direction = (safe_target - global_position).normalized()
+					# safe_target is in screen space, calculate direction using global positions
+					var current_global = global_position
+					_move_direction = (safe_target - current_global).normalized()
 				else:
 					# Fallback: move toward center
 					var viewport_size = get_viewport_rect().size
-					var center = Vector2(viewport_size.x / 2, position.y)
+					var center = Vector2(viewport_size.x / 2, global_position.y)
 					_move_direction = (center - global_position).normalized()
 		else:
 			# Fallback: simple screen bounds check if background not available

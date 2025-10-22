@@ -56,17 +56,14 @@ var level_y_positions: Dictionary = {
 
 
 func _ready() -> void:
-	print("StructureManager initialized")
-
 	# Connect to EventManager's modal signals
 	# Wait for EventManager to setup modal first
 	await get_tree().process_frame
 	var modal = EventManager.get_ui(EventManager.UIType.MODAL)
 	if modal:
 		modal.modal_closed.connect(_on_modal_closed)
-		print("StructureManager: Connected to modal_closed signal")
 	else:
-		push_error("StructureManager: Could not get modal from EventManager!")
+		push_error("StructureManager: Could not get modal from EventManager - modals will not work")
 
 
 func _process(delta: float) -> void:
@@ -79,17 +76,14 @@ func _process(delta: float) -> void:
 func can_interact() -> bool:
 	# Can't interact if modal is open
 	if is_modal_open:
-		print("StructureManager: Cannot interact - modal is open")
 		return false
 
 	# Can't interact if transitioning (camera panning)
 	if is_transitioning:
-		print("StructureManager: Cannot interact - transition in progress")
 		return false
 
 	# Can't interact if still in debounce period
 	if time_since_last_click > 0:
-		print("StructureManager: Cannot interact - debounce period (", time_since_last_click, "s remaining)")
 		return false
 
 	return true
@@ -99,10 +93,6 @@ func can_interact() -> bool:
 func handle_structure_click(structure: Node2D, structure_name: String, structure_description: String) -> void:
 	if not can_interact():
 		return
-
-	print("========================================")
-	print("StructureManager: Structure clicked - ", structure_name)
-	print("========================================")
 
 	# Set debounce
 	time_since_last_click = click_debounce_time
@@ -121,40 +111,30 @@ func handle_structure_click(structure: Node2D, structure_name: String, structure
 
 ## Open the modal for a structure
 func _open_structure_modal(structure_name: String, structure_description: String) -> void:
-	print("StructureManager: _open_structure_modal called for ", structure_name)
-
 	# Find the main scene to trigger camera pan
 	var main_scene = get_tree().root.get_node_or_null("Main")
 	if not main_scene:
-		push_error("StructureManager: Could not find Main scene for camera pan")
+		push_error("StructureManager: Could not find Main scene - cannot pan camera")
 		return
 
 	# Mark as transitioning
 	is_transitioning = true
-	print("StructureManager: Requesting view change to SKY")
 
 	# Request view change to sky via EventManager
 	EventManager.request_view_change(EventManager.ViewState.SKY)
 
 	# Wait for view transition to complete
-	print("StructureManager: Waiting for view transition to complete...")
 	await EventManager.view_transition_completed
-	print("StructureManager: View transition completed!")
 
 	# Mark transition complete, modal opening
 	is_transitioning = false
 	is_modal_open = true
 
 	# Get modal from EventManager (single source of truth)
-	print("StructureManager: Requesting modal from EventManager...")
-	print("StructureManager: Modal ready? ", EventManager.is_ui_ready(EventManager.UIType.MODAL))
 	var modal = EventManager.get_ui(EventManager.UIType.MODAL)
 	if not modal:
-		push_error("StructureManager: Modal not found in EventManager!")
-		push_error("StructureManager: UI Registry state: ", EventManager.ui_registry)
+		push_error("StructureManager: Modal not found in EventManager - cannot show structure")
 		return
-
-	print("StructureManager: Modal retrieved from EventManager, setting up content...")
 
 	# Clear previous content
 	modal.clear_content()
@@ -197,13 +177,10 @@ func _open_structure_modal(structure_name: String, structure_description: String
 	modal.open()
 
 	structure_modal_opened.emit(current_structure)
-	print("StructureManager: Modal opened for ", structure_name)
 
 
 ## Called when the modal is closed
 func _on_modal_closed() -> void:
-	print("StructureManager: Modal closed, panning camera back")
-
 	# Hide modal via EventManager (handles visibility and input unblocking)
 	EventManager.hide_ui(EventManager.UIType.MODAL)
 
@@ -222,7 +199,6 @@ func _on_modal_closed() -> void:
 
 	structure_modal_closed.emit(current_structure)
 	current_structure = null
-	print("StructureManager: Returned to ground view")
 
 
 ## Force close any open modal (emergency cleanup)
@@ -230,13 +206,12 @@ func force_close_modal() -> void:
 	is_modal_open = false
 	is_transitioning = false
 	current_structure = null
-	print("StructureManager: Force closed modal")
 
 
 ## Register a structure and automatically position it
 func register_structure(structure: Node2D) -> void:
 	if structure in registered_structures:
-		push_warning("StructureManager: Structure already registered")
+		push_error("StructureManager: Structure already registered - cannot register twice")
 		return
 
 	registered_structures.append(structure)
@@ -255,8 +230,6 @@ func register_structure(structure: Node2D) -> void:
 	# Use the node name as cache key for consistency
 	cache_structure_sprite(structure.name, structure)
 
-	print("StructureManager: Registered structure '", structure.name, "' at position ", position, " (Level: ", level, ")")
-
 
 ## Calculate position for a structure based on its index and level
 func _calculate_structure_position(index: int, level: BaseStructure.StructureLevel = BaseStructure.StructureLevel.GROUND) -> Vector2:
@@ -265,7 +238,7 @@ func _calculate_structure_position(index: int, level: BaseStructure.StructureLev
 		return structure_slots[index]
 
 	# Fallback if we run out of slots (shouldn't happen with current setup)
-	push_warning("Structure index ", index, " exceeds available slots!")
+	push_error("StructureManager: Structure index %d exceeds available slots (%d)" % [index, structure_slots.size()])
 	return Vector2(100 + (index * 200), 380)
 
 
@@ -292,7 +265,6 @@ func get_spawn_structures() -> Array[Node2D]:
 ## Clear all registered structures (useful for scene transitions)
 func clear_structures() -> void:
 	registered_structures.clear()
-	print("StructureManager: Cleared all registered structures")
 
 
 ## Create special content for Dragon Den with dice rolling
@@ -385,7 +357,6 @@ func _create_dragon_den_content(description: String) -> Control:
 	dice.dice_roll_finished.connect(func(result: int):
 		result_label.text = "You rolled a " + str(result) + "!"
 		roll_button.disabled = false
-		print("Dragon Den dice result: ", result)
 	)
 
 	return container
@@ -398,7 +369,7 @@ func _create_dragon_den_content(description: String) -> Control:
 ## Cache a structure's sprite for UI display
 func cache_structure_sprite(structure_name: String, structure: Node2D) -> void:
 	if not structure or not structure.has_node("Sprite2D"):
-		push_warning("StructureManager: Cannot cache sprite for ", structure_name, " - no Sprite2D found")
+		push_error("StructureManager: Cannot cache sprite for '%s' - no Sprite2D found" % structure_name)
 		return
 
 	var sprite = structure.get_node("Sprite2D") as Sprite2D
@@ -406,7 +377,6 @@ func cache_structure_sprite(structure_name: String, structure: Node2D) -> void:
 		# Duplicate sprite once and store in cache
 		var cached_sprite = sprite.duplicate() as Sprite2D
 		ui_sprite_cache[structure_name] = cached_sprite
-		print("StructureManager: Cached UI sprite for ", structure_name)
 
 
 ## Get cached UI sprite for a structure
@@ -416,5 +386,5 @@ func get_cached_structure_sprite(structure_name: String) -> Sprite2D:
 	if ui_sprite_cache.has(structure_name) and ui_sprite_cache[structure_name] != null:
 		return ui_sprite_cache[structure_name]
 
-	push_warning("StructureManager: No cached UI sprite for ", structure_name)
+	# No cached sprite available - silently return null
 	return null
