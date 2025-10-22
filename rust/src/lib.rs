@@ -1,5 +1,7 @@
 use godot::prelude::*;
 
+mod holymap;
+
 struct Godo;
 
 #[gdextension]

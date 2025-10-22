@@ -36,6 +36,9 @@ func _ready() -> void:
 	screen_width = get_viewport_rect().size.x
 	screen_height = get_viewport_rect().size.y
 
+	# Test HolyMap (Rust GDExtension)
+	_test_holymap()
+
 	# Setup cat for testing
 	_setup_cat_testing()
 
@@ -177,3 +180,60 @@ func _cycle_cat_animation() -> void:
 
 	# Play the animation
 	NPCManager.cat.controller.play_state(new_state)
+
+
+func _test_holymap() -> void:
+	print("=== HolyMap Test Start ===")
+
+	# Create a new HolyMap instance
+	var map = GodotHolyMap.new()
+	print("✓ HolyMap created")
+
+	# Test insert
+	map.insert("player_name", "Alice")
+	map.insert("player_hp", 100)
+	map.insert("player_level", 5)
+	print("✓ Inserted 3 values")
+
+	# Test get
+	var name = map.get("player_name")
+	var hp = map.get("player_hp")
+	var level = map.get("player_level")
+	print("✓ Retrieved values: name=%s, hp=%s, level=%s" % [name, hp, level])
+
+	# Test has
+	var has_name = map.has("player_name")
+	var has_missing = map.has("missing_key")
+	print("✓ Has checks: player_name=%s, missing_key=%s" % [has_name, has_missing])
+
+	# Test counts before sync
+	var write_count = map.write_count()
+	var read_count = map.read_count()
+	print("✓ Before sync - write_count=%d, read_count=%d" % [write_count, read_count])
+
+	# Test manual sync
+	map.sync()
+	print("✓ Manual sync triggered")
+
+	# Test counts after sync
+	write_count = map.write_count()
+	read_count = map.read_count()
+	print("✓ After sync - write_count=%d, read_count=%d" % [write_count, read_count])
+
+	# Test size
+	var size = map.size()
+	print("✓ Map size: %d" % size)
+
+	# Test remove
+	var removed = map.remove("player_level")
+	print("✓ Removed player_level: %s" % removed)
+
+	# Test clear
+	map.clear()
+	print("✓ Map cleared")
+
+	var final_size = map.size()
+	print("✓ Final size after clear: %d" % final_size)
+
+	print("=== HolyMap Test Complete ===")
+

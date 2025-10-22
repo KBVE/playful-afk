@@ -5,6 +5,9 @@ set -e
 # Builds the extension for multiple platforms and copies to /afk/addons/godo/
 # This makes the extension self-contained as a Godot plugin (no ../ paths needed)
 
+# Source Rust environment if available
+[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AFK_DIR="$(cd "$SCRIPT_DIR/../afk" && pwd)"
 PLUGIN_DIR="$AFK_DIR/addons/godo"
