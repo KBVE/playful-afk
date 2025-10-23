@@ -67,6 +67,7 @@ func _initialize_pool(projectile_type: String) -> void:
 		projectile.visible = false
 		projectile.process_mode = Node.PROCESS_MODE_DISABLED
 		projectile.scale = Vector2(0.5, 0.5)  # Half size for all projectiles
+		projectile.z_index = 10  # Render projectiles above NPCs (NPCs default to z_index=0)
 
 		# Add to scene tree if container is set
 		if projectile_container:
@@ -154,6 +155,7 @@ func _create_new_projectile(projectile_type: String) -> Node2D:
 
 	var projectile = projectile_scene.instantiate()
 	projectile.scale = Vector2(0.5, 0.5)  # Half size for all projectiles
+	projectile.z_index = 10  # Render projectiles above NPCs
 
 	if projectile_container:
 		projectile_container.add_child(projectile)

@@ -328,7 +328,7 @@ func _handle_combat_event(event: Dictionary) -> void:
 	if "target_ulid" in event:
 		target = _find_npc_by_ulid(event.target_ulid)
 
-	# DEFENSIVE: Check for missing NPCs (error condition)
+	# DEFENSIVE: Check for missing NPCs (should not happen if Rust properly cleaned up)
 	if "attacker_ulid" in event and not attacker:
 		if not has_meta("_logged_missing_" + event.attacker_ulid):
 			push_error("[COMBAT ERROR] Could not find attacker with ULID: %s" % event.attacker_ulid)
@@ -395,6 +395,19 @@ func _handle_combat_event(event: Dictionary) -> void:
 				var initial_target = Vector2(viewport_size.x / 2, spawn_pos.y)
 				# Spawn the monster
 				_spawn_monster(monster_type, spawn_pos, initial_target)
+		"projectile":
+			# PROJECTILE EVENT: Store projectile data on attacker for delayed firing
+			# Arrow will be fired during attack animation (frame-based)
+			# event.attacker_animation contains projectile type (e.g., "arrow")
+			# event.target_x, event.target_y contain target position
+			if attacker and target:
+				# Store projectile data on attacker NPC to be fired during animation
+				attacker.set_meta("pending_projectile", {
+					"type": event.attacker_animation,  # "arrow"
+					"target": target,
+					"target_pos": Vector2(event.target_x, event.target_y),
+					"speed": 300.0
+				})
 		_:
 			push_error("[COMBAT] Unknown event type: %s" % event.event_type)
 
@@ -2395,30 +2408,10 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	# Assign healthbar to NPC (from pool)
 	get_healthbar_for_npc(npc)
 
-	# Connect to death signal for release animation
-	# Monsters use monster_died signal, allies use npc_died signal
-	if npc.has_signal("monster_died"):
-		# Check if already connected to avoid duplicate connections
-		if not npc.monster_died.is_connected(_on_npc_died):
-			npc.monster_died.connect(_on_npc_died.bind(npc))
-	elif npc.has_signal("npc_died"):
-		# Check if already connected to avoid duplicate connections
-		if not npc.npc_died.is_connected(_on_npc_died):
-			npc.npc_died.connect(_on_npc_died.bind(npc))
+	# RUST COMBAT: Death is now handled by combat events, not signals
+	# Removed old death signal connections to prevent duplicate release animations
 
 	return npc
-
-
-## Handle NPC death - play release effect immediately
-func _on_npc_died(npc: Node2D) -> void:
-	if not is_instance_valid(npc):
-		return
-
-	# Play release effect immediately at NPC's position
-	# On midpoint (frame 5), return NPC to pool
-	play_release_effect(npc.global_position, func():
-		return_generic_npc(npc)
-	)
 
 
 ## Return generic NPC to pool

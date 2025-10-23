@@ -106,13 +106,23 @@ func _return_to_pool() -> void:
 
 ## Handle collision (to be called externally or via Area2D signal)
 func on_hit(target: Node2D) -> void:
-	# Use CombatManager to apply damage with proper attack/defense calculation
-	if CombatManager and attacker:
-		var calculated_damage = CombatManager.calculate_damage(attacker, target)
-		CombatManager.apply_damage(attacker, target, calculated_damage)
-	elif target.has_method("take_damage"):
-		# Fallback to basic damage if CombatManager not available
-		target.take_damage(damage)
+	# RUST COMBAT: Call Rust to handle damage calculation and application
+	if NPCDataWarehouse and attacker and target:
+		# Get attacker and target ULIDs
+		if "stats" in attacker and attacker.stats and "ulid" in attacker.stats:
+			if "stats" in target and target.stats and "ulid" in target.stats:
+				var attacker_ulid = attacker.stats.ulid
+				var target_ulid = target.stats.ulid
+
+				# Call Rust to handle projectile hit (calculates damage, applies it, returns events)
+				var events_json = NPCDataWarehouse.projectile_hit(attacker_ulid, target_ulid)
+
+				# Process damage/death events through NPCManager
+				if NPCManager:
+					for event_json in events_json:
+						var event = JSON.parse_string(event_json)
+						if event:
+							NPCManager._handle_combat_event(event)
 
 	# Return to pool (deferred to avoid physics callback issues)
 	call_deferred("_return_to_pool")

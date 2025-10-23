@@ -99,6 +99,13 @@ impl NPCState {
     }
 }
 
+// World bounds constants - NPCs stay within these coordinates during combat
+// These bounds match the typical viewport size (1280x720) with margins for parallax
+const WORLD_MIN_X: f32 = 50.0;    // Left edge with margin
+const WORLD_MAX_X: f32 = 1230.0;  // Right edge with margin
+const WORLD_MIN_Y: f32 = 100.0;   // Top of playable area
+const WORLD_MAX_Y: f32 = 650.0;   // Below bottom of screen
+
 /// ULID wrapper for binary storage (16 bytes)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UlidBytes([u8; 16]);
@@ -390,19 +397,32 @@ pub struct NPCDataWarehouse {
     /// Key format: "error_type:ulid" -> "1"
     error_log: HolyMap<SafeString, SafeValue>,
 
-    /// Spawn wave management - track last spawn time and monster counts
-    /// Rust manages when to spawn new waves based on active monster count
+    /// Spawn wave management - track last spawn time and counts
+    /// Rust manages ALL spawning (allies + monsters) with gradual ramp-up
     last_spawn_time_ms: Arc<AtomicU64>,
+    last_ally_spawn_time_ms: Arc<AtomicU64>,  // Separate timer for allies
 
-    /// Spawn configuration
-    spawn_interval_ms: u64,  // Time between spawn waves (default 10 seconds)
+    /// Monster spawn configuration
+    spawn_interval_ms: u64,  // Time between monster waves (default 10 seconds)
     min_wave_size: i32,       // Minimum monsters per wave (default 4)
     max_wave_size: i32,       // Maximum monsters per wave (default 10)
     min_active_monsters: i32, // Spawn new wave when below this count (default 3)
 
+    /// Ally spawn configuration (warriors, archers)
+    ally_spawn_interval_ms: u64,  // Time between ally spawns (default 3 seconds)
+    max_warriors: i32,             // Max warrior count (default 6)
+    max_archers: i32,              // Max archer count (default 6)
+
     /// Spawn tracking (defensive programming)
     spawn_requests: Arc<AtomicU64>,  // Total spawn requests sent
     spawn_confirmations: Arc<AtomicU64>,  // Total spawns confirmed by GDScript
+
+    /// World bounds for clamping waypoints (set by GDScript from BackgroundManager)
+    /// These can be updated dynamically when background changes
+    world_min_x: Arc<std::sync::atomic::AtomicU32>,  // Stored as f32 bits
+    world_max_x: Arc<std::sync::atomic::AtomicU32>,
+    world_min_y: Arc<std::sync::atomic::AtomicU32>,
+    world_max_y: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl NPCDataWarehouse {
@@ -417,12 +437,21 @@ impl NPCDataWarehouse {
             active_combat_npcs: DashMap::new(),
             error_log: HolyMap::new(sync_interval_ms),
             last_spawn_time_ms: Arc::new(AtomicU64::new(0)),
-            spawn_interval_ms: 10000,  // 10 seconds between waves
+            last_ally_spawn_time_ms: Arc::new(AtomicU64::new(0)),
+            spawn_interval_ms: 10000,  // 10 seconds between monster waves
             min_wave_size: 4,
             max_wave_size: 10,
             min_active_monsters: 3,    // Spawn new wave when below 3 monsters
+            ally_spawn_interval_ms: 3000,  // 3 seconds between ally spawns (gradual ramp-up)
+            max_warriors: 6,           // Cap at 6 warriors
+            max_archers: 6,            // Cap at 6 archers
             spawn_requests: Arc::new(AtomicU64::new(0)),
             spawn_confirmations: Arc::new(AtomicU64::new(0)),
+            // Initialize with default world bounds (will be updated by GDScript from BackgroundManager)
+            world_min_x: Arc::new(std::sync::atomic::AtomicU32::new(WORLD_MIN_X.to_bits())),
+            world_max_x: Arc::new(std::sync::atomic::AtomicU32::new(WORLD_MAX_X.to_bits())),
+            world_min_y: Arc::new(std::sync::atomic::AtomicU32::new(WORLD_MIN_Y.to_bits())),
+            world_max_y: Arc::new(std::sync::atomic::AtomicU32::new(WORLD_MAX_Y.to_bits())),
         }
     }
 
@@ -811,24 +840,16 @@ impl NPCDataWarehouse {
                 continue; // Still on cooldown
             }
 
-            // Get attacker and target stats
-            let attacker_attack = self.get_stat_value(&attacker_ulid, "attack").unwrap_or(10.0);
-            let target_defense = self.get_stat_value(&target_ulid, "defense").unwrap_or(5.0);
+            // Get attacker static state to check if RANGED
+            let attacker_static_state = self.get_stat_value(&attacker_ulid, "static_state").unwrap_or(0.0) as i32;
+            let is_ranged = (attacker_static_state & NPCStaticState::RANGED.bits() as i32) != 0;
+            let is_magic = (attacker_static_state & NPCStaticState::MAGIC.bits() as i32) != 0;
 
-            // Calculate damage
-            let damage = (attacker_attack - (target_defense / 2.0)).max(1.0);
-
-            // DEBUG: Log damage calculation (only for first 3 attacks)
-            static mut DAMAGE_LOG_COUNT: i32 = 0;
-            unsafe {
-                if DAMAGE_LOG_COUNT < 3 {
-                    godot_print!("[COMBAT DEBUG] Attack: {} -> Defense: {} -> Damage: {}", attacker_attack, target_defense, damage);
-                    DAMAGE_LOG_COUNT += 1;
-                }
-            }
-
-            // Apply damage and get new HP
-            let target_hp = self.apply_damage(&target_ulid, damage);
+            // Get attacker and target positions
+            let (attacker_x, attacker_y) = self.get_npc_position_internal(&attacker_ulid)
+                .unwrap_or((0.0, 0.0));
+            let (target_x, target_y) = self.get_npc_position_internal(&target_ulid)
+                .unwrap_or((0.0, 0.0));
 
             // Update attacker cooldown
             self.update_cooldown(&attacker_ulid, now_ms);
@@ -836,11 +857,7 @@ impl NPCDataWarehouse {
             // Set ATTACKING state on attacker (Rust manages all states)
             self.add_attacking_state(&attacker_ulid);
 
-            // Get target position for VFX
-            let (target_x, target_y) = self.get_npc_position_internal(&target_ulid)
-                .unwrap_or((0.0, 0.0));
-
-            // Generate attack event
+            // Generate attack event (for animation)
             events.push(CombatEvent {
                 event_type: "attack".to_string(),
                 attacker_ulid: attacker_ulid.clone(),
@@ -852,43 +869,83 @@ impl NPCDataWarehouse {
                 target_y,
             });
 
-            // Handle target state based on HP
-            if target_hp <= 0.0 {
-                // Mark target as dead (Rust manages all states)
-                self.mark_dead(&target_ulid);
-
-                // Generate death event
+            // RANGED attacks (archers) use projectiles - GDScript handles collision and calls back
+            if is_ranged && !is_magic {
+                // Generate projectile event for GDScript to spawn arrow
+                // GDScript will read attacker position from attacker NPC node
                 events.push(CombatEvent {
-                    event_type: "death".to_string(),
-                    attacker_ulid,
+                    event_type: "projectile".to_string(),
+                    attacker_ulid: attacker_ulid.clone(),
                     target_ulid: target_ulid.clone(),
-                    amount: damage,
-                    attacker_animation: "".to_string(),
-                    target_animation: "death".to_string(),
-                    target_x,
+                    amount: 0.0, // Damage will be calculated on hit
+                    attacker_animation: "arrow".to_string(), // Projectile type
+                    target_animation: format!("{},{}", attacker_y, 300.0), // Encode attacker_y and arrow speed
+                    target_x, // Target position
                     target_y,
                 });
+                // Damage will be applied when GDScript calls projectile_hit()
             } else {
-                // Set DAMAGED state on target (Rust manages all states)
-                self.add_damaged_state(&target_ulid);
+                // MELEE and MAGIC attacks: Apply damage instantly
+                let attacker_attack = self.get_stat_value(&attacker_ulid, "attack").unwrap_or(10.0);
+                let target_defense = self.get_stat_value(&target_ulid, "defense").unwrap_or(5.0);
 
-                // Generate damage event
-                events.push(CombatEvent {
-                    event_type: "damage".to_string(),
-                    attacker_ulid,
-                    target_ulid: target_ulid.clone(),
-                    amount: damage,
-                    attacker_animation: "".to_string(),
-                    target_animation: "hurt".to_string(),
-                    target_x,
-                    target_y,
-                });
+                // Calculate damage
+                let damage = (attacker_attack - (target_defense / 2.0)).max(1.0);
+
+                // DEBUG: Log damage calculation (only for first 3 attacks)
+                static mut DAMAGE_LOG_COUNT: i32 = 0;
+                unsafe {
+                    if DAMAGE_LOG_COUNT < 3 {
+                        godot_print!("[COMBAT DEBUG] Attack: {} -> Defense: {} -> Damage: {}", attacker_attack, target_defense, damage);
+                        DAMAGE_LOG_COUNT += 1;
+                    }
+                }
+
+                // Apply damage and get new HP
+                let target_hp = self.apply_damage(&target_ulid, damage);
+
+                // Handle target state based on HP
+                if target_hp <= 0.0 {
+                    // Mark target as dead (Rust manages all states)
+                    self.mark_dead(&target_ulid);
+
+                    // Generate death event
+                    events.push(CombatEvent {
+                        event_type: "death".to_string(),
+                        attacker_ulid,
+                        target_ulid: target_ulid.clone(),
+                        amount: damage,
+                        attacker_animation: "".to_string(),
+                        target_animation: "death".to_string(),
+                        target_x,
+                        target_y,
+                    });
+                } else {
+                    // Set DAMAGED state on target (Rust manages all states)
+                    self.add_damaged_state(&target_ulid);
+
+                    // Generate damage event
+                    events.push(CombatEvent {
+                        event_type: "damage".to_string(),
+                        attacker_ulid,
+                        target_ulid: target_ulid.clone(),
+                        amount: damage,
+                        attacker_animation: "".to_string(),
+                        target_animation: "hurt".to_string(),
+                        target_x,
+                        target_y,
+                    });
+                }
             }
         }
 
-        // 4. Check if we need to spawn a new wave (Rust manages spawn timing)
-        let spawn_events = self.check_spawn_wave(now_ms);
-        events.extend(spawn_events);
+        // 4. Check if we need to spawn monsters (Rust manages monster spawn timing)
+        let monster_spawn_events = self.check_spawn_wave(now_ms);
+        events.extend(monster_spawn_events);
+
+        // 5. Check if we need to spawn allies (gradual ramp-up)
+        let ally_spawn_events = self.check_ally_spawn(now_ms);
+        events.extend(ally_spawn_events);
 
         events
     }
@@ -958,10 +1015,20 @@ impl NPCDataWarehouse {
                             let retreat_x = *x_a + (dir_x / dir_len) * retreat_distance;
                             let retreat_y = *y_a + (dir_y / dir_len) * retreat_distance;
 
-                            // Store retreat waypoint
+                            // Clamp waypoint to world bounds (prevent NPCs from going off-screen)
+                            // Read bounds atomically (can be updated by GDScript from BackgroundManager)
+                            let min_x = f32::from_bits(self.world_min_x.load(Ordering::Relaxed));
+                            let max_x = f32::from_bits(self.world_max_x.load(Ordering::Relaxed));
+                            let min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
+                            let max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
+
+                            let clamped_x = retreat_x.clamp(min_x, max_x);
+                            let clamped_y = retreat_y.clamp(min_y, max_y);
+
+                            // Store retreat waypoint (clamped)
                             self.storage.insert(
                                 SafeString(format!("waypoint:{}", ulid_a)),
-                                SafeValue(format!("{},{}", retreat_x, retreat_y))
+                                SafeValue(format!("{},{}", clamped_x, clamped_y))
                             );
 
                             // Set RETREATING state flag
@@ -974,9 +1041,18 @@ impl NPCDataWarehouse {
                         }
                     } else if distance > attack_range {
                         // TOO FAR - Move toward target to get in range
+                        // Clamp waypoint to world bounds
+                        let min_x = f32::from_bits(self.world_min_x.load(Ordering::Relaxed));
+                        let max_x = f32::from_bits(self.world_max_x.load(Ordering::Relaxed));
+                        let min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
+                        let max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
+
+                        let clamped_x = target_x.clamp(min_x, max_x);
+                        let clamped_y = target_y.clamp(min_y, max_y);
+
                         self.storage.insert(
                             SafeString(format!("waypoint:{}", ulid_a)),
-                            SafeValue(format!("{},{}", target_x, target_y))
+                            SafeValue(format!("{},{}", clamped_x, clamped_y))
                         );
 
                         // Clear RETREATING state
@@ -1001,10 +1077,18 @@ impl NPCDataWarehouse {
                 } else {
                     // MELEE/MAGIC units: Simple pursue behavior (original logic)
                     if distance > attack_range {
-                        // Move toward target
+                        // Move toward target (clamp to world bounds)
+                        let min_x = f32::from_bits(self.world_min_x.load(Ordering::Relaxed));
+                        let max_x = f32::from_bits(self.world_max_x.load(Ordering::Relaxed));
+                        let min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
+                        let max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
+
+                        let clamped_x = target_x.clamp(min_x, max_x);
+                        let clamped_y = target_y.clamp(min_y, max_y);
+
                         self.storage.insert(
                             SafeString(format!("waypoint:{}", ulid_a)),
-                            SafeValue(format!("{},{}", target_x, target_y))
+                            SafeValue(format!("{},{}", clamped_x, clamped_y))
                         );
                     } else {
                         // In range - stop moving
@@ -1198,7 +1282,7 @@ impl NPCDataWarehouse {
         new_hp
     }
 
-    /// Mark NPC as dead
+    /// Mark NPC as dead and remove from active combat
     fn mark_dead(&self, ulid: &str) {
         // Set behavioral state to DEAD only (clear all other flags)
         let dead_state = NPCState::DEAD.bits() as i32;
@@ -1206,6 +1290,10 @@ impl NPCDataWarehouse {
             SafeString(format!("behavioral_state:{}", ulid)),
             SafeValue(dead_state.to_string())
         );
+
+        // IMPORTANT: Remove from active combat immediately
+        // This prevents dead NPCs from being included in combat processing next tick
+        self.active_combat_npcs.remove(ulid);
     }
 
     /// Add ATTACKING state flag (set during attack)
@@ -1310,6 +1398,81 @@ impl NPCDataWarehouse {
                     target_y: 0.0,
                 });
             }
+        }
+
+        events
+    }
+
+    /// Check if we should spawn allies (warriors, archers)
+    /// Returns spawn events for GDScript to handle
+    /// Spawns gradually to ramp up (one ally every 3 seconds until cap reached)
+    fn check_ally_spawn(&self, now_ms: u64) -> Vec<CombatEvent> {
+        use std::sync::atomic::Ordering;
+        let mut events = Vec::new();
+
+        // Count active warriors and archers
+        let mut warrior_count = 0;
+        let mut archer_count = 0;
+
+        for entry in self.active_combat_npcs.iter() {
+            let ulid = entry.key();
+            if let Some(static_state) = self.get_stat_value(ulid, "static_state") {
+                let state = static_state as i32;
+                // Check if ALLY faction
+                if (state & NPCStaticState::ALLY.bits() as i32) != 0 {
+                    // Check combat type
+                    if (state & NPCStaticState::MELEE.bits() as i32) != 0 {
+                        warrior_count += 1;
+                    } else if (state & NPCStaticState::RANGED.bits() as i32) != 0 {
+                        archer_count += 1;
+                    }
+                }
+            }
+        }
+
+        // Check if enough time has passed since last ally spawn
+        let last_ally_spawn = self.last_ally_spawn_time_ms.load(Ordering::Relaxed);
+        let time_since_spawn = now_ms - last_ally_spawn;
+
+        if time_since_spawn < self.ally_spawn_interval_ms {
+            return events; // Not time yet
+        }
+
+        // Spawn one ally at a time (warrior or archer, alternating priority)
+        // Prioritize whichever is further from cap
+        let warrior_deficit = self.max_warriors - warrior_count;
+        let archer_deficit = self.max_archers - archer_count;
+
+        if warrior_deficit > 0 || archer_deficit > 0 {
+            // Update last spawn time
+            self.last_ally_spawn_time_ms.store(now_ms, Ordering::Relaxed);
+
+            // Track spawn request
+            self.spawn_requests.fetch_add(1, Ordering::Relaxed);
+
+            // Decide which to spawn (prioritize bigger deficit)
+            let ally_type = if warrior_deficit >= archer_deficit && warrior_deficit > 0 {
+                "warrior"
+            } else if archer_deficit > 0 {
+                "archer"
+            } else {
+                return events; // Both at cap
+            };
+
+            // Generate spawn event
+            events.push(CombatEvent {
+                event_type: "spawn".to_string(),
+                attacker_ulid: ally_type.to_string(),  // Ally type
+                target_ulid: String::new(),
+                amount: 0.0,
+                attacker_animation: String::new(),
+                target_animation: String::new(),
+                target_x: 0.0,  // GDScript will calculate spawn position
+                target_y: 0.0,
+            });
+
+            godot_print!("[RUST SPAWN] Spawning {} (Warriors: {}/{}, Archers: {}/{})",
+                ally_type, warrior_count, self.max_warriors, archer_count, self.max_archers);
         }
 
         events
@@ -1621,6 +1784,83 @@ impl GodotNPCDataWarehouse {
         }
     }
 
+    /// Handle projectile hit - called by GDScript when arrow/projectile collides with target
+    /// Calculates damage, applies it, and returns events (damage or death)
+    /// Usage: var events_json = NPCDataWarehouse.projectile_hit(attacker_ulid, target_ulid)
+    #[func]
+    pub fn projectile_hit(&self, attacker_ulid_bytes: PackedByteArray, target_ulid_bytes: PackedByteArray) -> Array<GString> {
+        use std::sync::atomic::Ordering;
+
+        let attacker_result = packed_bytes_to_hex(&attacker_ulid_bytes);
+        let target_result = packed_bytes_to_hex(&target_ulid_bytes);
+
+        if attacker_result.is_err() || target_result.is_err() {
+            godot_error!("[PROJECTILE] Invalid ULID bytes in projectile_hit");
+            return Array::new();
+        }
+
+        let attacker_ulid = attacker_result.unwrap();
+        let target_ulid = target_result.unwrap();
+
+        // Validate target is alive
+        let target_hp = self.warehouse.get_stat_value(&target_ulid, "hp").unwrap_or(0.0);
+        if target_hp <= 0.0 {
+            // Target already dead, no damage
+            return Array::new();
+        }
+
+        // Get attacker and target stats
+        let attacker_attack = self.warehouse.get_stat_value(&attacker_ulid, "attack").unwrap_or(10.0);
+        let target_defense = self.warehouse.get_stat_value(&target_ulid, "defense").unwrap_or(5.0);
+
+        // Calculate damage
+        let damage = (attacker_attack - (target_defense / 2.0)).max(1.0);
+
+        // Apply damage
+        let new_target_hp = self.warehouse.apply_damage(&target_ulid, damage);
+
+        // Get target position for event
+        let (target_x, target_y) = self.warehouse.get_npc_position_internal(&target_ulid)
+            .unwrap_or((0.0, 0.0));
+
+        // Generate event based on result
+        let event = if new_target_hp <= 0.0 {
+            // Mark target as dead
+            self.warehouse.mark_dead(&target_ulid);
+
+            CombatEvent {
+                event_type: "death".to_string(),
+                attacker_ulid,
+                target_ulid,
+                amount: damage,
+                attacker_animation: "".to_string(),
+                target_animation: "death".to_string(),
+                target_x,
+                target_y,
+            }
+        } else {
+            // Set DAMAGED state on target
+            self.warehouse.add_damaged_state(&target_ulid);
+
+            CombatEvent {
+                event_type: "damage".to_string(),
+                attacker_ulid,
+                target_ulid,
+                amount: damage,
+                attacker_animation: "".to_string(),
+                target_animation: "hurt".to_string(),
+                target_x,
+                target_y,
+            }
+        };
+
+        // Return event as JSON array
+        let mut godot_array = Array::new();
+        let json = serde_json::to_string(&event).unwrap_or_default();
+        godot_array.push(&GString::from(&json));
+        godot_array
+    }
+
     /// Get NPCStaticState constant value by name (combat types + factions)
     /// Usage in GDScript: NPCDataWarehouse.get_static_state("MELEE") returns 1
     #[func]
@@ -1635,6 +1875,19 @@ impl GodotNPCDataWarehouse {
             "PASSIVE" => NPCStaticState::PASSIVE.to_i32(),
             _ => 0,
         }
+    }
+
+    /// Set world bounds for waypoint clamping (from BackgroundManager safe_rectangle)
+    /// Usage: NPCDataWarehouse.set_world_bounds(min_x, max_x, min_y, max_y)
+    /// Should be called when background loads/changes
+    #[func]
+    pub fn set_world_bounds(&self, min_x: f32, max_x: f32, min_y: f32, max_y: f32) {
+        use std::sync::atomic::Ordering;
+        self.warehouse.world_min_x.store(min_x.to_bits(), Ordering::Relaxed);
+        self.warehouse.world_max_x.store(max_x.to_bits(), Ordering::Relaxed);
+        self.warehouse.world_min_y.store(min_y.to_bits(), Ordering::Relaxed);
+        self.warehouse.world_max_y.store(max_y.to_bits(), Ordering::Relaxed);
+        godot_print!("[RUST BOUNDS] Updated world bounds: X({} to {}), Y({} to {})", min_x, max_x, min_y, max_y);
     }
 
     /// Check if a state has a specific flag set

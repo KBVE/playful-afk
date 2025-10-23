@@ -134,6 +134,20 @@ func _setup_character_pool() -> void:
 		# Set environment container for flags and other environment objects
 		if EnvironmentManager:
 			EnvironmentManager.set_environment_container(background.layer4_objects)
+
+		# RUST COMBAT: Set world bounds from BackgroundManager safe_rectangle
+		# This ensures Rust waypoint clamping uses the actual background's playable area
+		if BackgroundManager and BackgroundManager.safe_rectangle.has_area():
+			var rect = BackgroundManager.safe_rectangle
+			NPCDataWarehouse.set_world_bounds(
+				rect.position.x,
+				rect.position.x + rect.size.x,
+				rect.position.y,
+				rect.position.y + rect.size.y
+			)
+			print("[MAIN] Set Rust world bounds from BackgroundManager: ", rect)
+		else:
+			push_warning("[MAIN] BackgroundManager safe_rectangle not available, using default Rust bounds")
 	else:
 		push_error("Layer4Objects not found in background!")
 		return

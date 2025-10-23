@@ -402,3 +402,19 @@ func get_npc_waypoint(ulid_bytes: PackedByteArray) -> PackedFloat32Array:
 	if _warehouse:
 		return _warehouse.get_npc_waypoint(ulid_bytes)
 	return PackedFloat32Array()
+
+## Handle projectile hit - called when arrow/projectile collides with target
+## attacker_ulid_bytes: PackedByteArray (16 bytes) - who fired the projectile
+## target_ulid_bytes: PackedByteArray (16 bytes) - who got hit
+## Returns: Array of JSON event strings (damage or death events)
+func projectile_hit(attacker_ulid_bytes: PackedByteArray, target_ulid_bytes: PackedByteArray) -> Array:
+	if _warehouse:
+		return _warehouse.projectile_hit(attacker_ulid_bytes, target_ulid_bytes)
+	return []
+
+## Set world bounds for waypoint clamping (from BackgroundManager)
+## Called when background loads to set safe zone boundaries
+## min_x, max_x, min_y, max_y: floats defining the playable rectangle
+func set_world_bounds(min_x: float, max_x: float, min_y: float, max_y: float) -> void:
+	if _warehouse:
+		_warehouse.set_world_bounds(min_x, max_x, min_y, max_y)

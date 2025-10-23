@@ -106,11 +106,17 @@ func _process(delta: float) -> void:
 			var target_pos = Vector2(waypoint[0], waypoint[1])
 			var direction = (target_pos - global_position).normalized()
 			_move_direction = direction
-			current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING | NPCManager.NPCState.COMBAT
+			# Set WALKING state and update animation immediately
+			if not (current_state & NPCManager.NPCState.WALKING):
+				current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING | NPCManager.NPCState.COMBAT
+				_update_animation()  # Update animation immediately when state changes
 		else:  # No waypoint - stay idle
 			_move_direction = Vector2.ZERO
 			if not (current_state & NPCManager.NPCState.ATTACKING):
-				current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.COMBAT) | NPCManager.NPCState.IDLE
+				if current_state & NPCManager.NPCState.WALKING:
+					# Transitioning from WALKING to IDLE
+					current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.COMBAT) | NPCManager.NPCState.IDLE
+					_update_animation()  # Update animation immediately when state changes
 
 	# Update movement
 	_update_movement(delta)
@@ -120,14 +126,33 @@ func _process(delta: float) -> void:
 	if stats and stats.ulid:
 		NPCDataWarehouse.update_npc_position(stats.ulid, position.x, position.y)
 
-	# Ensure looping animations continue playing (walking, idle, attacking)
-	# Fix for: animations stopping even though monster is still in that state
-	if animated_sprite and not animated_sprite.is_playing():
-		var should_loop = (current_state & NPCManager.NPCState.WALKING) or \
-						  (current_state & NPCManager.NPCState.IDLE) or \
-						  (current_state & NPCManager.NPCState.ATTACKING)
-		if should_loop:
-			_update_animation()  # Restart the animation
+	# Ensure animations match current state
+	# Fix for: animations stopping or getting stuck on wrong animation
+	if animated_sprite:
+		# Check if animation stopped playing
+		if not animated_sprite.is_playing():
+			var should_loop = (current_state & NPCManager.NPCState.WALKING) or \
+							  (current_state & NPCManager.NPCState.IDLE) or \
+							  (current_state & NPCManager.NPCState.ATTACKING)
+			if should_loop:
+				_update_animation()  # Restart the animation
+		else:
+			# Animation is playing - verify it matches current state
+			var expected_anim = ""
+			if current_state & NPCManager.NPCState.DEAD:
+				expected_anim = state_to_animation.get(NPCManager.NPCState.DEAD, "dead")
+			elif current_state & NPCManager.NPCState.DAMAGED:
+				expected_anim = state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt")
+			elif current_state & NPCManager.NPCState.ATTACKING:
+				expected_anim = state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking")
+			elif current_state & NPCManager.NPCState.WALKING:
+				expected_anim = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
+			elif current_state & NPCManager.NPCState.IDLE:
+				expected_anim = state_to_animation.get(NPCManager.NPCState.IDLE, "idle")
+
+			# If animation doesn't match state, update it
+			if expected_anim != "" and animated_sprite.animation != expected_anim:
+				_update_animation()
 
 
 func _update_movement(delta: float) -> void:
@@ -291,6 +316,8 @@ func _on_animation_finished() -> void:
 		# Sync state from Rust (using PackedByteArray directly)
 		var new_state = NPCDataWarehouse.get_npc_behavioral_state(stats.ulid)
 		current_state = new_state
+		# Update animation to reflect new state (e.g., WALKING after hurt)
+		_update_animation()
 
 	# Tell Rust to clear ATTACKING state when attack animation finishes
 	if animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking"):
@@ -298,6 +325,8 @@ func _on_animation_finished() -> void:
 		# Sync state from Rust (using PackedByteArray directly)
 		var new_state = NPCDataWarehouse.get_npc_behavioral_state(stats.ulid)
 		current_state = new_state
+		# Update animation to reflect new state (e.g., WALKING after attack)
+		_update_animation()
 
 
 ## Check if this monster is passive (doesn't deal damage to others)
