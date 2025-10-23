@@ -301,17 +301,16 @@ func _ready() -> void:
 		CombatManager.damage_dealt.connect(_on_damage_dealt)
 		CombatManager.target_killed.connect(_on_target_killed)
 
-	# RUST COMBAT: Start autonomous combat system
+	# RUST COMBAT: Enable combat system
 	NPCDataWarehouse.start_combat_system()
-	print("✓ Autonomous combat system started")
 
 
-## ===== COMBAT EVENT POLLING =====
+## ===== COMBAT TICK =====
 
-## Process combat events from Rust autonomous thread
-func _process(_delta: float) -> void:
-	# RUST COMBAT: Poll combat events and handle visual rendering
-	var events_json = NPCDataWarehouse.poll_combat_events()
+## Process combat logic and events every frame
+func _process(delta: float) -> void:
+	# RUST COMBAT: Tick combat logic and get events
+	var events_json = NPCDataWarehouse.tick_combat(delta)
 
 	for event_json in events_json:
 		var event = JSON.parse_string(event_json)
@@ -321,24 +320,45 @@ func _process(_delta: float) -> void:
 
 ## Handle combat event from Rust (animations, damage numbers, VFX)
 func _handle_combat_event(event: Dictionary) -> void:
+	# Look up NPCs by ULID
+	var attacker: Node2D = null
+	var target: Node2D = null
+
+	if "attacker_ulid" in event:
+		attacker = _find_npc_by_ulid(event.attacker_ulid)
+	if "target_ulid" in event:
+		target = _find_npc_by_ulid(event.target_ulid)
+
 	match event.event_type:
 		"attack":
-			print("[COMBAT] Attack: %s -> %s" % [event.attacker_ulid, event.target_ulid])
-			# TODO: Play attack animation via EventManager
+			# Emit EventManager signal for combat started
+			if attacker and target:
+				EventManager.combat_started.emit(attacker, target)
 		"damage":
-			print("[COMBAT] Damage: %s took %.1f damage from %s (HP remaining)" % [
-				event.target_ulid,
-				event.amount,
-				event.attacker_ulid
-			])
+			# Emit EventManager signal for damage dealt
+			if attacker and target and "amount" in event:
+				EventManager.damage_dealt.emit(attacker, target, event.amount)
 			# TODO: Show damage number
 			# TODO: Play hurt animation
 		"death":
-			print("[COMBAT] Death: %s killed by %s" % [event.target_ulid, event.attacker_ulid])
+			# Emit EventManager signal for target killed
+			if attacker and target:
+				EventManager.target_killed.emit(attacker, target)
 			# TODO: Play death animation
 			# TODO: Schedule NPC despawn after animation
 		_:
-			print("[COMBAT] Unknown event type: %s" % event.event_type)
+			push_error("[COMBAT] Unknown event type: %s" % event.event_type)
+
+
+## Find NPC by ULID hex string
+func _find_npc_by_ulid(ulid_hex: String) -> Node2D:
+	# Search through all active NPCs
+	for npc in _npc_ai_states.keys():
+		if npc and "stats" in npc and npc.stats and "ulid" in npc.stats:
+			var npc_ulid_hex = ULID.to_hex(npc.stats.ulid)
+			if npc_ulid_hex == ulid_hex:
+				return npc
+	return null
 
 
 ## ===== STATE HISTORY SYSTEM FUNCTIONS =====

@@ -2,8 +2,6 @@ use godot::prelude::*;
 use crate::holymap::HolyMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
-use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use bitflags::bitflags;
 use crossbeam_queue::SegQueue;
@@ -854,42 +852,20 @@ impl NPCDataWarehouse {
     // COMBAT THREAD LIFECYCLE
     // ============================================================================
 
-    /// Start autonomous combat thread (60fps)
-    /// Thread runs independently, processing combat logic and generating events
+    /// Enable combat system (no-op, kept for API compatibility)
+    /// Combat is now ticked manually from GDScript to avoid threading issues
     pub fn start_combat_thread(self: &Arc<Self>) {
-        if self.combat_thread_running.load(Ordering::Relaxed) {
-            return;
-        }
-
         self.combat_thread_running.store(true, Ordering::Relaxed);
-
-        // Clone the Arc to pass into thread - gives thread access to all warehouse data
-        let warehouse = Arc::clone(self);
-
-        thread::spawn(move || {
-
-            while warehouse.combat_thread_running.load(Ordering::Relaxed) {
-                thread::sleep(Duration::from_millis(16)); // 60fps
-
-                // Process combat tick - autonomous combat logic
-                let events = warehouse.tick_combat_internal(0.016); // 16ms delta
-
-                // Push events to queue for GDScript to poll
-                for event in events {
-                    warehouse.combat_event_queue.push(event);
-                }
-            }
-        });
     }
 
-    /// Stop combat thread gracefully
+    /// Disable combat system (no-op, kept for API compatibility)
     pub fn stop_combat_thread(&self) {
-        if !self.combat_thread_running.load(Ordering::Relaxed) {
-            return;
-        }
-
         self.combat_thread_running.store(false, Ordering::Relaxed);
-        // Thread will stop on next iteration
+    }
+
+    /// Check if combat system is enabled
+    pub fn is_combat_enabled(&self) -> bool {
+        self.combat_thread_running.load(Ordering::Relaxed)
     }
 }
 

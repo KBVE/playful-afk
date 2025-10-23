@@ -305,21 +305,28 @@ func is_in_combat(state: int) -> bool:
 		return _warehouse.is_in_combat(state)
 	return false
 
-## ===== AUTONOMOUS COMBAT SYSTEM =====
+## ===== COMBAT SYSTEM =====
 
-## Start autonomous combat thread (60fps)
+## Enable combat system
 func start_combat_system() -> void:
 	if _warehouse:
 		_warehouse.start_combat_system()
 	else:
 		push_error("NPCDataWarehouse: Warehouse not initialized!")
 
-## Stop combat thread gracefully
+## Disable combat system
 func stop_combat_system() -> void:
 	if _warehouse:
 		_warehouse.stop_combat_system()
 
-## Poll combat events from Rust thread (call every frame)
+## Tick combat logic (call every frame from _process)
+## Returns Array of JSON strings (CombatEvent)
+func tick_combat(delta: float) -> Array:
+	if _warehouse:
+		return _warehouse.tick_combat(delta)
+	return []
+
+## Poll combat events from event queue
 ## Returns Array of JSON strings (CombatEvent)
 func poll_combat_events() -> Array:
 	if _warehouse:
