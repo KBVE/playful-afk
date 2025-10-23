@@ -17,6 +17,8 @@ signal damage_taken(amount: float, current_hp: float, max_hp: float)
 signal monster_died
 
 ## Monster's current state (uses NPCManager.NPCState enum)
+## ONLY contains behavioral/dynamic states (IDLE, WALKING, ATTACKING, etc.)
+## Combat type and faction are now in static_state (immutable)
 var current_state: int = NPCManager.NPCState.IDLE:
 	set(value):
 		if current_state != value:
@@ -25,6 +27,11 @@ var current_state: int = NPCManager.NPCState.IDLE:
 			_update_animation()
 			# Emit state change signal for NPCManager
 			state_changed.emit(old_state, current_state)
+
+## Static/immutable monster properties (combat type + faction)
+## Set once during initialization, NEVER modified during gameplay
+## Example: MELEE | MONSTER or PASSIVE
+var static_state: int = 0
 
 ## Movement speed when walking
 @export var walk_speed: float = 30.0
@@ -37,10 +44,6 @@ var current_state: int = NPCManager.NPCState.IDLE:
 ## NPC Stats reference (assigned by NPCManager)
 var stats: NPCStats = null
 
-## Deprecated properties - now using NPCState bitwise flags
-## Faction, combat type, and monster types are now in current_state
-## Example: MELEE | MONSTER | IDLE or PASSIVE | IDLE
-
 # Node references
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
 @onready var state_timer: Timer = $StateTimer
@@ -50,7 +53,6 @@ var controller = null
 
 # Internal state
 var _move_direction: Vector2 = Vector2.ZERO
-var _is_hurt: bool = false
 
 # State-to-animation mapping (override in subclasses if needed)
 var state_to_animation: Dictionary = {
@@ -96,17 +98,45 @@ func _register_with_input_manager() -> void:
 
 
 func _process(delta: float) -> void:
+	# RUST COMBAT: Get waypoint from Rust AI and move toward it
+	if stats and stats.ulid and not (current_state & NPCManager.NPCState.DEAD):
+		var waypoint = NPCDataWarehouse.get_npc_waypoint(stats.ulid)
+		if waypoint.size() == 2:  # Has waypoint
+			# Calculate direction to waypoint
+			var target_pos = Vector2(waypoint[0], waypoint[1])
+			var direction = (target_pos - global_position).normalized()
+			_move_direction = direction
+			current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING | NPCManager.NPCState.COMBAT
+		else:  # No waypoint - stay idle
+			_move_direction = Vector2.ZERO
+			if not (current_state & NPCManager.NPCState.ATTACKING):
+				current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.COMBAT) | NPCManager.NPCState.IDLE
+
 	# Update movement
 	_update_movement(delta)
 
-	# RUST COMBAT: Sync position to autonomous combat system
+	# RUST COMBAT: Sync position to autonomous combat system (Rust detects arrival via position)
+	# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
 	if stats and stats.ulid:
-		var ulid_key = ULID.to_hex(stats.ulid)
-		NPCDataWarehouse.update_npc_position(ulid_key, position.x, position.y)
+		NPCDataWarehouse.update_npc_position(stats.ulid, position.x, position.y)
+
+	# Ensure looping animations continue playing (walking, idle, attacking)
+	# Fix for: animations stopping even though monster is still in that state
+	if animated_sprite and not animated_sprite.is_playing():
+		var should_loop = (current_state & NPCManager.NPCState.WALKING) or \
+						  (current_state & NPCManager.NPCState.IDLE) or \
+						  (current_state & NPCManager.NPCState.ATTACKING)
+		if should_loop:
+			_update_animation()  # Restart the animation
 
 
 func _update_movement(delta: float) -> void:
 	# Simple movement for monsters
+	# Don't move if dead
+	if current_state & NPCManager.NPCState.DEAD:
+		_move_direction = Vector2.ZERO
+		return
+
 	# Check if WALKING flag is set (bitwise AND, not equality)
 	if current_state & NPCManager.NPCState.WALKING:
 		# Update movement direction to follow terrain slope for natural hill climbing
@@ -190,21 +220,24 @@ func _update_animation() -> void:
 
 
 func _on_state_timer_timeout() -> void:
-	# Randomly change state for AFK behavior (only if not hurt)
-	if not _is_hurt:
-		_random_state_change()
+	# Randomly change state for AFK behavior
+	# Note: For combat monsters, state_timer is stopped in NPCManager
+	# Rust manages all movement and state for monsters in combat
+	_random_state_change()
 
 
 ## Override this in subclasses for custom state changes
 func _random_state_change() -> void:
 	# 70% chance to idle, 30% chance to walk (using modulo for fun!)
 	var should_walk = (randi() % 10) >= 7  # 3 out of 10 numbers (7,8,9) = 30%
-	current_state = NPCManager.NPCState.WALKING if should_walk else NPCManager.NPCState.IDLE
 
-	# Set random direction if walking
+	# Wandering monsters should have WANDERING flag set
+	# WALKING is just the movement component
 	if should_walk:
+		current_state = NPCManager.NPCState.WALKING | NPCManager.NPCState.WANDERING
 		_move_direction = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
 	else:
+		current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.WANDERING
 		_move_direction = Vector2.ZERO
 
 	# Randomize next state change time
@@ -227,7 +260,6 @@ func take_damage(amount: float, attacker: Node2D = null) -> void:
 			return
 
 	# Add DAMAGED state with bitwise OR (allows coexisting with ATTACKING)
-	_is_hurt = true
 	current_state |= NPCManager.NPCState.DAMAGED
 
 	# Notify NPCManager to set combat target (counter-attack)
@@ -248,17 +280,29 @@ func _on_take_damage(amount: float) -> void:
 	pass
 
 
-## Called when animation finishes - clean up DAMAGED state if hurt animation finished
+## Called when animation finishes - tell Rust to clear transient states
 func _on_animation_finished() -> void:
-	# If hurt animation just finished, remove DAMAGED state
-	if _is_hurt and animated_sprite and animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt"):
-		_is_hurt = false
-		current_state &= ~NPCManager.NPCState.DAMAGED
+	if not animated_sprite or not stats or not stats.ulid:
+		return
+
+	# Tell Rust to clear DAMAGED state when hurt animation finishes
+	if animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt"):
+		NPCDataWarehouse.clear_damaged_state(stats.ulid)
+		# Sync state from Rust (using PackedByteArray directly)
+		var new_state = NPCDataWarehouse.get_npc_behavioral_state(stats.ulid)
+		current_state = new_state
+
+	# Tell Rust to clear ATTACKING state when attack animation finishes
+	if animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking"):
+		NPCDataWarehouse.clear_attacking_state(stats.ulid)
+		# Sync state from Rust (using PackedByteArray directly)
+		var new_state = NPCDataWarehouse.get_npc_behavioral_state(stats.ulid)
+		current_state = new_state
 
 
 ## Check if this monster is passive (doesn't deal damage to others)
 func is_passive() -> bool:
-	return (current_state & NPCManager.NPCState.PASSIVE) != 0
+	return (static_state & NPCManager.NPCStaticState.PASSIVE) != 0
 
 
 ## Check if this monster can attack

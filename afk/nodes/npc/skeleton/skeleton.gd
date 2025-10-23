@@ -39,9 +39,10 @@ func _init() -> void:
 	# Set skeleton-specific properties
 	walk_speed = 28.0  # Medium speed (between mushroom and goblin)
 
-	# Set state flags: MELEE combat type + MONSTER faction
-	# Skeletons are MELEE MONSTER (undead warriors, attacks allies)
-	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.MONSTER
+	# Set state flags: MELEE combat type + MONSTER faction (static, never changes)
+	static_state = NPCManager.NPCStaticState.MELEE | NPCManager.NPCStaticState.MONSTER
+	# Behavioral state (dynamic, changes during gameplay)
+	current_state = NPCManager.NPCState.IDLE
 
 	# State-to-animation mapping (skeleton has all 5 animations)
 	state_to_animation = {

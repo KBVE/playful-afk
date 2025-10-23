@@ -39,9 +39,10 @@ func _init() -> void:
 	# Set chicken-specific properties
 	walk_speed = 30.0
 
-	# Set state flags: PASSIVE faction (no combat type - doesn't attack)
-	# Chickens are PASSIVE (harmless, can't attack anyone)
-	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.PASSIVE
+	# Set state flags: PASSIVE faction (static, never changes)
+	static_state = NPCManager.NPCStaticState.PASSIVE
+	# Behavioral state (dynamic, changes during gameplay)
+	current_state = NPCManager.NPCState.IDLE
 
 	# Override state-to-animation mapping (chickens use idle for walking)
 	state_to_animation = {

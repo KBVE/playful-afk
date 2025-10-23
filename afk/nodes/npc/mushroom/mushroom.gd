@@ -39,9 +39,10 @@ func _init() -> void:
 	# Set mushroom-specific properties
 	walk_speed = 25.0  # Slightly slower than chicken
 
-	# Set state flags: MELEE combat type + MONSTER faction
-	# Mushrooms are MELEE MONSTER (aggressive, attacks allies)
-	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.MONSTER
+	# Set state flags: MELEE combat type + MONSTER faction (static, never changes)
+	static_state = NPCManager.NPCStaticState.MELEE | NPCManager.NPCStaticState.MONSTER
+	# Behavioral state (dynamic, changes during gameplay)
+	current_state = NPCManager.NPCState.IDLE
 
 	# State-to-animation mapping (mushroom has all 5 animations)
 	state_to_animation = {

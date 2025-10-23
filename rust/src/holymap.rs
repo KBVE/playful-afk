@@ -188,18 +188,14 @@ where
     /// This rebuilds Papaya in the background and atomically swaps it.
     /// No read blocking occurs during this operation!
     pub fn sync(&self) {
-        godot_print!("HolyMap: Starting sync...");
-
         // Build new Papaya from DashMap (in background, non-blocking)
         let new_papaya = PapayaMap::new();
-        let mut count = 0;
 
         {
             // Scope the pinned reference so it drops before we move new_papaya
             let pinned = new_papaya.pin();
             for entry in self.write_store.iter() {
                 pinned.insert(entry.key().clone(), entry.value().clone());
-                count += 1;
             }
         } // pinned is dropped here
 
@@ -208,8 +204,6 @@ where
 
         // Update timestamp
         self.last_sync_ms.store(Self::current_time_ms(), Ordering::Relaxed);
-
-        godot_print!("HolyMap: Sync complete! Synced {} entries", count);
     }
 
     /// Auto-sync if the sync interval has elapsed

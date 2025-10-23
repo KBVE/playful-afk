@@ -72,7 +72,7 @@ func can_melee_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Check if attacker is passive (can't attack)
 	# Use bitwise check for PASSIVE flag
 	var attacker_state := Bitwise._ensure_int_prop(attacker, "current_state")
-	if Bitwise.has_flag(attacker_state, NPCManager.NPCState.PASSIVE):
+	if Bitwise.has_flag(attacker_state, NPCManager.NPCStaticState.PASSIVE):
 		return false
 
 	# Check if target is alive
@@ -224,7 +224,7 @@ func can_ranged_attack(attacker: Node2D, target: Node2D) -> bool:
 	# Check if attacker is passive (can't attack)
 	# Use bitwise check for PASSIVE flag
 	var attacker_state := Bitwise._ensure_int_prop(attacker, "current_state")
-	if Bitwise.has_flag(attacker_state, NPCManager.NPCState.PASSIVE):
+	if Bitwise.has_flag(attacker_state, NPCManager.NPCStaticState.PASSIVE):
 		return false
 
 	# Check if target is alive
@@ -308,7 +308,7 @@ func start_ranged_attack(attacker: Node2D, target: Node2D, projectile_type: Stri
 
 	# CRITICAL: Only RANGED combat type NPCs can fire projectiles
 	var attacker_combat_type = _get_npc_combat_type(attacker)
-	if attacker_combat_type != NPCManager.NPCState.RANGED:
+	if attacker_combat_type != NPCManager.NPCStaticState.RANGED:
 		return false
 
 	# Get NPC type
@@ -455,7 +455,7 @@ func find_nearest_target(attacker: Node2D, max_range: float = 500.0) -> Node2D:
 
 		# Skip if target is same faction as attacker (don't attack allies)
 		# Extract faction bits and compare directly (ALLY, MONSTER, or PASSIVE)
-		var faction_mask := NPCManager.NPCState.ALLY | NPCManager.NPCState.MONSTER | NPCManager.NPCState.PASSIVE
+		var faction_mask := NPCManager.NPCStaticState.ALLY | NPCManager.NPCStaticState.MONSTER | NPCManager.NPCStaticState.PASSIVE
 		var attacker_faction := Bitwise.extract_bits(Bitwise._ensure_int_prop(attacker, "current_state"), faction_mask)
 		var target_faction := Bitwise.extract_bits(Bitwise._ensure_int_prop(target, "current_state"), faction_mask)
 		if attacker_faction == target_faction and attacker_faction != 0:
@@ -500,7 +500,7 @@ func find_all_valid_targets(attacker: Node2D, max_range: float = 500.0) -> Array
 
 		# Skip if target is same faction as attacker (don't attack allies)
 		# Extract faction bits and compare directly (ALLY, MONSTER, or PASSIVE)
-		var faction_mask := NPCManager.NPCState.ALLY | NPCManager.NPCState.MONSTER | NPCManager.NPCState.PASSIVE
+		var faction_mask := NPCManager.NPCStaticState.ALLY | NPCManager.NPCStaticState.MONSTER | NPCManager.NPCStaticState.PASSIVE
 		var attacker_faction := Bitwise.extract_bits(Bitwise._ensure_int_prop(attacker, "current_state"), faction_mask)
 		var target_faction := Bitwise.extract_bits(Bitwise._ensure_int_prop(target, "current_state"), faction_mask)
 		if attacker_faction == target_faction and attacker_faction != 0:
@@ -617,14 +617,14 @@ func _get_npc_combat_type(npc: Node2D) -> int:
 	var state := Bitwise._ensure_int_prop(npc, "current_state")
 
 	# Check bitwise flags for combat type
-	if Bitwise.has_flag(state, NPCManager.NPCState.MELEE):
-		return NPCManager.NPCState.MELEE
-	elif Bitwise.has_flag(state, NPCManager.NPCState.RANGED):
-		return NPCManager.NPCState.RANGED
-	elif Bitwise.has_flag(state, NPCManager.NPCState.MAGIC):
-		return NPCManager.NPCState.MAGIC
-	elif Bitwise.has_flag(state, NPCManager.NPCState.HEALER):
-		return NPCManager.NPCState.HEALER
+	if Bitwise.has_flag(state, NPCManager.NPCStaticState.MELEE):
+		return NPCManager.NPCStaticState.MELEE
+	elif Bitwise.has_flag(state, NPCManager.NPCStaticState.RANGED):
+		return NPCManager.NPCStaticState.RANGED
+	elif Bitwise.has_flag(state, NPCManager.NPCStaticState.MAGIC):
+		return NPCManager.NPCStaticState.MAGIC
+	elif Bitwise.has_flag(state, NPCManager.NPCStaticState.HEALER):
+		return NPCManager.NPCStaticState.HEALER
 
 	return 0  # No combat type (passive)
 

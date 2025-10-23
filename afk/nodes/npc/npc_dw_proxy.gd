@@ -334,28 +334,71 @@ func poll_combat_events() -> Array:
 	return []
 
 ## Register NPC for combat system
-func register_npc_for_combat(ulid: String, initial_state: int, max_hp: float, attack: float, defense: float) -> void:
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+func register_npc_for_combat(ulid_bytes: PackedByteArray, static_state: int, behavioral_state: int, max_hp: float, attack: float, defense: float) -> void:
 	if _warehouse:
-		_warehouse.register_npc_for_combat(ulid, initial_state, max_hp, attack, defense)
+		_warehouse.register_npc_for_combat(ulid_bytes, static_state, behavioral_state, max_hp, attack, defense)
 
 ## Unregister NPC from combat system
-func unregister_npc_from_combat(ulid: String) -> void:
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+func unregister_npc_from_combat(ulid_bytes: PackedByteArray) -> void:
 	if _warehouse:
-		_warehouse.unregister_npc_from_combat(ulid)
+		_warehouse.unregister_npc_from_combat(ulid_bytes)
 
 ## Get NPC current HP
-func get_npc_hp(ulid: String) -> float:
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+func get_npc_hp(ulid_bytes: PackedByteArray) -> float:
 	if _warehouse:
-		return _warehouse.get_npc_hp(ulid)
+		return _warehouse.get_npc_hp(ulid_bytes)
 	return 0.0
 
 ## Update NPC position (call every frame from NPC _process)
-func update_npc_position(ulid: String, x: float, y: float) -> void:
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+func update_npc_position(ulid_bytes: PackedByteArray, x: float, y: float) -> void:
 	if _warehouse:
-		_warehouse.update_npc_position(ulid, x, y)
+		_warehouse.update_npc_position(ulid_bytes, x, y)
 
 ## Get NPC position
 func get_npc_position(ulid: String) -> PackedFloat32Array:
 	if _warehouse:
 		return _warehouse.get_npc_position(ulid)
+	return PackedFloat32Array()
+
+## Get NPC behavioral state (IDLE, WALKING, ATTACKING, DAMAGED, DEAD, etc.)
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+## Returns: int - bitwise state flags
+func get_npc_behavioral_state(ulid_bytes: PackedByteArray) -> int:
+	if _warehouse:
+		return _warehouse.get_npc_behavioral_state(ulid_bytes)
+	return 0
+
+## Clear ATTACKING state after attack animation finishes
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+## Called by NPC animation_finished handler
+func clear_attacking_state(ulid_bytes: PackedByteArray) -> void:
+	if _warehouse:
+		_warehouse.clear_attacking_state(ulid_bytes)
+
+## Clear DAMAGED state after hurt animation finishes
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+## Called by NPC animation_finished handler
+func clear_damaged_state(ulid_bytes: PackedByteArray) -> void:
+	if _warehouse:
+		_warehouse.clear_damaged_state(ulid_bytes)
+
+## Confirm spawn completed successfully (defensive programming)
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+## monster_type: String - type of monster spawned
+## static_state: int - expected static state flags
+## behavioral_state: int - expected behavioral state flags
+func confirm_spawn(ulid_bytes: PackedByteArray, monster_type: String, static_state: int, behavioral_state: int) -> void:
+	if _warehouse:
+		_warehouse.confirm_spawn(ulid_bytes, monster_type, static_state, behavioral_state)
+
+## Get NPC waypoint (target position calculated by Rust AI)
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes from stats.ulid
+## Returns: PackedFloat32Array [x, y] world position, or empty array if no waypoint
+func get_npc_waypoint(ulid_bytes: PackedByteArray) -> PackedFloat32Array:
+	if _warehouse:
+		return _warehouse.get_npc_waypoint(ulid_bytes)
 	return PackedFloat32Array()

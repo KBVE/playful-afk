@@ -8,22 +8,18 @@ extends Node
 ## Unified bitwise flag system for ALL NPC states, types, and behaviors
 ## Consolidates behavioral states, combat types, and factions into one performant system
 
-## NPC State enum (using bitwise flags for easy combinations)
-## Can combine states: e.g., WALKING | COMBAT | MELEE | ALLY
+## NPC State enum - BEHAVIORAL states only (dynamic, changes during gameplay)
+## Can combine states: e.g., WALKING | COMBAT
 ##
-## State Categories:
-##   - Behavioral: IDLE, WALKING, WANDERING, COMBAT, PURSUING, RETREATING, SPAWN
-##   - Visual: ATTACKING, DAMAGED, DEAD, HURT
-##   - Combat Types: MELEE, RANGED, MAGIC, HEALER
-##   - Factions: ALLY, MONSTER, PASSIVE
+## These states change dynamically during gameplay based on NPC behavior.
+## For static properties (combat type, faction), use NPCStaticState instead.
 ##
 ## Usage Examples:
-##   Warrior:  IDLE | MELEE | ALLY
-##   Goblin:   WALKING | WANDERING | MELEE | MONSTER
-##   Chicken:  IDLE | PASSIVE
-##   Archer:   IDLE | RANGED | ALLY
+##   Idle warrior:     IDLE
+##   Walking monster:  WALKING | WANDERING
+##   Attacking ally:   ATTACKING | COMBAT
 enum NPCState {
-	# Behavioral States (0-10)
+	# Behavioral States (bits 0-11) - Change during gameplay
 	IDLE = 1 << 0,        # 1:     Idle (not moving, not attacking)
 	WALKING = 1 << 1,     # 2:     Walking/moving
 	ATTACKING = 1 << 2,   # 4:     Currently attacking (animation playing)
@@ -35,20 +31,7 @@ enum NPCState {
 	DAMAGED = 1 << 8,     # 256:   Taking damage - plays hurt/damage animation
 	DEAD = 1 << 9,        # 512:   Dead - plays death animation
 	SPAWN = 1 << 10,      # 1024:  Just spawned - routing to safe zone
-
-	# Combat Types (11-14) - Each NPC has exactly ONE combat type
-	MELEE = 1 << 11,      # 2048:  Melee attacker (warriors, knights, goblins)
-	RANGED = 1 << 12,     # 4096:  Ranged attacker (archers, crossbowmen)
-	MAGIC = 1 << 13,      # 8192:  Magic attacker (mages, wizards)
-	HEALER = 1 << 14,     # 16384: Healer/support (clerics, druids)
-
-	# Factions (15-17) - Determines who can attack whom
-	ALLY = 1 << 15,       # 32768:  Player's allies - don't attack each other
-	MONSTER = 1 << 16,    # 65536:  Hostile creatures - attack allies
-	PASSIVE = 1 << 17,    # 131072: Doesn't attack/do damage (chickens, critters)
-
-	# Waypoint
-	WAYPOINT = 1 << 18
+	WAYPOINT = 1 << 11    # 2048:  Following waypoint path
 }
 
 ## Static/Immutable NPC properties (set once, never change)
@@ -304,22 +287,38 @@ func _ready() -> void:
 	# RUST COMBAT: Enable combat system
 	NPCDataWarehouse.start_combat_system()
 
+	# RUST COMBAT: Create fixed combat tick timer (16ms = 60 ticks per second)
+	var combat_tick_timer = Timer.new()
+	combat_tick_timer.name = "CombatTickTimer"
+	combat_tick_timer.wait_time = 0.016  # 16ms = 60 ticks/second
+	combat_tick_timer.autostart = true
+	combat_tick_timer.timeout.connect(_on_combat_tick)
+	add_child(combat_tick_timer)
+
 
 ## ===== COMBAT TICK =====
 
-## Process combat logic and events every frame
-func _process(delta: float) -> void:
+## Combat tick handler (called by timer at fixed 60Hz rate)
+func _on_combat_tick() -> void:
 	# RUST COMBAT: Tick combat logic and get events
-	var events_json = NPCDataWarehouse.tick_combat(delta)
+	# Pass fixed delta of 0.016 (60 ticks per second)
+	var events_json = NPCDataWarehouse.tick_combat(0.016)
 
 	for event_json in events_json:
 		var event = JSON.parse_string(event_json)
 		if event:
 			_handle_combat_event(event)
+		else:
+			push_error("[COMBAT ERROR] Failed to parse combat event JSON: %s" % event_json)
 
 
 ## Handle combat event from Rust (animations, damage numbers, VFX)
 func _handle_combat_event(event: Dictionary) -> void:
+	# DEFENSIVE: Validate event has required fields
+	if not "event_type" in event:
+		push_error("[COMBAT ERROR] Event missing event_type field")
+		return
+
 	# Look up NPCs by ULID
 	var attacker: Node2D = null
 	var target: Node2D = null
@@ -329,25 +328,173 @@ func _handle_combat_event(event: Dictionary) -> void:
 	if "target_ulid" in event:
 		target = _find_npc_by_ulid(event.target_ulid)
 
+	# DEFENSIVE: Check for missing NPCs (error condition)
+	if "attacker_ulid" in event and not attacker:
+		if not has_meta("_logged_missing_" + event.attacker_ulid):
+			push_error("[COMBAT ERROR] Could not find attacker with ULID: %s" % event.attacker_ulid)
+			set_meta("_logged_missing_" + event.attacker_ulid, true)
+		return
+
+	if "target_ulid" in event and not target:
+		if not has_meta("_logged_missing_" + event.target_ulid):
+			push_error("[COMBAT ERROR] Could not find target with ULID: %s" % event.target_ulid)
+			set_meta("_logged_missing_" + event.target_ulid, true)
+		return
+
+	# DEFENSIVE: Validate attacker and target are different NPCs
+	if attacker and target and attacker == target:
+		push_error("[COMBAT ERROR] NPC is attacking itself! Attacker: %s" % event.attacker_ulid)
+		return
+
 	match event.event_type:
 		"attack":
-			# Emit EventManager signal for combat started
+			# VISUAL ONLY: Sync state from Rust and emit signals
 			if attacker and target:
 				EventManager.combat_started.emit(attacker, target)
+				# Sync attacker state from Rust (ATTACKING flag already set by Rust)
+				if attacker.stats and attacker.stats.ulid:
+					var attacker_state = NPCDataWarehouse.get_npc_behavioral_state(attacker.stats.ulid)
+					if "current_state" in attacker:
+						attacker.current_state = attacker_state
 		"damage":
-			# Emit EventManager signal for damage dealt
+			# VISUAL ONLY: Sync state and HP from Rust, update healthbar
 			if attacker and target and "amount" in event:
 				EventManager.damage_dealt.emit(attacker, target, event.amount)
-			# TODO: Show damage number
-			# TODO: Play hurt animation
+				# Sync target state from Rust (DAMAGED flag already set by Rust)
+				if target.stats and target.stats.ulid:
+					var target_state = NPCDataWarehouse.get_npc_behavioral_state(target.stats.ulid)
+					if "current_state" in target:
+						target.current_state = target_state
+					# Update healthbar (read HP from Rust)
+					var current_hp = NPCDataWarehouse.get_npc_hp(target.stats.ulid)
+					target.stats.hp = current_hp  # Sync from Rust
+					# Emit damage_taken signal for healthbar update
+					if target.has_signal("damage_taken"):
+						target.damage_taken.emit(event.amount, current_hp, target.stats.max_hp)
+				# TODO: Show damage number floating text
 		"death":
-			# Emit EventManager signal for target killed
+			# VISUAL ONLY: Sync state from Rust and despawn
 			if attacker and target:
 				EventManager.target_killed.emit(attacker, target)
-			# TODO: Play death animation
-			# TODO: Schedule NPC despawn after animation
+				# Sync target state from Rust (DEAD flag already set by Rust)
+				if target.stats and target.stats.ulid:
+					var target_state = NPCDataWarehouse.get_npc_behavioral_state(target.stats.ulid)
+					if "current_state" in target:
+						target.current_state = target_state
+				# Schedule despawn after death animation
+				get_tree().create_timer(1.0).timeout.connect(func(): _despawn_dead_npc(target))
+		"spawn":
+			# RUST SPAWN: Rust decided to spawn a monster wave
+			# attacker_ulid contains the monster type
+			if "attacker_ulid" in event and event.attacker_ulid != "":
+				var monster_type = event.attacker_ulid
+				# Calculate spawn position (edge of screen, random Y)
+				var spawn_pos = _calculate_spawn_position()
+				# Calculate initial target (center of screen)
+				var viewport_size = get_viewport().get_visible_rect().size
+				var initial_target = Vector2(viewport_size.x / 2, spawn_pos.y)
+				# Spawn the monster
+				_spawn_monster(monster_type, spawn_pos, initial_target)
 		_:
 			push_error("[COMBAT] Unknown event type: %s" % event.event_type)
+
+
+## Despawn a dead NPC and return to pool
+func _despawn_dead_npc(npc: Node2D) -> void:
+	if not npc or not is_instance_valid(npc):
+		return
+
+	# Play release effect (particle animation)
+	# On midpoint (when particles converge), actually despawn the NPC
+	var npc_position = npc.global_position
+	play_release_effect(npc_position, func():
+		_complete_npc_despawn(npc)
+	)
+
+
+## Complete NPC despawn after release effect finishes
+func _complete_npc_despawn(npc: Node2D) -> void:
+	if not npc or not is_instance_valid(npc):
+		return
+
+	# IMPORTANT: Return healthbar to pool FIRST (before resetting NPC)
+	return_healthbar(npc)
+
+	# Get NPC type to find the right pool
+	var npc_type: String = ""
+	var found_in_pool: bool = false
+
+	# Search generic pool first (monsters are here)
+	for slot in generic_pool:
+		if slot.has("character") and slot["character"] == npc:
+			if slot.has("npc_type"):
+				npc_type = slot["npc_type"]
+
+			# Deactivate and hide
+			slot["is_active"] = false
+			npc.visible = false
+			npc.position = Vector2.ZERO
+			npc.process_mode = Node.PROCESS_MODE_DISABLED
+
+			# Clean up stats and ULID
+			if "stats" in npc and npc.stats:
+				var ulid_key = ULID.to_hex(npc.stats.ulid)
+				# Unregister from Rust combat system (if not already done)
+				NPCDataWarehouse.unregister_npc_from_combat(npc.stats.ulid)
+				# Remove from Rust NPCDataWarehouse
+				NPCDataWarehouse.remove_npc(ulid_key)
+				# Clean up historic_state entry
+				historic_state.erase(ulid_key)
+				# Reset stats for future reuse
+				npc.stats.reset_to_full()
+				npc.stats = null
+
+			# Reset states
+			if "current_state" in npc:
+				npc.current_state = NPCState.IDLE
+			if "static_state" in npc:
+				pass  # Keep static_state, it's immutable
+
+			found_in_pool = true
+			break
+
+	# If not found in generic pool, search persistent pool (allies)
+	if not found_in_pool:
+		for slot in persistent_pool:
+			if slot.has("character") and slot["character"] == npc:
+				if slot.has("npc_type"):
+					npc_type = slot["npc_type"]
+
+				# Deactivate and hide
+				slot["is_active"] = false
+				npc.visible = false
+				npc.position = Vector2.ZERO
+				npc.process_mode = Node.PROCESS_MODE_DISABLED
+
+				# Clean up stats and ULID
+				if "stats" in npc and npc.stats:
+					var ulid_key = ULID.to_hex(npc.stats.ulid)
+					# Unregister from Rust combat system (if not already done)
+					NPCDataWarehouse.unregister_npc_from_combat(npc.stats.ulid)
+					# Remove from Rust NPCDataWarehouse
+					NPCDataWarehouse.remove_npc(ulid_key)
+					# Clean up historic_state entry
+					historic_state.erase(ulid_key)
+					# Reset stats for future reuse
+					npc.stats.reset_to_full()
+					npc.stats = null
+
+				# Reset states
+				if "current_state" in npc:
+					npc.current_state = NPCState.IDLE
+				if "static_state" in npc:
+					pass  # Keep static_state, it's immutable
+
+				break
+
+	# Note: Monster respawning is handled by EventManager's spawn wave system
+	# NPCManager just despawns dead monsters and returns them to the pool
+	# EventManager will spawn new monsters based on wave timing and game state
 
 
 ## Find NPC by ULID hex string
@@ -359,6 +506,67 @@ func _find_npc_by_ulid(ulid_hex: String) -> Node2D:
 			if npc_ulid_hex == ulid_hex:
 				return npc
 	return null
+
+
+## Calculate spawn position at edge of screen
+func _calculate_spawn_position() -> Vector2:
+	if not BackgroundManager:
+		return Vector2.ZERO
+
+	# Get viewport size
+	var viewport_size = get_viewport().get_visible_rect().size
+
+	# Random Y position within walkable bounds
+	var y_bounds = BackgroundManager.get_walkable_y_bounds(0)  # Get Y bounds
+	var spawn_y = randf_range(y_bounds.x, y_bounds.y)
+
+	# Spawn at right edge of screen (monsters enter from right)
+	var spawn_x = viewport_size.x + 50  # 50 pixels off screen
+
+	return Vector2(spawn_x, spawn_y)
+
+
+## Spawn a monster from the pool (called by Rust spawn events)
+func _spawn_monster(monster_type: String, spawn_pos: Vector2, initial_target: Vector2) -> void:
+	# Find available slot in generic pool
+	for slot in generic_pool:
+		if not slot.get("is_active", false) and slot.get("npc_type") == monster_type:
+			var npc = slot.get("character")
+			if npc and is_instance_valid(npc):
+				# Activate the monster
+				slot["is_active"] = true
+				npc.visible = true
+				npc.process_mode = Node.PROCESS_MODE_INHERIT
+				npc.global_position = spawn_pos
+
+				# Initialize stats if needed
+				if "stats" in npc and npc.stats:
+					npc.stats.reset_to_full()
+
+					# Register with Rust combat system
+					var static_state = npc.get("static_state", NPCStaticState.MELEE | NPCStaticState.MONSTER)
+					var behavioral_state = NPCState.WALKING | NPCState.SPAWN
+					NPCDataWarehouse.register_npc_for_combat(
+						npc.stats.ulid,
+						static_state,
+						behavioral_state,
+						npc.stats.max_hp,
+						npc.stats.attack,
+						npc.stats.defense
+					)
+
+					# Set initial state
+					if "current_state" in npc:
+						npc.current_state = behavioral_state
+
+					# DEFENSIVE: Confirm spawn to Rust (verifies state is correct)
+					NPCDataWarehouse.confirm_spawn(npc.stats.ulid, monster_type, static_state, behavioral_state)
+
+				return  # Successfully spawned
+
+	# If we get here, no available slot was found (pool is full or type doesn't exist)
+	# Note: Rust will detect missing monsters and try again next tick
+	push_warning("[RUST SPAWN] No available slot for monster type: %s (pool full or no %s slots)" % [monster_type, monster_type])
 
 
 ## ===== STATE HISTORY SYSTEM FUNCTIONS =====
@@ -947,7 +1155,7 @@ func on_npc_damaged(victim: Node2D, attacker: Node2D) -> void:
 
 	# Check if victim can actually attack (not passive)
 	# Check bitwise state for PASSIVE flag
-	if victim.current_state & NPCState.PASSIVE:
+	if victim.current_state & NPCStaticState.PASSIVE:
 		return  # Passive NPCs don't counter-attack
 
 	# Set attacker as combat target for counter-attack
@@ -957,7 +1165,7 @@ func on_npc_damaged(victim: Node2D, attacker: Node2D) -> void:
 	ai_state["time_until_next_change"] = 0.1  # Immediate response
 
 	# For monsters, immediately set movement direction and combat state
-	if victim.current_state & NPCState.MONSTER:
+	if victim.current_state & NPCStaticState.MONSTER:
 		if "_move_direction" in victim:
 			var direction = (attacker.global_position - victim.global_position).normalized()
 			victim._move_direction = direction
@@ -1008,8 +1216,12 @@ func _update_npc_ai(npc: Node2D) -> void:
 	# Get NPC type (unused but kept for future debugging)
 	var _npc_type = ai_state.get("npc_type", "")
 
-	# COMBAT BEHAVIOR - Check for nearby enemies first (highest priority)
-	if CombatManager:
+	# COMBAT BEHAVIOR - Now handled by Rust combat system
+	# Old GDScript combat logic removed - Rust handles target finding, movement, and attacks
+	# Combat events from Rust are handled in _handle_combat_event()
+
+	# OLD GDSCRIPT COMBAT (DISABLED - Rust now handles this)
+	if false and CombatManager:
 		# Don't do anything if currently attacking (animation playing)
 		if CombatManager.has_state(npc, NPCManager.NPCState.ATTACKING):
 			return
@@ -1019,10 +1231,10 @@ func _update_npc_ai(npc: Node2D) -> void:
 
 		if target:
 			# Get NPC's combat type from bitwise state flags
-			var has_combat_type = npc.current_state & (NPCState.MELEE | NPCState.RANGED | NPCState.MAGIC | NPCState.HEALER)
+			var has_combat_type = npc.current_state & (NPCStaticState.MELEE | NPCStaticState.RANGED | NPCStaticState.MAGIC | NPCStaticState.HEALER)
 
 			# MELEE COMBAT (Warriors, Knights, etc.)
-			if npc.current_state & NPCState.MELEE:
+			if npc.current_state & NPCStaticState.MELEE:
 				var movement_target = _get_movement_target(npc)
 				var distance_to_target = npc.global_position.distance_to(target.global_position)
 				var melee_range = npc.attack_range if "attack_range" in npc else 60.0
@@ -1042,13 +1254,13 @@ func _update_npc_ai(npc: Node2D) -> void:
 						movement_target.stop_auto_movement()
 
 					# Stop monster movement (clear direction)
-					if (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
+					if (npc.current_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
 						npc._move_direction = Vector2.ZERO
 
 					# Set NPC to attacking state (triggers attack animation)
 					# IMPORTANT: Preserve combat type and faction flags!
 					if "current_state" in npc:
-						if npc.current_state & NPCState.MONSTER:
+						if npc.current_state & NPCStaticState.MONSTER:
 							# Monsters: remove WANDERING and WALKING, add COMBAT and ATTACKING (bitwise)
 							var new_state = (npc.current_state & ~NPCState.WANDERING & ~NPCState.WALKING) | NPCState.COMBAT | NPCState.ATTACKING
 							_change_npc_state(npc, new_state, "monster_start_attack")
@@ -1098,7 +1310,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 							ai_state["last_combat_target_pos"] = target.global_position
 							ai_state["time_until_next_change"] = 2.0
 						# Monsters without controllers - use direct movement
-						elif (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
+						elif (npc.current_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
 							var direction = (target.global_position - npc.global_position).normalized()
 							npc._move_direction = direction
 
@@ -1113,7 +1325,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 					return
 
 			# RANGED COMBAT + KITING (Archers, Crossbowmen, etc.)
-			elif npc.current_state & NPCState.RANGED:
+			elif npc.current_state & NPCStaticState.RANGED:
 				var movement_target = _get_movement_target(npc)
 				var distance_to_target = npc.global_position.distance_to(target.global_position)
 				var ranged_range = npc.attack_range if "attack_range" in npc else 150.0
@@ -1252,7 +1464,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 
 			# Restore proper behavioral state after combat
 			if "current_state" in npc:
-				if npc.current_state & NPCState.MONSTER:
+				if npc.current_state & NPCStaticState.MONSTER:
 					# Monsters: remove COMBAT/ATTACKING/WALKING, add WANDERING
 					var new_state = (npc.current_state & ~NPCState.COMBAT & ~NPCState.ATTACKING & ~NPCState.WALKING) | NPCState.WANDERING
 					_change_npc_state(npc, new_state, "monster_end_combat")
@@ -1279,7 +1491,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 		if is_available and not is_passive:
 			# Get this NPC's faction bitwise flags
 			var my_state = npc.current_state
-			var my_faction_flags = my_state & (NPCState.ALLY | NPCState.MONSTER | NPCState.PASSIVE)
+			var my_faction_flags = my_state & (NPCStaticState.ALLY | NPCStaticState.MONSTER | NPCStaticState.PASSIVE)
 
 			# Look for nearby faction allies that are in combat (within 400px radius)
 			var help_radius = 400.0
@@ -1296,7 +1508,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 				if not "current_state" in other_npc:
 					continue
 
-				var other_faction_flags = other_npc.current_state & (NPCState.ALLY | NPCState.MONSTER | NPCState.PASSIVE)
+				var other_faction_flags = other_npc.current_state & (NPCStaticState.ALLY | NPCStaticState.MONSTER | NPCStaticState.PASSIVE)
 				if other_faction_flags != my_faction_flags or my_faction_flags == 0:
 					continue
 
@@ -1313,7 +1525,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 			# If found ally in combat, move toward them to assist
 			if nearest_combat_distance < INF:
 				# For monsters with direct movement
-				if (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
+				if (npc.current_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
 					var direction = (nearest_combat_location - npc.global_position).normalized()
 					npc._move_direction = direction
 					npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
@@ -1335,7 +1547,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 	# SPAWN STATE ROUTING - Priority handling for newly spawned monsters
 	# Route monsters from spawn edge to safe zone before normal AI takes over
 	var npc_state = ai_state.get("current_state", NPCState.IDLE)
-	if (npc.current_state & NPCState.MONSTER) and (npc_state & NPCState.SPAWN):
+	if (npc.current_state & NPCStaticState.MONSTER) and (npc_state & NPCState.SPAWN):
 		# Check if we have a spawn target to route to
 		if ai_state.has("spawn_target"):
 			var spawn_target = ai_state["spawn_target"]
@@ -1368,7 +1580,7 @@ func _update_npc_ai(npc: Node2D) -> void:
 
 	# MONSTER ROAMING BEHAVIOR - All monsters roam with bounds checking (passive and aggressive)
 	# Passive monsters (chickens) roam but don't attack, aggressive monsters (mushrooms) attack + roam
-	if npc.current_state & NPCState.MONSTER:
+	if npc.current_state & NPCStaticState.MONSTER:
 		# Check if already has combat target (handled above)
 		if not ai_state.get("combat_target"):
 			var movement_target = _get_movement_target(npc)
@@ -1463,7 +1675,7 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
 		# For monsters, preserve WANDERING flag if present (bitwise)
-		if (npc.current_state & NPCState.MONSTER) and (npc.current_state & NPCState.WANDERING):
+		if (npc.current_state & NPCStaticState.MONSTER) and (npc.current_state & NPCState.WANDERING):
 			npc.current_state = (npc.current_state & ~NPCState.IDLE) | NPCState.WALKING
 		else:
 			# For NPCs with controllers (warriors, archers), preserve combat type and faction
@@ -1522,7 +1734,7 @@ func _ai_start_walking(npc: Node2D, ai_state: Dictionary) -> void:
 				# Walking directly to target
 
 	# Monsters without controllers - use direct movement direction
-	elif (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
+	elif (npc.current_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
 		# Pick random target position within safe bounds
 		var target_x = randf_range(movement_bounds_x.x, movement_bounds_x.y)
 		var target_y = get_safe_y_for_x(target_x, npc.global_position.y)
@@ -1550,7 +1762,7 @@ func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 	# AI System sets the high-level behavioral state
 	if "current_state" in npc:
 		# For monsters, preserve WANDERING flag if present (bitwise)
-		if (npc.current_state & NPCState.MONSTER) and (npc.current_state & NPCState.WANDERING):
+		if (npc.current_state & NPCStaticState.MONSTER) and (npc.current_state & NPCState.WANDERING):
 			npc.current_state = (npc.current_state & ~NPCState.WALKING) | NPCState.IDLE
 		else:
 			# For NPCs with controllers, preserve combat type and faction flags
@@ -1565,7 +1777,7 @@ func _ai_start_idle(npc: Node2D, ai_state: Dictionary) -> void:
 		# print("NPCManager AI: %s idling" % ai_state["npc_type"])
 
 	# Monsters without controllers - stop direct movement
-	elif (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
+	elif (npc.current_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
 		npc._move_direction = Vector2.ZERO
 		# Clear wander target
 		if ai_state.has("wander_target"):
@@ -2108,40 +2320,63 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	npc.process_mode = Node.PROCESS_MODE_INHERIT
 	_update_character_z_index(npc)
 
-	# CRITICAL: Set combat type and faction flags based on NPC type BEFORE AI registration
-	# This ensures the state is correct from the start
-	if npc_type == "warrior":
-		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.ALLY
-	elif npc_type == "archer":
-		npc.current_state = NPCState.IDLE | NPCState.RANGED | NPCState.ALLY
-	elif npc_type == "goblin":
-		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.MONSTER
-	elif npc_type == "mushroom":
-		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.MONSTER
-	elif npc_type == "skeleton":
-		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.MONSTER
-	elif npc_type == "eyebeast":
-		npc.current_state = NPCState.IDLE | NPCState.RANGED | NPCState.MONSTER
-	elif npc_type == "chicken":
-		npc.current_state = NPCState.IDLE | NPCState.PASSIVE
+	# Set static state (combat type + faction - immutable)
+	var static_state: int = 0
+	var behavioral_state: int = 0
 
-	# RUST COMBAT: Register NPC with autonomous combat system
+	if npc_type == "warrior":
+		static_state = NPCStaticState.MELEE | NPCStaticState.ALLY
+		behavioral_state = NPCState.IDLE
+	elif npc_type == "archer":
+		static_state = NPCStaticState.RANGED | NPCStaticState.ALLY
+		behavioral_state = NPCState.IDLE
+	elif npc_type == "goblin":
+		static_state = NPCStaticState.MELEE | NPCStaticState.MONSTER
+		behavioral_state = NPCState.IDLE | NPCState.WANDERING
+	elif npc_type == "mushroom":
+		static_state = NPCStaticState.MELEE | NPCStaticState.MONSTER
+		behavioral_state = NPCState.IDLE | NPCState.WANDERING
+	elif npc_type == "skeleton":
+		static_state = NPCStaticState.MELEE | NPCStaticState.MONSTER
+		behavioral_state = NPCState.IDLE | NPCState.WANDERING
+	elif npc_type == "eyebeast":
+		static_state = NPCStaticState.RANGED | NPCStaticState.MONSTER
+		behavioral_state = NPCState.IDLE | NPCState.WANDERING
+	elif npc_type == "chicken":
+		static_state = NPCStaticState.MELEE | NPCStaticState.PASSIVE
+		behavioral_state = NPCState.IDLE | NPCState.WANDERING
+
+	# Store states on NPC node
+	if "static_state" in npc:
+		npc.static_state = static_state
+	if "current_state" in npc:
+		npc.current_state = behavioral_state
+
+	# Stop state timer for monsters - movement controlled by combat system now
+	if npc_type in ["goblin", "mushroom", "skeleton", "eyebeast"]:
+		if "state_timer" in npc and npc.state_timer:
+			npc.state_timer.stop()  # Disable random wandering
+
+	# RUST COMBAT: Register NPC with combat system
+	# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
 	NPCDataWarehouse.register_npc_for_combat(
-		ulid_key,
-		npc.current_state,
+		fresh_stats.ulid,
+		static_state,
+		behavioral_state,
 		fresh_stats.max_hp,
 		fresh_stats.attack,
 		fresh_stats.defense
 	)
 
 	# RUST COMBAT: Set initial position
-	NPCDataWarehouse.update_npc_position(ulid_key, position.x, position.y)
+	# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
+	NPCDataWarehouse.update_npc_position(fresh_stats.ulid, position.x, position.y)
 
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
 	register_npc_ai(npc, npc_type)
 
 	# Set initial movement direction for monsters spawned with a target
-	if initial_target != Vector2.ZERO and (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
+	if initial_target != Vector2.ZERO and (npc.static_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
 		var direction = (initial_target - position).normalized()
 		npc._move_direction = direction
 
@@ -2203,7 +2438,8 @@ func return_generic_npc(npc: Node2D) -> void:
 				npc.stats.reset_to_full()
 				var ulid_key = ULID.to_hex(npc.stats.ulid)
 				# RUST COMBAT: Unregister from combat system
-				NPCDataWarehouse.unregister_npc_from_combat(ulid_key)
+				# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
+				NPCDataWarehouse.unregister_npc_from_combat(npc.stats.ulid)
 				# MIGRATION: Remove from Rust NPCDataWarehouse
 				NPCDataWarehouse.remove_npc(ulid_key)
 				# Clean up historic_state entry for this NPC
@@ -2211,13 +2447,13 @@ func return_generic_npc(npc: Node2D) -> void:
 				npc.stats = null
 
 			# Reset monster movement direction BEFORE resetting state
-			if (npc.current_state & NPCState.MONSTER) and "_move_direction" in npc:
+			if (npc.current_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
 				npc._move_direction = Vector2.ZERO
 
 			# Reset NPC state flags - preserve combat type and faction for re-use
 			if "current_state" in npc:
 				# Keep MELEE/RANGED/ALLY/MONSTER flags, only reset behavioral state to IDLE
-				var preserved_flags = npc.current_state & (NPCState.MELEE | NPCState.RANGED | NPCState.ALLY | NPCState.MONSTER)
+				var preserved_flags = npc.current_state & (NPCStaticState.MELEE | NPCStaticState.RANGED | NPCStaticState.ALLY | NPCStaticState.MONSTER)
 				npc.current_state = NPCState.IDLE | preserved_flags
 
 			# Clear AI state

@@ -108,6 +108,20 @@ func _process(delta: float) -> void:
 	# Update movement
 	_update_movement(delta)
 
+	# RUST COMBAT: Sync position to combat system
+	# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
+	if stats and stats.ulid:
+		NPCDataWarehouse.update_npc_position(stats.ulid, position.x, position.y)
+
+	# Ensure looping animations continue playing (walking, idle, attacking)
+	# Fix for: animations stopping even though NPC is still in that state
+	if animated_sprite and not animated_sprite.is_playing():
+		var should_loop = (current_state & NPCManager.NPCState.WALKING) or \
+		                  (current_state & NPCManager.NPCState.IDLE) or \
+		                  (current_state & NPCManager.NPCState.ATTACKING)
+		if should_loop:
+			_update_animation()  # Restart the animation
+
 
 func _physics_process(delta: float) -> void:
 	# Physics disabled - movement handled directly in _process
@@ -123,8 +137,9 @@ func _update_animation() -> void:
 	# Early exit pattern for common cases (optimized for performance)
 	var animation_name: String = ""
 
-	# Debug for warriors/archers to see what animation they're choosing
-	var is_warrior_or_archer = (current_state & NPCManager.NPCState.ALLY) and (current_state & (NPCManager.NPCState.MELEE | NPCManager.NPCState.RANGED))
+	# Debug tracking (not used, kept for potential debugging)
+	# Check if this is an ally (warrior/archer) using static_state
+	var is_warrior_or_archer = (static_state & NPCManager.NPCStaticState.ALLY) != 0
 	var is_actually_moving = current_speed > 0.1
 
 	# Check high-priority states first (less common, but more important)
@@ -311,18 +326,26 @@ func is_moving() -> bool:
 
 ## Called when an animation finishes
 func _on_animation_finished() -> void:
-	# Check if this animation should loop using bitwise checks
-	# IDLE, WALKING, and ATTACKING animations loop
-	var is_looping_state = (current_state & NPCManager.NPCState.IDLE) or \
-	                       (current_state & NPCManager.NPCState.WALKING) or \
-	                       (current_state & NPCManager.NPCState.ATTACKING)
+	if not animated_sprite or not stats or not stats.ulid:
+		return
 
-	if not is_looping_state:
-		# Non-looping animation finished (hurt, dead, etc.)
-		# Only transition if not dead (use bitwise check)
-		if not (current_state & NPCManager.NPCState.DEAD):
-			# Preserve combat type and faction flags when transitioning to IDLE
-			current_state = (current_state & ~NPCManager.NPCState.DAMAGED) | NPCManager.NPCState.IDLE
+	# Tell Rust to clear DAMAGED state when hurt animation finishes
+	if animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt"):
+		NPCDataWarehouse.clear_damaged_state(stats.ulid)
+		# Sync state from Rust (using PackedByteArray directly)
+		var new_state = NPCDataWarehouse.get_npc_behavioral_state(stats.ulid)
+		current_state = new_state
+		# Update animation to reflect new state (e.g., WALKING after hurt)
+		_update_animation()
+
+	# Tell Rust to clear ATTACKING state when attack animation finishes
+	if animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking"):
+		NPCDataWarehouse.clear_attacking_state(stats.ulid)
+		# Sync state from Rust (using PackedByteArray directly)
+		var new_state = NPCDataWarehouse.get_npc_behavioral_state(stats.ulid)
+		current_state = new_state
+		# Update animation to reflect new state (e.g., WALKING after attack)
+		_update_animation()
 
 
 ## ============================================================================

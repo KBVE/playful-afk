@@ -40,9 +40,11 @@ func _init() -> void:
 	walk_speed = 35.0  # Faster than goblin (flies)
 
 	# Set state flags: MELEE combat type + MONSTER faction
-	# Eyebeasts are MELEE MONSTER (aggressive flyers, melee attacks for now)
+	# Set state flags: MELEE combat type + MONSTER faction (static, never changes)
 	# TODO: Change to RANGED when ranged monster attacks are implemented
-	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.MONSTER
+	static_state = NPCManager.NPCStaticState.MELEE | NPCManager.NPCStaticState.MONSTER
+	# Behavioral state (dynamic, changes during gameplay)
+	current_state = NPCManager.NPCState.IDLE
 
 	# State-to-animation mapping (eyebeast has all 5 animations)
 	state_to_animation = {

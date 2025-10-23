@@ -39,9 +39,10 @@ func _init() -> void:
 	# Set goblin-specific properties
 	walk_speed = 30.0  # Slightly faster than mushroom
 
-	# Set state flags: MELEE combat type + MONSTER faction
-	# Goblins are MELEE MONSTER (aggressive, attacks allies)
-	current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.MELEE | NPCManager.NPCState.MONSTER
+	# Set state flags: MELEE combat type + MONSTER faction (static, never changes)
+	static_state = NPCManager.NPCStaticState.MELEE | NPCManager.NPCStaticState.MONSTER
+	# Behavioral state (dynamic, changes during gameplay)
+	current_state = NPCManager.NPCState.IDLE
 
 	# State-to-animation mapping (goblin has all 5 animations)
 	state_to_animation = {
