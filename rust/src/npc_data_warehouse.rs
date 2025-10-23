@@ -1,7 +1,13 @@
 use godot::prelude::*;
 use crate::holymap::HolyMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread;
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 use bitflags::bitflags;
+use crossbeam_queue::SegQueue;
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
 // NPCState bitflags - matches GDScript NPCManager.NPCState enum
@@ -352,6 +358,15 @@ pub struct NPCDataWarehouse {
 
     /// Sync interval in milliseconds
     sync_interval_ms: u64,
+
+    /// Combat event queue - lock-free MPMC queue for Rust → GDScript communication
+    combat_event_queue: Arc<SegQueue<CombatEvent>>,
+
+    /// Combat thread running flag
+    combat_thread_running: Arc<AtomicBool>,
+
+    /// Active NPCs in combat system - Set of ULIDs for iteration
+    active_combat_npcs: DashMap<String, ()>,
 }
 
 impl NPCDataWarehouse {
@@ -361,6 +376,9 @@ impl NPCDataWarehouse {
         Self {
             storage: HolyMap::new(sync_interval_ms),
             sync_interval_ms,
+            combat_event_queue: Arc::new(SegQueue::new()),
+            combat_thread_running: Arc::new(AtomicBool::new(false)),
+            active_combat_npcs: DashMap::new(),
         }
     }
 
@@ -492,45 +510,386 @@ impl NPCDataWarehouse {
         None
     }
 
-    /// Combat tick - public for Arc access
-    pub fn tick_combat_internal(&self, _delta: f32) -> Vec<CombatEvent> {
-        let events = Vec::new();
+    // ============================================================================
+    // COMBAT REGISTRATION - Track NPCs in combat system
+    // ============================================================================
 
-        // TODO: Implement combat logic
+    /// Register NPC for combat tracking
+    /// Stores combat-relevant data in HolyMap for autonomous thread access
+    pub fn register_npc_for_combat_internal(
+        &self,
+        ulid: &str,
+        initial_state: i32,
+        max_hp: f32,
+        attack: f32,
+        defense: f32,
+    ) {
+        // Mark as active in combat system
+        self.storage.insert(
+            SafeString(format!("combat:{}", ulid)),
+            SafeValue("active".to_string())
+        );
+
+        // Store HP
+        self.storage.insert(
+            SafeString(format!("hp:{}", ulid)),
+            SafeValue(max_hp.to_string())
+        );
+
+        // Store state flags
+        self.storage.insert(
+            SafeString(format!("state:{}", ulid)),
+            SafeValue(initial_state.to_string())
+        );
+
+        // Store attack stat
+        self.storage.insert(
+            SafeString(format!("attack:{}", ulid)),
+            SafeValue(attack.to_string())
+        );
+
+        // Store defense stat
+        self.storage.insert(
+            SafeString(format!("defense:{}", ulid)),
+            SafeValue(defense.to_string())
+        );
+
+        // Initialize cooldown to 0 (can attack immediately)
+        self.storage.insert(
+            SafeString(format!("cooldown:{}", ulid)),
+            SafeValue("0".to_string())
+        );
+
+        // Add to active NPCs set for combat thread iteration
+        self.active_combat_npcs.insert(ulid.to_string(), ());
+    }
+
+    /// Unregister NPC from combat (on death/despawn)
+    /// Cleans up all combat-related data from HolyMap
+    pub fn unregister_npc_from_combat_internal(&self, ulid: &str) {
+        self.storage.remove(&SafeString(format!("combat:{}", ulid)));
+        self.storage.remove(&SafeString(format!("pos:{}", ulid)));
+        self.storage.remove(&SafeString(format!("hp:{}", ulid)));
+        self.storage.remove(&SafeString(format!("state:{}", ulid)));
+        self.storage.remove(&SafeString(format!("attack:{}", ulid)));
+        self.storage.remove(&SafeString(format!("defense:{}", ulid)));
+        self.storage.remove(&SafeString(format!("cooldown:{}", ulid)));
+
+        // Remove from active NPCs set
+        self.active_combat_npcs.remove(ulid);
+    }
+
+    /// Get NPC current HP
+    pub fn get_npc_hp_internal(&self, ulid: &str) -> Option<f32> {
+        let key = SafeString(format!("hp:{}", ulid));
+        if let Some(SafeValue(hp_str)) = self.storage.get(&key) {
+            return hp_str.parse::<f32>().ok();
+        }
+        None
+    }
+
+    /// Combat tick - public for Arc access
+    /// Called by autonomous thread every 16ms (60fps)
+    pub fn tick_combat_internal(&self, _delta: f32) -> Vec<CombatEvent> {
+        let mut events = Vec::new();
+
         // 1. Get all active NPCs with positions
+        let active_npcs = self.get_active_npcs_with_positions();
+        if active_npcs.is_empty() {
+            return events; // No NPCs in combat
+        }
+
         // 2. Find combat pairs (proximity + hostility checks)
-        // 3. Process attacks (cooldowns, damage calc)
-        // 4. Update HP and states
-        // 5. Generate CombatEvent structs
+        let combat_pairs = self.find_combat_pairs(&active_npcs);
+        if combat_pairs.is_empty() {
+            return events; // No combat happening
+        }
+
+        // 3. Process each combat pair
+        let now_ms = Self::get_current_time_ms();
+
+        for (attacker_ulid, target_ulid, _distance) in combat_pairs {
+            // Check cooldown
+            if !self.check_attack_cooldown(&attacker_ulid, now_ms) {
+                continue; // Still on cooldown
+            }
+
+            // Get attacker and target stats
+            let attacker_attack = self.get_stat_value(&attacker_ulid, "attack").unwrap_or(10.0);
+            let target_defense = self.get_stat_value(&target_ulid, "defense").unwrap_or(5.0);
+
+            // Calculate damage
+            let damage = (attacker_attack - (target_defense / 2.0)).max(1.0);
+
+            // Apply damage and get new HP
+            let target_hp = self.apply_damage(&target_ulid, damage);
+
+            // Update attacker cooldown
+            self.update_cooldown(&attacker_ulid, now_ms);
+
+            // Get target position for VFX
+            let (target_x, target_y) = self.get_npc_position_internal(&target_ulid)
+                .unwrap_or((0.0, 0.0));
+
+            // Generate attack event
+            events.push(CombatEvent {
+                event_type: "attack".to_string(),
+                attacker_ulid: attacker_ulid.clone(),
+                target_ulid: target_ulid.clone(),
+                amount: 0.0,
+                attacker_animation: "attack".to_string(),
+                target_animation: "".to_string(),
+                target_x,
+                target_y,
+            });
+
+            // Generate damage/death event
+            let target_animation = if target_hp <= 0.0 {
+                "death".to_string()
+            } else {
+                "hurt".to_string()
+            };
+
+            events.push(CombatEvent {
+                event_type: if target_hp <= 0.0 { "death" } else { "damage" }.to_string(),
+                attacker_ulid,
+                target_ulid: target_ulid.clone(),
+                amount: damage,
+                attacker_animation: "".to_string(),
+                target_animation,
+                target_x,
+                target_y,
+            });
+
+            // Mark target as dead if HP <= 0
+            if target_hp <= 0.0 {
+                self.mark_dead(&target_ulid);
+            }
+        }
 
         events
     }
 
-    /// Get all active NPCs with their positions (internal helper)
-    #[allow(dead_code)]
+    /// Get all active NPCs with their positions
+    /// Returns: Vec<(ulid, x, y, state, hp, attack, defense)>
     fn get_active_npcs_with_positions(&self) -> Vec<(String, f32, f32, i32, f32, f32, f32)> {
-        // TODO: Query HolyMap for all "pos:{ulid}" entries
-        // For each position, fetch state + stats
-        // Filter out dead NPCs
-        vec![]
+        let mut npcs = Vec::new();
+
+        // Iterate over active combat NPCs DashMap
+        for entry in self.active_combat_npcs.iter() {
+            let ulid = entry.key();
+
+            // Get position
+            let pos = self.get_npc_position_internal(ulid);
+            if pos.is_none() {
+                continue; // No position yet, skip
+            }
+            let (x, y) = pos.unwrap();
+
+            // Get state
+            let state = self.get_stat_value(ulid, "state")
+                .unwrap_or(0.0) as i32;
+
+            // Skip if dead
+            if (state & NPCState::DEAD.bits() as i32) != 0 {
+                continue;
+            }
+
+            // Get combat stats
+            let hp = self.get_stat_value(ulid, "hp").unwrap_or(100.0);
+            let attack = self.get_stat_value(ulid, "attack").unwrap_or(10.0);
+            let defense = self.get_stat_value(ulid, "defense").unwrap_or(5.0);
+
+            npcs.push((ulid.clone(), x, y, state, hp, attack, defense));
+        }
+
+        npcs
     }
 
-    /// Find combat pairs (NPCs within attack range who are hostile)
-    #[allow(dead_code)]
-    fn find_combat_pairs(&self, _npcs: &[(String, f32, f32, i32, f32, f32, f32)]) -> Vec<(String, String, f32)> {
-        // TODO: For each NPC, find nearest hostile NPC within range
-        // Melee: ~50px range
-        // Ranged: ~200px range
-        // Check are_hostile() for each pair
-        vec![]
+    /// Find combat pairs based on proximity and faction hostility
+    /// Returns: Vec<(attacker_ulid, target_ulid, distance)>
+    fn find_combat_pairs(&self, npcs: &[(String, f32, f32, i32, f32, f32, f32)]) -> Vec<(String, String, f32)> {
+        let mut pairs = Vec::new();
+
+        for i in 0..npcs.len() {
+            let (ulid_a, x_a, y_a, state_a, _, _, _) = &npcs[i];
+
+            // Skip if dead
+            if (*state_a & NPCState::DEAD.bits() as i32) != 0 {
+                continue;
+            }
+
+            for j in (i + 1)..npcs.len() {
+                let (ulid_b, x_b, y_b, state_b, _, _, _) = &npcs[j];
+
+                // Skip if dead
+                if (*state_b & NPCState::DEAD.bits() as i32) != 0 {
+                    continue;
+                }
+
+                // Check if hostile factions
+                if !Self::are_factions_hostile(*state_a, *state_b) {
+                    continue;
+                }
+
+                // Calculate distance
+                let distance = Self::distance(*x_a, *y_a, *x_b, *y_b);
+
+                // Get attack range based on combat type
+                let range_a = Self::get_attack_range(*state_a);
+                let range_b = Self::get_attack_range(*state_b);
+
+                // If in range, add to pairs (both directions possible)
+                if distance <= range_a {
+                    pairs.push((ulid_a.clone(), ulid_b.clone(), distance));
+                }
+                if distance <= range_b {
+                    pairs.push((ulid_b.clone(), ulid_a.clone(), distance));
+                }
+            }
+        }
+
+        pairs
+    }
+
+    /// Check if two faction states are hostile
+    fn are_factions_hostile(state1: i32, state2: i32) -> bool {
+        let ally1 = (state1 & NPCState::ALLY.bits() as i32) != 0;
+        let monster1 = (state1 & NPCState::MONSTER.bits() as i32) != 0;
+        let passive1 = (state1 & NPCState::PASSIVE.bits() as i32) != 0;
+
+        let ally2 = (state2 & NPCState::ALLY.bits() as i32) != 0;
+        let monster2 = (state2 & NPCState::MONSTER.bits() as i32) != 0;
+        let passive2 = (state2 & NPCState::PASSIVE.bits() as i32) != 0;
+
+        // Passive never hostile
+        if passive1 || passive2 {
+            return false;
+        }
+
+        // Ally vs Monster = hostile
+        (ally1 && monster2) || (monster1 && ally2)
+    }
+
+    /// Get attack range based on combat type
+    fn get_attack_range(state: i32) -> f32 {
+        if (state & NPCState::MELEE.bits() as i32) != 0 {
+            50.0 // Melee range
+        } else if (state & NPCState::RANGED.bits() as i32) != 0 {
+            200.0 // Ranged range
+        } else if (state & NPCState::MAGIC.bits() as i32) != 0 {
+            150.0 // Magic range
+        } else {
+            50.0 // Default
+        }
+    }
+
+    /// Helper to get stat value from HolyMap
+    fn get_stat_value(&self, ulid: &str, stat_name: &str) -> Option<f32> {
+        let key = SafeString(format!("{}:{}", stat_name, ulid));
+        if let Some(SafeValue(value_str)) = self.storage.get(&key) {
+            return value_str.parse::<f32>().ok();
+        }
+        None
     }
 
     /// Calculate distance between two points
-    #[allow(dead_code)]
     fn distance(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
         let dx = x2 - x1;
         let dy = y2 - y1;
         (dx * dx + dy * dy).sqrt()
+    }
+
+    /// Check if attacker can attack (cooldown expired)
+    fn check_attack_cooldown(&self, ulid: &str, now_ms: u64) -> bool {
+        if let Some(last_attack_ms) = self.get_stat_value(ulid, "cooldown") {
+            let cooldown_duration_ms = 1000; // 1 attack per second
+            return now_ms >= (last_attack_ms as u64) + cooldown_duration_ms;
+        }
+        true // No cooldown record = can attack
+    }
+
+    /// Update attack cooldown
+    fn update_cooldown(&self, ulid: &str, now_ms: u64) {
+        self.storage.insert(
+            SafeString(format!("cooldown:{}", ulid)),
+            SafeValue(now_ms.to_string())
+        );
+    }
+
+    /// Apply damage to target, return new HP
+    fn apply_damage(&self, target_ulid: &str, damage: f32) -> f32 {
+        let current_hp = self.get_stat_value(target_ulid, "hp").unwrap_or(100.0);
+        let new_hp = (current_hp - damage).max(0.0);
+
+        self.storage.insert(
+            SafeString(format!("hp:{}", target_ulid)),
+            SafeValue(new_hp.to_string())
+        );
+
+        new_hp
+    }
+
+    /// Mark NPC as dead
+    fn mark_dead(&self, ulid: &str) {
+        if let Some(state) = self.get_stat_value(ulid, "state") {
+            let mut state_i32 = state as i32;
+            state_i32 |= NPCState::DEAD.bits() as i32;
+            self.storage.insert(
+                SafeString(format!("state:{}", ulid)),
+                SafeValue(state_i32.to_string())
+            );
+        }
+    }
+
+    /// Get current time in milliseconds
+    fn get_current_time_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
+    // ============================================================================
+    // COMBAT THREAD LIFECYCLE
+    // ============================================================================
+
+    /// Start autonomous combat thread (60fps)
+    /// Thread runs independently, processing combat logic and generating events
+    pub fn start_combat_thread(self: &Arc<Self>) {
+        if self.combat_thread_running.load(Ordering::Relaxed) {
+            return;
+        }
+
+        self.combat_thread_running.store(true, Ordering::Relaxed);
+
+        // Clone the Arc to pass into thread - gives thread access to all warehouse data
+        let warehouse = Arc::clone(self);
+
+        thread::spawn(move || {
+
+            while warehouse.combat_thread_running.load(Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(16)); // 60fps
+
+                // Process combat tick - autonomous combat logic
+                let events = warehouse.tick_combat_internal(0.016); // 16ms delta
+
+                // Push events to queue for GDScript to poll
+                for event in events {
+                    warehouse.combat_event_queue.push(event);
+                }
+            }
+        });
+    }
+
+    /// Stop combat thread gracefully
+    pub fn stop_combat_thread(&self) {
+        if !self.combat_thread_running.load(Ordering::Relaxed) {
+            return;
+        }
+
+        self.combat_thread_running.store(false, Ordering::Relaxed);
+        // Thread will stop on next iteration
     }
 }
 
@@ -1009,6 +1368,82 @@ impl GodotNPCDataWarehouse {
 
         events_array
     }
+
+    // ============================================================================
+    // COMBAT THREAD CONTROL (GDScript API)
+    // ============================================================================
+
+    /// Start autonomous combat thread
+    /// Thread runs at 60fps independently, processing combat logic
+    #[func]
+    pub fn start_combat_system(&self) {
+        self.warehouse.start_combat_thread();
+    }
+
+    /// Stop combat thread gracefully
+    #[func]
+    pub fn stop_combat_system(&self) {
+        self.warehouse.as_ref().stop_combat_thread();
+    }
+
+    /// Poll combat events from autonomous thread
+    /// Returns Array of JSON strings (CombatEvent)
+    /// Call this once per frame from GDScript to drain event queue
+    #[func]
+    pub fn poll_combat_events(&self) -> Array<GString> {
+        let mut events_array = Array::new();
+
+        // Drain queue until empty (lock-free)
+        while let Some(event) = self.warehouse.as_ref().combat_event_queue.pop() {
+            events_array.push(&GString::from(event.to_json()));
+        }
+
+        events_array
+    }
+
+    // ============================================================================
+    // COMBAT REGISTRATION (GDScript API)
+    // ============================================================================
+
+    /// Register NPC for combat system
+    /// Call this when NPC spawns - stores combat data in Rust HolyMap
+    #[func]
+    pub fn register_npc_for_combat(
+        &self,
+        ulid: GString,
+        initial_state: i32,
+        max_hp: f32,
+        attack: f32,
+        defense: f32,
+    ) {
+        self.warehouse.as_ref().register_npc_for_combat_internal(
+            &ulid.to_string(),
+            initial_state,
+            max_hp,
+            attack,
+            defense,
+        );
+    }
+
+    /// Unregister NPC from combat system
+    /// Call this when NPC despawns or dies - cleans up combat data
+    #[func]
+    pub fn unregister_npc_from_combat(&self, ulid: GString) {
+        self.warehouse.as_ref().unregister_npc_from_combat_internal(&ulid.to_string());
+    }
+
+    /// Get NPC current HP
+    /// Returns current HP or 0.0 if not found
+    #[func]
+    pub fn get_npc_hp(&self, ulid: GString) -> f32 {
+        self.warehouse.as_ref()
+            .get_npc_hp_internal(&ulid.to_string())
+            .unwrap_or(0.0)
+    }
+
+    // ============================================================================
+    // STATE TRANSITION METHODS
+    // ============================================================================
 
     /// Transition state to combat mode (add COMBAT flag, remove WANDERING/IDLE)
     /// Returns new state value

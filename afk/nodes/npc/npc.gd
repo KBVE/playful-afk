@@ -143,29 +143,17 @@ func _update_animation() -> void:
 	elif current_state & NPCManager.NPCState.IDLE:
 		animation_name = state_to_animation.get(NPCManager.NPCState.IDLE, "idle")
 	else:
-		# Debug: No behavioral state flag found, check what flags are set
-		var is_ally = current_state & NPCManager.NPCState.ALLY
-		var is_melee = current_state & NPCManager.NPCState.MELEE
-		var is_ranged = current_state & NPCManager.NPCState.RANGED
-		if is_ally and (is_melee or is_ranged):
-			print("WARNING: Warrior/Archer with no behavioral state! State=%d, Stack trace:" % current_state)
-			print(get_stack())
 		animation_name = "idle"  # Fallback to idle
 		# Force IDLE state to fix this edge case - remove all other behavioral states first
 		current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.ATTACKING & ~NPCManager.NPCState.DAMAGED) | NPCManager.NPCState.IDLE
 
 	# Play animation if it exists, otherwise fallback to idle
 	# Only call play() if animation has changed to avoid restarting the same animation
-	var is_warrior = (current_state & NPCManager.NPCState.ALLY) and (current_state & NPCManager.NPCState.MELEE)
 	if animated_sprite.sprite_frames.has_animation(animation_name):
 		if animated_sprite.animation != animation_name:
-			if is_warrior:
-				print("ANIM CHANGE: %s -> %s (state=%d, speed=%.2f)" % [animated_sprite.animation, animation_name, current_state, current_speed])
 			animated_sprite.play(animation_name)
 	elif animated_sprite.sprite_frames.has_animation("idle"):
 		if animated_sprite.animation != "idle":
-			if is_warrior:
-				print("ANIM CHANGE: %s -> idle (fallback, state=%d)" % [animated_sprite.animation, current_state])
 			animated_sprite.play("idle")
 
 

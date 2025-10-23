@@ -301,6 +301,45 @@ func _ready() -> void:
 		CombatManager.damage_dealt.connect(_on_damage_dealt)
 		CombatManager.target_killed.connect(_on_target_killed)
 
+	# RUST COMBAT: Start autonomous combat system
+	NPCDataWarehouse.start_combat_system()
+	print("✓ Autonomous combat system started")
+
+
+## ===== COMBAT EVENT POLLING =====
+
+## Process combat events from Rust autonomous thread
+func _process(_delta: float) -> void:
+	# RUST COMBAT: Poll combat events and handle visual rendering
+	var events_json = NPCDataWarehouse.poll_combat_events()
+
+	for event_json in events_json:
+		var event = JSON.parse_string(event_json)
+		if event:
+			_handle_combat_event(event)
+
+
+## Handle combat event from Rust (animations, damage numbers, VFX)
+func _handle_combat_event(event: Dictionary) -> void:
+	match event.event_type:
+		"attack":
+			print("[COMBAT] Attack: %s -> %s" % [event.attacker_ulid, event.target_ulid])
+			# TODO: Play attack animation via EventManager
+		"damage":
+			print("[COMBAT] Damage: %s took %.1f damage from %s (HP remaining)" % [
+				event.target_ulid,
+				event.amount,
+				event.attacker_ulid
+			])
+			# TODO: Show damage number
+			# TODO: Play hurt animation
+		"death":
+			print("[COMBAT] Death: %s killed by %s" % [event.target_ulid, event.attacker_ulid])
+			# TODO: Play death animation
+			# TODO: Schedule NPC despawn after animation
+		_:
+			print("[COMBAT] Unknown event type: %s" % event.event_type)
+
 
 ## ===== STATE HISTORY SYSTEM FUNCTIONS =====
 
@@ -816,15 +855,10 @@ func register_npc_ai(npc: Node2D, npc_type: String) -> void:
 	if "current_state" in npc and npc.current_state != 0:
 		# NPC has already set its state (warriors, archers, monsters)
 		npc_full_state = npc.current_state
-		# Only log for warriors and archers
-		if npc_type == "warrior" or npc_type == "archer":
-			print("DEBUG register_npc_ai: %s has state %d (preserving)" % [npc_type, npc_full_state])
 	else:
 		# Fallback: NPC doesn't have state yet, use behavioral state
 		# This should rarely happen since NPCs set state in _ready()
 		npc_full_state = behavioral_state
-		if npc_type == "warrior" or npc_type == "archer":
-			print("DEBUG register_npc_ai: %s has no state, using behavioral %d" % [npc_type, behavioral_state])
 		# Don't set it on the NPC - let the NPC's _ready() handle state initialization
 		# Setting it here would strip combat type and faction flags
 
@@ -966,15 +1000,6 @@ func _update_npc_ai(npc: Node2D) -> void:
 		if target:
 			# Get NPC's combat type from bitwise state flags
 			var has_combat_type = npc.current_state & (NPCState.MELEE | NPCState.RANGED | NPCState.MAGIC | NPCState.HEALER)
-
-			# Debug logging for warriors and archers only
-			var npc_type = ai_state["npc_type"]
-			if npc_type == "warrior" or npc_type == "archer":
-				if has_combat_type == 0:
-					print("DEBUG %s: state=%d, NO COMBAT TYPE!" % [npc_type, npc.current_state])
-				else:
-					var distance = npc.global_position.distance_to(target.global_position)
-					print("DEBUG %s: state=%d, has combat type, distance=%.1f" % [npc_type, npc.current_state, distance])
 
 			# MELEE COMBAT (Warriors, Knights, etc.)
 			if npc.current_state & NPCState.MELEE:
@@ -2069,6 +2094,28 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.ALLY
 	elif npc_type == "archer":
 		npc.current_state = NPCState.IDLE | NPCState.RANGED | NPCState.ALLY
+	elif npc_type == "goblin":
+		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.MONSTER
+	elif npc_type == "mushroom":
+		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.MONSTER
+	elif npc_type == "skeleton":
+		npc.current_state = NPCState.IDLE | NPCState.MELEE | NPCState.MONSTER
+	elif npc_type == "eyebeast":
+		npc.current_state = NPCState.IDLE | NPCState.RANGED | NPCState.MONSTER
+	elif npc_type == "chicken":
+		npc.current_state = NPCState.IDLE | NPCState.PASSIVE
+
+	# RUST COMBAT: Register NPC with autonomous combat system
+	NPCDataWarehouse.register_npc_for_combat(
+		ulid_key,
+		npc.current_state,
+		fresh_stats.max_hp,
+		fresh_stats.attack,
+		fresh_stats.defense
+	)
+
+	# RUST COMBAT: Set initial position
+	NPCDataWarehouse.update_npc_position(ulid_key, position.x, position.y)
 
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
 	register_npc_ai(npc, npc_type)
@@ -2135,6 +2182,8 @@ func return_generic_npc(npc: Node2D) -> void:
 			if "stats" in npc and npc.stats:
 				npc.stats.reset_to_full()
 				var ulid_key = ULID.to_hex(npc.stats.ulid)
+				# RUST COMBAT: Unregister from combat system
+				NPCDataWarehouse.unregister_npc_from_combat(ulid_key)
 				# MIGRATION: Remove from Rust NPCDataWarehouse
 				NPCDataWarehouse.remove_npc(ulid_key)
 				# Clean up historic_state entry for this NPC

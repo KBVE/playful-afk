@@ -99,6 +99,11 @@ func _process(delta: float) -> void:
 	# Update movement
 	_update_movement(delta)
 
+	# RUST COMBAT: Sync position to autonomous combat system
+	if stats and stats.ulid:
+		var ulid_key = ULID.to_hex(stats.ulid)
+		NPCDataWarehouse.update_npc_position(ulid_key, position.x, position.y)
+
 
 func _update_movement(delta: float) -> void:
 	# Simple movement for monsters

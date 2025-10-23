@@ -901,6 +901,7 @@ dependencies = [
  "arc-swap",
  "bevy",
  "bitflags",
+ "crossbeam-queue",
  "dashmap",
  "godot",
  "once_cell",

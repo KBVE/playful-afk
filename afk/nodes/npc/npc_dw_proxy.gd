@@ -304,3 +304,51 @@ func is_in_combat(state: int) -> bool:
 	if _warehouse:
 		return _warehouse.is_in_combat(state)
 	return false
+
+## ===== AUTONOMOUS COMBAT SYSTEM =====
+
+## Start autonomous combat thread (60fps)
+func start_combat_system() -> void:
+	if _warehouse:
+		_warehouse.start_combat_system()
+	else:
+		push_error("NPCDataWarehouse: Warehouse not initialized!")
+
+## Stop combat thread gracefully
+func stop_combat_system() -> void:
+	if _warehouse:
+		_warehouse.stop_combat_system()
+
+## Poll combat events from Rust thread (call every frame)
+## Returns Array of JSON strings (CombatEvent)
+func poll_combat_events() -> Array:
+	if _warehouse:
+		return _warehouse.poll_combat_events()
+	return []
+
+## Register NPC for combat system
+func register_npc_for_combat(ulid: String, initial_state: int, max_hp: float, attack: float, defense: float) -> void:
+	if _warehouse:
+		_warehouse.register_npc_for_combat(ulid, initial_state, max_hp, attack, defense)
+
+## Unregister NPC from combat system
+func unregister_npc_from_combat(ulid: String) -> void:
+	if _warehouse:
+		_warehouse.unregister_npc_from_combat(ulid)
+
+## Get NPC current HP
+func get_npc_hp(ulid: String) -> float:
+	if _warehouse:
+		return _warehouse.get_npc_hp(ulid)
+	return 0.0
+
+## Update NPC position (call every frame from NPC _process)
+func update_npc_position(ulid: String, x: float, y: float) -> void:
+	if _warehouse:
+		_warehouse.update_npc_position(ulid, x, y)
+
+## Get NPC position
+func get_npc_position(ulid: String) -> PackedFloat32Array:
+	if _warehouse:
+		return _warehouse.get_npc_position(ulid)
+	return PackedFloat32Array()
