@@ -5,8 +5,13 @@ set -e
 # Builds the extension for multiple platforms and copies to /afk/addons/godo/
 # This makes the extension self-contained as a Godot plugin (no ../ paths needed)
 
+# Add cargo to PATH if it exists
+if [ -d "$HOME/.cargo/bin" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 # Source Rust environment if available
-[ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env"
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AFK_DIR="$(cd "$SCRIPT_DIR/../afk" && pwd)"
@@ -63,6 +68,10 @@ echo "[4/4] Copying binaries to plugin..."
 if [ -f "$TARGET_DIR/debug/libgodo.dylib" ]; then
     cp "$TARGET_DIR/debug/libgodo.dylib" "$PLUGIN_DIR/bin/debug/"
     echo "  ✓ Copied: libgodo.dylib (debug)"
+    # Remove quarantine and re-sign for macOS
+    xattr -dr com.apple.quarantine "$PLUGIN_DIR/bin/debug/libgodo.dylib" 2>/dev/null || true
+    codesign --force --sign - "$PLUGIN_DIR/bin/debug/libgodo.dylib" 2>/dev/null || true
+    echo "  ✓ Signed: libgodo.dylib (debug)"
 else
     echo "  ✗ Missing: libgodo.dylib (debug)"
 fi
@@ -71,6 +80,10 @@ fi
 if [ -f "$TARGET_DIR/release/libgodo.dylib" ]; then
     cp "$TARGET_DIR/release/libgodo.dylib" "$PLUGIN_DIR/bin/release/"
     echo "  ✓ Copied: libgodo.dylib (release)"
+    # Remove quarantine and re-sign for macOS
+    xattr -dr com.apple.quarantine "$PLUGIN_DIR/bin/release/libgodo.dylib" 2>/dev/null || true
+    codesign --force --sign - "$PLUGIN_DIR/bin/release/libgodo.dylib" 2>/dev/null || true
+    echo "  ✓ Signed: libgodo.dylib (release)"
 else
     echo "  ✗ Missing: libgodo.dylib (release)"
 fi

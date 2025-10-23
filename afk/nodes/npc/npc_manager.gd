@@ -209,9 +209,8 @@ var persistent_pool: Array[Dictionary] = []  # Each entry: {character, ulid, is_
 const MAX_GENERIC_POOL_SIZE: int = 50
 var generic_pool: Array[Dictionary] = []  # Each entry: {character, is_active, npc_type, ...}
 
-## STATS DATABASE - All NPC stats indexed by ULID
-## Key: ULID string, Value: NPCStats instance
-var stats_database: Dictionary = {}
+## MIGRATION COMPLETE: NPC stats are now stored in Rust NPCDataWarehouse
+## Use get_stats_by_key(ulid_key) to fetch stats from Rust
 
 ## HEALTHBAR POOL - Pooled healthbars for NPCs
 ## Pre-allocated healthbars that are assigned to NPCs when spawned
@@ -1949,8 +1948,9 @@ func add_persistent_npc(
 	# Create or assign stats
 	var npc_stats = initial_stats if initial_stats else NPCStats.new()
 
-	# Store stats in database by ULID
-	stats_database[npc_stats.ulid] = npc_stats
+	# MIGRATION: Store stats in Rust NPCDataWarehouse
+	var ulid_key = ULID.to_hex(npc_stats.ulid)
+	NPCDataWarehouse.store_npc(ulid_key, JSON.stringify(npc_stats.to_dict()))
 
 	# Store in persistent pool
 	var slot = persistent_pool[slot_index]
@@ -2048,9 +2048,9 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	# Generate FRESH stats for this spawn with random name (configured per NPC type)
 	var fresh_stats = _create_stats_for_type(npc_type)
 
-	# Store in database (use hex string as key for dictionary compatibility)
+	# Store in Rust NPCDataWarehouse (use hex string as key)
 	var ulid_key = ULID.to_hex(fresh_stats.ulid)
-	stats_database[ulid_key] = fresh_stats
+	NPCDataWarehouse.store_npc(ulid_key, JSON.stringify(fresh_stats.to_dict()))
 
 	# Assign to NPC
 	if "stats" in npc:
@@ -2135,7 +2135,8 @@ func return_generic_npc(npc: Node2D) -> void:
 			if "stats" in npc and npc.stats:
 				npc.stats.reset_to_full()
 				var ulid_key = ULID.to_hex(npc.stats.ulid)
-				stats_database.erase(ulid_key)
+				# MIGRATION: Remove from Rust NPCDataWarehouse
+				NPCDataWarehouse.remove_npc(ulid_key)
 				# Clean up historic_state entry for this NPC
 				historic_state.erase(ulid_key)
 				npc.stats = null
@@ -2256,45 +2257,54 @@ func print_pool_stats() -> void:
 ## Get NPC stats by binary ULID
 func get_stats(ulid: PackedByteArray) -> NPCStats:
 	var ulid_key = ULID.to_hex(ulid)
-	return stats_database.get(ulid_key, null)
+	return get_stats_by_key(ulid_key)
 
 
 ## Get NPC stats by hex string key (for internal use)
 func get_stats_by_key(ulid_key: String) -> NPCStats:
-	return stats_database.get(ulid_key, null)
+	# MIGRATION: Fetch from Rust NPCDataWarehouse
+	var json_str = NPCDataWarehouse.get_npc(ulid_key)
+	if json_str == "":
+		return null
+
+	var json = JSON.new()
+	var parse_result = json.parse(json_str)
+	if parse_result != OK:
+		push_error("Failed to parse NPC stats JSON for ULID: %s" % ulid_key)
+		return null
+
+	var stats = NPCStats.new()
+	stats.from_dict(json.data)
+	return stats
 
 
 ## Get persistent NPC stats by name
 func get_persistent_npc_stats_by_name(npc_name: String) -> NPCStats:
 	for slot in persistent_pool:
 		if slot["npc_name"] == npc_name and slot.has("ulid"):
-			return stats_database.get(slot["ulid"], null)
+			var ulid_key = slot["ulid"]
+			return get_stats_by_key(ulid_key)
 	return null
 
 
-## Save all NPC stats (both persistent and generic currently active)
+## Save all NPC stats (only persistent NPCs need to be saved)
 func save_all_stats() -> Dictionary:
 	var saved_data = {}
 
-	# Save all stats from database with metadata
-	for ulid_key in stats_database:
-		var stats = stats_database[ulid_key]
+	# MIGRATION: Only save persistent NPCs (generic NPCs are ephemeral)
+	# Fetch stats from Rust NPCDataWarehouse
+	for slot in persistent_pool:
+		if slot.has("ulid"):
+			var ulid_key = slot["ulid"]
+			var stats = get_stats_by_key(ulid_key)
 
-		# Find if this is a persistent NPC
-		var npc_name = ""
-		var npc_type = ""
-		for slot in persistent_pool:
-			if slot.has("ulid") and slot["ulid"] == ulid_key:
-				npc_name = slot["npc_name"]
-				npc_type = slot["npc_type"]
-				break
-
-		saved_data[ulid_key] = {
-			"stats": stats.to_dict(),
-			"npc_name": npc_name,
-			"npc_type": npc_type,
-			"is_persistent": npc_name != ""
-		}
+			if stats:
+				saved_data[ulid_key] = {
+					"stats": stats.to_dict(),
+					"npc_name": slot["npc_name"],
+					"npc_type": slot["npc_type"],
+					"is_persistent": true
+				}
 
 	return saved_data
 

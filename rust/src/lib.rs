@@ -1,6 +1,7 @@
 use godot::prelude::*;
 
 mod holymap;
+mod npc_data_warehouse;
 
 struct Godo;
 
