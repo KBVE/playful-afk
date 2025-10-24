@@ -906,6 +906,7 @@ dependencies = [
  "godot",
  "once_cell",
  "papaya",
+ "parking_lot",
  "rand",
  "serde",
  "serde_json",

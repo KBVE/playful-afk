@@ -96,17 +96,18 @@ where
 
     /// Get a value from the map
     ///
-    /// Strong consistency: Checks Papaya first (fast), then DashMap (recent writes)
+    /// Strong consistency: Checks DashMap first (recent writes), then Papaya (cached reads)
+    /// This ensures write-read consistency - recently written values are immediately visible
     pub fn get(&self, key: &K) -> Option<V> {
-        // Fast path: lock-free read from Papaya (90%+ hits)
-        let papaya_map = self.read_store.load();
-        let pinned = papaya_map.pin();
-        if let Some(val) = pinned.get(key) {
-            return Some(val.clone());
+        // FIXED: Check DashMap FIRST for strong consistency (recent writes visible immediately)
+        if let Some(entry) = self.write_store.get(key) {
+            return Some(entry.value().clone());
         }
 
-        // Fallback: check DashMap for recent writes not yet synced
-        self.write_store.get(key).map(|entry| entry.value().clone())
+        // Fallback: check Papaya for older cached values
+        let papaya_map = self.read_store.load();
+        let pinned = papaya_map.pin();
+        pinned.get(key).map(|v| v.clone())
     }
 
     /// Insert a key-value pair into the map

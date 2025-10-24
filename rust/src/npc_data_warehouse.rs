@@ -4,11 +4,11 @@ use crate::holymap::HolyMap;
 use crate::bytemap::ByteMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering, AtomicU64};
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use bitflags::bitflags;
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -757,7 +757,7 @@ pub struct NPCDataWarehouse {
 
     /// Active NPCs (currently spawned and visible)
     /// Key: ULID bytes (Vec for HashMap compatibility) -> RustNPC instance
-    active_npc_pool: DashMap<Vec<u8>, RustNPC>,
+    active_npc_pool: DashMap<[u8; 16], RustNPC>,
 
     /// Inactive NPCs (in pool, ready to spawn)
     /// Key: NPC type -> Vec of inactive NPCs
@@ -769,11 +769,11 @@ pub struct NPCDataWarehouse {
 
     /// Scene tree container node (set by GDScript, NPCs are added as children)
     /// This is the Layer4Objects container from the background
-    /// Wrapped in Arc<Mutex<>> for thread-safe mutable access
-    scene_container: Arc<Mutex<Option<Gd<Node2D>>>>,
+    /// Wrapped in RwLock for thread-safe access (write-once, read-many pattern)
+    scene_container: RwLock<Option<Gd<Node2D>>>,
 
     // ============================================================================
-    // BYTE-KEYED STORAGE - Efficient storage using ULID bytes as keys
+    // BYTE-KEYED STORAGE - ByteMap now uses DashMap internally for strong consistency
     // ============================================================================
 
     /// NPC positions (ULID bytes -> "x,y")
@@ -783,7 +783,7 @@ pub struct NPCDataWarehouse {
     npc_names: ByteMap,      // ULID -> generated name
     npc_types: ByteMap,      // ULID -> npc_type (warrior, archer, etc.)
 
-    /// NPC combat stats (ULID bytes -> NPCCombatStats struct)
+    /// NPC combat stats (ULID bytes -> NPCCombatStats struct serialized as JSON)
     /// Contains: hp, max_hp, attack, defense, static_state
     npc_combat_stats: ByteMap,
 
@@ -793,6 +793,19 @@ pub struct NPCDataWarehouse {
 }
 
 impl NPCDataWarehouse {
+    /// Helper to track all state writes for debugging
+    fn set_behavioral_state(&self, ulid: &[u8; 16], new_state: i32, caller: &str) {
+        static mut STATE_WRITE_COUNT: u32 = 0;
+        unsafe {
+            STATE_WRITE_COUNT += 1;
+            if STATE_WRITE_COUNT <= 30 {
+                let ulid_hex = bytes_to_hex(ulid);
+                godot_print!("[STATE WRITE] {} - ULID {} - setting to {}", caller, &ulid_hex[..8], new_state);
+            }
+        }
+        self.npc_behavioral_state.insert_ulid(ulid, new_state.to_string());
+    }
+
     /// Create a new NPCDataWarehouse with the specified sync interval
     pub fn new(sync_interval_ms: u64) -> Self {
         godot_print!("NPCDataWarehouse: Initializing with {}ms sync interval", sync_interval_ms);
@@ -824,9 +837,9 @@ impl NPCDataWarehouse {
             active_npc_pool: DashMap::new(),
             inactive_npc_pool: DashMap::new(),
             scene_cache: HolyMap::new(sync_interval_ms),
-            scene_container: Arc::new(Mutex::new(None)),  // Will be set by GDScript via set_scene_container()
+            scene_container: RwLock::new(None),  // Will be set by GDScript via set_scene_container()
 
-            // Initialize byte-keyed storage
+            // Initialize byte-keyed storage (ByteMap now uses DashMap internally)
             npc_positions: ByteMap::new(sync_interval_ms),
             npc_names: ByteMap::new(sync_interval_ms),
             npc_types: ByteMap::new(sync_interval_ms),
@@ -939,16 +952,14 @@ impl NPCDataWarehouse {
     /// Set the scene container (Layer4Objects) where NPCs will be added
     pub fn set_scene_container(&self, container: Gd<Node2D>) {
         godot_print!("[RUST POOL] Setting scene container");
-        if let Ok(mut guard) = self.scene_container.lock() {
-            *guard = Some(container);
-        } else {
-            godot_error!("[RUST POOL] Failed to lock scene_container mutex");
-        }
+        *self.scene_container.write() = Some(container);
     }
 
     /// Spawn an NPC from the inactive pool
     /// Returns the ULID bytes of the spawned NPC, or None if pool is empty
     pub fn rust_spawn_npc(&self, npc_type: &str, position: Vector2) -> Option<[u8; 16]> {
+        godot_print!("[RUST SPAWN DEBUG] rust_spawn_npc called for type: {}", npc_type);
+
         // Get an inactive NPC from the pool
         let mut npc = {
             let mut pool_entry = match self.inactive_npc_pool.get_mut(npc_type) {
@@ -977,7 +988,8 @@ impl NPCDataWarehouse {
         let _ = npc.node.set("ulid", &ulid_variant);
 
         // Add NPC to scene tree if container is set
-        if let Ok(mut container_guard) = self.scene_container.lock() {
+        {
+            let mut container_guard = self.scene_container.write();
             if let Some(ref mut container) = *container_guard {
                 let container_path = container.get_path();
                 container.add_child(&npc.node);
@@ -988,9 +1000,6 @@ impl NPCDataWarehouse {
                 godot_error!("[RUST POOL] Cannot spawn NPC - scene container not set!");
                 return None;
             }
-        } else {
-            godot_error!("[RUST POOL] Failed to lock scene_container mutex");
-            return None;
         }
 
         // Activate the NPC AFTER adding to tree (important for visibility to work)
@@ -1004,13 +1013,26 @@ impl NPCDataWarehouse {
 
         // Register for combat using the stats extracted during pool initialization
         let npc_stats = npc.stats;
+        let ulid_hex = bytes_to_hex(&ulid);
+        godot_print!("[RUST SPAWN DEBUG] About to register NPC {} with ULID: {}", npc_type, ulid_hex);
         self.register_npc_with_stats(&ulid, &npc_stats);
 
         // Store position for combat system using ByteMap (no hex conversion!)
         self.npc_positions.insert_ulid(&ulid, format!("{},{}", position.x, position.y));
 
-        // Move to active pool (use Vec<u8> as key for DashMap compatibility)
-        self.active_npc_pool.insert(ulid.to_vec(), npc);
+        // Set initial wander cooldown so NPC stays idle for a bit after spawning (5-10 seconds)
+        use rand::Rng;
+        let mut rng = rand::rng();
+        let initial_idle_time = rng.random_range(5000..10000); // 5-10 seconds in milliseconds
+        let ulid_hex = bytes_to_hex(&ulid);
+        let now_ms = Self::get_current_time_ms();
+        self.storage.insert(
+            SafeString(format!("wander_cooldown:{}", ulid_hex)),
+            SafeValue((now_ms + initial_idle_time).to_string())
+        );
+
+        // Move to active pool (use [u8; 16] directly as key)
+        self.active_npc_pool.insert(ulid, npc);
 
         // Log spawn with first 8 bytes in hex
         let ulid_hex_short = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
@@ -1033,7 +1055,8 @@ impl NPCDataWarehouse {
         };
 
         // Remove from scene tree
-        if let Ok(mut container_guard) = self.scene_container.lock() {
+        {
+            let mut container_guard = self.scene_container.write();
             if let Some(ref mut container) = *container_guard {
                 container.remove_child(&npc.node);
             }
@@ -1090,7 +1113,7 @@ impl NPCDataWarehouse {
         self.register_npc_for_combat_internal(
             ulid,
             stats.static_state,
-            0, // behavioral_state (IDLE)
+            NPCState::IDLE.bits() as i32, // behavioral_state starts as IDLE
             stats.max_hp,
             stats.attack,
             stats.defense
@@ -1252,6 +1275,8 @@ impl NPCDataWarehouse {
             max_energy: 100.0,
         };
         self.npc_combat_stats.insert_ulid(ulid, serde_json::to_string(&combat_stats).unwrap());
+        let ulid_hex = bytes_to_hex(ulid);
+        godot_print!("[RUST STATE] register_npc_for_combat_internal ULID {} - setting state to {}", ulid_hex, behavioral_state);
         self.npc_behavioral_state.insert_ulid(ulid, behavioral_state.to_string());
         self.npc_cooldown.insert_ulid(ulid, "0".to_string());
 
@@ -1320,53 +1345,63 @@ impl NPCDataWarehouse {
 
     /// Combat tick - public for Arc access
     /// Called by autonomous thread every 16ms (60fps)
-    pub fn tick_combat_internal(&self, _delta: f32) -> Vec<CombatEvent> {
+    // ============================================================================
+    // THREE-PHASE TICK SYSTEM
+    // ============================================================================
+    // Split into separate phases to prevent state corruption:
+    // 1. Combat Phase: Calculate damage, update HP, set states (ATTACKING, DAMAGED, DEAD)
+    // 2. Movement Phase: Handle wandering, calculate directions, update positions
+    // 3. Animation Phase: Update sprites based on states, clear temporary states
+
+    /// PHASE 1: COMBAT - Calculate damage, update HP, set behavioral states
+    /// This phase ONLY handles combat logic and state changes
+    /// Returns combat events for GDScript to handle VFX/sounds
+    pub fn tick_combat_phase(&self) -> Vec<CombatEvent> {
         let mut events = Vec::new();
         let now_ms = Self::get_current_time_ms();
 
-        // 0. INITIAL SPAWN: Check if this is the first tick and spawn minimal entities
-        // This must run BEFORE the active_npcs check so NPCs can be spawned
-        let initial_spawn_events = self.check_initial_spawn(now_ms);
-        events.extend(initial_spawn_events);
-
-        // 1. Get all active NPCs with positions
+        // Get all active NPCs with positions
         let active_npcs = self.get_active_npcs_with_positions();
         if active_npcs.is_empty() {
-            // Return early but include any spawn events from initial spawn
             return events;
         }
 
-        // 2. Calculate movement for all NPCs (pursue nearest hostile)
-        self.calculate_movement_directions(&active_npcs);
-
-        // 2.5. Apply waypoint movement (move NPCs towards their waypoints)
-        self.apply_waypoint_movement(&active_npcs, _delta);
-
-        // 2.6. Update animations based on behavioral state (Rust controls animations)
-        self.update_npc_animations(&active_npcs);
-
-        // 3. Find combat pairs (proximity + hostility checks)
-        let combat_pairs = self.find_combat_pairs(&active_npcs);
-
-        // Validation check: Report if no combat despite having NPCs
-        if combat_pairs.is_empty() && active_npcs.len() > 1 {
-            static mut LAST_WARNING: u64 = 0;
-            let now = Self::get_current_time_ms();
-            unsafe {
-                if now - LAST_WARNING > 5000 {  // Warn every 5 seconds
-                    godot_warn!("[COMBAT] {} active NPCs but no combat pairs found - check faction/range settings", active_npcs.len());
-                    LAST_WARNING = now;
+        // Debug: Count NPCs by faction
+        static mut DEBUG_COUNT: u32 = 0;
+        unsafe {
+            DEBUG_COUNT += 1;
+            if DEBUG_COUNT % 60 == 1 { // Log once per second at 60fps
+                let mut ally_count = 0;
+                let mut monster_count = 0;
+                for (_ulid, _x, _y, static_state, _behavioral_state, _hp, _max_hp, _attack) in &active_npcs {
+                    let is_ally = (*static_state & NPCStaticState::ALLY.bits() as i32) != 0;
+                    let is_monster = (*static_state & NPCStaticState::MONSTER.bits() as i32) != 0;
+                    if is_ally { ally_count += 1; }
+                    if is_monster { monster_count += 1; }
                 }
+                godot_print!("[PHASE 1: COMBAT DEBUG] {} active NPCs ({} allies, {} monsters)",
+                    active_npcs.len(), ally_count, monster_count);
             }
         }
 
+        // Find combat pairs (proximity + hostility checks)
+        let combat_pairs = self.find_combat_pairs(&active_npcs);
+
         if combat_pairs.is_empty() {
+            // Debug why no combat pairs found
+            static mut NO_COMBAT_LOG: u32 = 0;
+            unsafe {
+                NO_COMBAT_LOG += 1;
+                if NO_COMBAT_LOG % 60 == 1 { // Log once per second
+                    godot_print!("[PHASE 1: COMBAT] No combat pairs found despite {} NPCs", active_npcs.len());
+                }
+            }
             return events; // No combat happening
         }
 
-        // 3. Process each combat pair
-        let now_ms = Self::get_current_time_ms();
+        godot_print!("[PHASE 1: COMBAT] Processing {} combat pairs", combat_pairs.len());
 
+        // Process each combat pair
         for (attacker_ulid, target_ulid, _distance) in combat_pairs {
 
             // DEFENSIVE: Validate attacker and target are different
@@ -1505,15 +1540,213 @@ impl NPCDataWarehouse {
             }
         }
 
-        // 4. Check if we need to spawn monsters (Rust manages monster spawn timing)
-        let monster_spawn_events = self.check_spawn_wave(now_ms);
-        events.extend(monster_spawn_events);
-
-        // 5. Check if we need to spawn allies (gradual ramp-up)
-        let ally_spawn_events = self.check_ally_spawn(now_ms);
-        events.extend(ally_spawn_events);
-
+        godot_print!("[PHASE 1: COMBAT] Generated {} combat events", events.len());
         events
+    }
+
+    /// PHASE 2: MOVEMENT - Handle wandering, calculate directions, update positions
+    /// This phase ONLY handles movement and position updates
+    /// Returns spawn events for new NPCs
+    pub fn tick_movement_phase(&self, delta: f32) -> Vec<CombatEvent> {
+        let mut events = Vec::new();
+        let now_ms = Self::get_current_time_ms();
+
+        // 0. INITIAL SPAWN: Check if this is the first tick and spawn minimal entities
+        let initial_spawn_events = self.check_initial_spawn(now_ms);
+        events.extend(initial_spawn_events);
+
+        // Get all active NPCs with positions
+        let active_npcs = self.get_active_npcs_with_positions();
+        if active_npcs.is_empty() {
+            return events;
+        }
+
+        // Reduced logging
+        static mut MOVE_LOG_COUNT: u32 = 0;
+        unsafe {
+            MOVE_LOG_COUNT += 1;
+            if MOVE_LOG_COUNT % 60 == 1 { // Log once per second
+                godot_print!("[PHASE 2: MOVEMENT] Processing {} NPCs", active_npcs.len());
+            }
+        }
+
+        // 1. Handle idle wandering (NPCs that are IDLE and not in combat will get random waypoints)
+        self.handle_idle_wandering(&active_npcs);
+
+        // 2. Calculate movement directions for all NPCs (pursue nearest hostile)
+        self.calculate_movement_directions(&active_npcs);
+
+        // 3. Apply waypoint movement (move NPCs towards their waypoints)
+        self.apply_waypoint_movement(&active_npcs, delta);
+
+        // 4. DISABLED: Check if we need to spawn monsters (Rust manages monster spawn timing)
+        // TODO: Re-enable once initial spawn is stable
+        // let monster_spawn_events = self.check_spawn_wave(now_ms);
+        // events.extend(monster_spawn_events);
+
+        // 5. DISABLED: Check if we need to spawn allies (gradual ramp-up)
+        // TODO: Re-enable once initial spawn is stable
+        // let ally_spawn_events = self.check_ally_spawn(now_ms);
+        // events.extend(ally_spawn_events);
+
+        godot_print!("[PHASE 2: MOVEMENT] Generated {} spawn events", events.len());
+        events
+    }
+
+    /// PHASE 3: ANIMATION - Update sprites based on states, clear temporary states
+    /// This phase ONLY handles visual updates and state cleanup
+    /// No events are returned as animations are updated directly
+    pub fn tick_animation_phase(&self) {
+        // Get all active NPCs with positions
+        let active_npcs = self.get_active_npcs_with_positions();
+        if active_npcs.is_empty() {
+            return;
+        }
+
+        // Reduced logging
+        static mut ANIM_LOG_COUNT: u32 = 0;
+        unsafe {
+            ANIM_LOG_COUNT += 1;
+            if ANIM_LOG_COUNT % 60 == 1 { // Log once per second
+                godot_print!("[PHASE 3: ANIMATION] Updating animations for {} NPCs", active_npcs.len());
+            }
+        }
+
+        // Update animations based on behavioral state (Rust controls animations)
+        self.update_npc_animations(&active_npcs);
+
+        // TODO: Clear temporary states (ATTACKING, DAMAGED) back to IDLE after animation duration
+        // This will be implemented once we have animation duration tracking
+    }
+
+    /// Legacy tick_combat_internal - now calls three phases sequentially
+    /// This maintains backward compatibility while using the new three-phase system
+    pub fn tick_combat_internal(&self, delta: f32) -> Vec<CombatEvent> {
+        let mut all_events = Vec::new();
+
+        // Reduced logging
+        static mut TICK_LOG_COUNT: u32 = 0;
+        unsafe {
+            TICK_LOG_COUNT += 1;
+            if TICK_LOG_COUNT % 60 == 1 { // Log once per second
+                godot_print!("[TICK] === Starting three-phase tick ===");
+            }
+        }
+
+        // Phase 1: Combat (damage calculations and state changes)
+        let combat_events = self.tick_combat_phase();
+        all_events.extend(combat_events);
+
+        // Phase 2: Movement (position updates and spawning)
+        let movement_events = self.tick_movement_phase(delta);
+        all_events.extend(movement_events);
+
+        // Phase 3: Animation (visual updates)
+        self.tick_animation_phase();
+
+        // Reduced logging
+        static mut TICK_END_LOG: u32 = 0;
+        unsafe {
+            TICK_END_LOG += 1;
+            if TICK_END_LOG % 60 == 1 { // Log once per second
+                godot_print!("[TICK] === Completed three-phase tick with {} total events ===", all_events.len());
+            }
+        }
+
+        all_events
+    }
+
+    /// Handle idle wandering for NPCs that are IDLE and not in COMBAT
+    /// Sets random waypoints within world bounds for NPCs to wander around
+    fn handle_idle_wandering(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) {
+        use rand::Rng;
+        let mut rng = rand::rng();
+        let now_ms = Self::get_current_time_ms();
+
+        // Load world bounds
+        let min_x = f32::from_bits(self.world_min_x.load(Ordering::Relaxed));
+        let max_x = f32::from_bits(self.world_max_x.load(Ordering::Relaxed));
+        let min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
+        let max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
+
+        for (ulid_bytes, x, y, static_state, _behavioral_state, _, _, _) in npcs {
+            // Get current behavioral state from ByteMap
+            let behavioral_state = if let Some(state_str) = self.npc_behavioral_state.get_ulid(ulid_bytes) {
+                state_str.parse::<i32>().unwrap_or(NPCState::IDLE.bits() as i32)
+            } else {
+                NPCState::IDLE.bits() as i32
+            };
+
+            // Only wander if IDLE and NOT in COMBAT
+            let is_idle = (behavioral_state & NPCState::IDLE.bits() as i32) != 0;
+            let in_combat = (behavioral_state & NPCState::COMBAT.bits() as i32) != 0;
+            let is_passive = (*static_state & NPCStaticState::PASSIVE.bits() as i32) != 0;
+
+            if is_idle && !in_combat && !is_passive {
+                // Convert ULID to hex for storage key
+                let ulid_hex = bytes_to_hex(ulid_bytes);
+
+                // Check if NPC already has a waypoint
+                let waypoint_key = SafeString(format!("waypoint:{}", ulid_hex));
+                let has_waypoint = self.storage.contains_key(&waypoint_key);
+
+                // Check wander cooldown (don't wander too frequently)
+                let cooldown_key = SafeString(format!("wander_cooldown:{}", ulid_hex));
+                let can_wander = if let Some(cooldown_str) = self.storage.get(&cooldown_key) {
+                    if let Ok(cooldown_until_ms) = cooldown_str.0.parse::<u64>() {
+                        now_ms >= cooldown_until_ms // Can wander if current time is past the cooldown time
+                    } else {
+                        true
+                    }
+                } else {
+                    true
+                };
+
+                if !has_waypoint && can_wander {
+                    // Determine faction-specific bounds (allies on left, monsters on right)
+                    let is_ally = (*static_state & NPCStaticState::ALLY.bits() as i32) != 0;
+                    let is_monster = (*static_state & NPCStaticState::MONSTER.bits() as i32) != 0;
+
+                    let (wander_min_x, wander_max_x) = if is_ally {
+                        // Allies wander on left side (friendly area)
+                        (min_x, min_x + (max_x - min_x) * 0.4)
+                    } else if is_monster {
+                        // Monsters wander on right side
+                        (min_x + (max_x - min_x) * 0.6, max_x)
+                    } else {
+                        // Default to full bounds
+                        (min_x, max_x)
+                    };
+
+                    // Generate random waypoint within faction bounds
+                    let target_x = rng.random_range(wander_min_x..wander_max_x);
+                    let target_y = rng.random_range(min_y..max_y);
+
+                    // Store waypoint in HolyMap storage
+                    self.storage.insert(
+                        waypoint_key,
+                        SafeValue(format!("{},{}", target_x, target_y))
+                    );
+
+                    // Update wander cooldown - set to 3 seconds in the future
+                    self.storage.insert(
+                        cooldown_key,
+                        SafeValue((now_ms + 3000).to_string())
+                    );
+
+                    // Set state to WALKING (remove IDLE, add WALKING, keep other flags like COMBAT if present)
+                    let new_state = (behavioral_state & !(NPCState::IDLE.bits() as i32 | NPCState::ATTACKING.bits() as i32)) | NPCState::WALKING.bits() as i32;
+                    godot_print!("[RUST WANDER] ULID {} - Setting waypoint: old_state={}, new_state={}", &ulid_hex[..8], behavioral_state, new_state);
+                    self.set_behavioral_state(ulid_bytes, new_state, "handle_idle_wandering");
+
+                    // Verify the write worked
+                    if let Some(verify_str) = self.npc_behavioral_state.get_ulid(ulid_bytes) {
+                        let verify_state = verify_str.parse::<i32>().unwrap_or(0);
+                        godot_print!("[RUST WANDER VERIFY] ULID {} - verified state after write: {}", &ulid_hex[..8], verify_state);
+                    }
+                }
+            }
+        }
     }
 
     /// Calculate movement directions for all NPCs (pursue nearest hostile)
@@ -1581,6 +1814,24 @@ impl NPCDataWarehouse {
             // }
 
             if let Some((target_x, target_y, distance)) = nearest_hostile {
+                // COMBAT ENGAGEMENT RANGE: Only enter combat if enemy is within 400px
+                // This prevents NPCs from permanently being in combat state when enemies are far away
+                const COMBAT_DETECTION_RANGE: f32 = 400.0;
+
+                if distance > COMBAT_DETECTION_RANGE {
+                    // Enemy too far - clear combat state and let idle wandering take over
+                    if let Some(state_str) = self.npc_behavioral_state.get_ulid(ulid_bytes_a) {
+                        if let Ok(current_state) = state_str.parse::<i32>() {
+                            if (current_state & NPCState::COMBAT.bits() as i32) != 0 {
+                                // Remove COMBAT flag
+                                let new_state = current_state & !(NPCState::COMBAT.bits() as i32);
+                                self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
+                            }
+                        }
+                    }
+                    continue; // Skip movement calculation for distant enemies
+                }
+
                 // Get attack range for this NPC
                 let attack_range = Self::get_attack_range(*static_state_a);
 
@@ -1695,23 +1946,18 @@ impl NPCDataWarehouse {
                     }
                 }
             } else {
-                // No enemies - clear waypoint and return to IDLE
-                self.storage.remove(&SafeString(format!("waypoint:{}", ulid_hex_a)));
-
-                // Update behavioral state to IDLE (remove WALKING, remove COMBAT)
+                // No enemies - only clear COMBAT state, don't touch idle wandering waypoints!
+                // Idle wandering waypoints are managed by handle_idle_wandering()
+                // We should only clear combat-related state here
                 let current_state = *behavioral_state_a;
-                let new_state = (current_state & !(NPCState::WALKING.bits() as i32) & !(NPCState::COMBAT.bits() as i32))
-                    | NPCState::IDLE.bits() as i32;
 
-                // static mut IDLE_LOG_COUNT: u32 = 0;
-                // unsafe {
-                //     IDLE_LOG_COUNT += 1;
-                //     if IDLE_LOG_COUNT < 5 { // Log first few times
-                //         godot_print!("[RUST MOVEMENT] No enemies found, setting NPC to IDLE (was: {}, now: {})", current_state, new_state);
-                //     }
-                // }
-
-                self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
+                // Only modify state if NPC was in COMBAT
+                if (current_state & NPCState::COMBAT.bits() as i32) != 0 {
+                    // Remove COMBAT flag, but keep WALKING/IDLE as-is (for idle wandering)
+                    let new_state = current_state & !(NPCState::COMBAT.bits() as i32);
+                    self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
+                }
+                // If not in combat, leave state alone (might be idle wandering with WALKING state)
             }
         }
     }
@@ -1722,13 +1968,13 @@ impl NPCDataWarehouse {
     fn apply_waypoint_movement(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)], delta_time: f32) {
         const MOVEMENT_SPEED: f32 = 30.0; // pixels per second
 
-        // static mut MOVEMENT_LOG_COUNT: u32 = 0;
-        // unsafe {
-        //     MOVEMENT_LOG_COUNT += 1;
-        //     if MOVEMENT_LOG_COUNT == 1 {
-        //         godot_print!("[RUST MOVEMENT] apply_waypoint_movement called with {} NPCs", npcs.len());
-        //     }
-        // }
+        static mut MOVEMENT_LOG_COUNT: u32 = 0;
+        unsafe {
+            MOVEMENT_LOG_COUNT += 1;
+            if MOVEMENT_LOG_COUNT <= 5 {
+                godot_print!("[RUST MOVEMENT] apply_waypoint_movement called with {} NPCs", npcs.len());
+            }
+        }
 
         for (ulid_bytes, _x, _y, _static_state, _behavioral_state, _, _, _) in npcs {
             // Convert bytes to hex for storage key lookup
@@ -1753,13 +1999,14 @@ impl NPCDataWarehouse {
             // Get waypoint from storage (stored as "waypoint:{ulid_hex}" -> "x,y")
             let waypoint_key = SafeString(format!("waypoint:{}", ulid_hex));
             if let Some(waypoint_value) = self.storage.get(&waypoint_key) {
-                // static mut WAYPOINT_FOUND_COUNT: u32 = 0;
-                // unsafe {
-                //     WAYPOINT_FOUND_COUNT += 1;
-                //     if WAYPOINT_FOUND_COUNT < 3 {
-                //         godot_print!("[RUST MOVEMENT] Found waypoint: {}", waypoint_value.0);
-                //     }
-                // }
+                static mut WAYPOINT_FOUND_COUNT: u32 = 0;
+                unsafe {
+                    WAYPOINT_FOUND_COUNT += 1;
+                    if WAYPOINT_FOUND_COUNT <= 10 {
+                        godot_print!("[RUST MOVEMENT] Found waypoint for {}: current=({:.1},{:.1}), target={}",
+                            &ulid_hex[24..], current_x, current_y, waypoint_value.0);
+                    }
+                }
                 let waypoint_coords: Vec<&str> = waypoint_value.0.split(',').collect();
                 if waypoint_coords.len() != 2 {
                     continue;
@@ -1795,12 +2042,48 @@ impl NPCDataWarehouse {
                     }
 
                     // Update Node2D visual position directly from Rust (use local position)
+                    static mut NPC_SEARCH_COUNT: u32 = 0;
+                    let mut found = false;
                     for pool_entry in self.active_npc_pool.iter() {
                         let npc = pool_entry.value();
                         if &npc.ulid == ulid_bytes {
-                            let mut node_mut = npc.node.clone();
-                            node_mut.set_position(Vector2::new(new_x, new_y));
+                            // Clone the Gd handle (creates new reference to same node)
+                            let mut node = npc.node.clone();
+                            node.set_position(Vector2::new(new_x, new_y));
+                            found = true;
+
+                            static mut NODE_UPDATE_COUNT: u32 = 0;
+                            unsafe {
+                                NODE_UPDATE_COUNT += 1;
+                                if NODE_UPDATE_COUNT <= 5 {
+                                    let actual_pos = node.get_position();
+                                    godot_print!("[RUST MOVEMENT] Set position to ({:.1}, {:.1}), actual: ({:.1}, {:.1})",
+                                        new_x, new_y, actual_pos.x, actual_pos.y);
+                                }
+                            }
                             break;
+                        }
+                    }
+
+                    unsafe {
+                        NPC_SEARCH_COUNT += 1;
+                        if !found && NPC_SEARCH_COUNT <= 3 {
+                            godot_print!("[RUST MOVEMENT] Could not find NPC {} in active pool (pool size: {})",
+                                &ulid_hex[24..], self.active_npc_pool.len());
+                        }
+                    }
+                } else {
+                    // Reached waypoint! Clear it and return to IDLE
+                    self.storage.remove(&waypoint_key);
+
+                    // Set state to IDLE (remove WALKING and ATTACKING flags, add IDLE, keep other flags like COMBAT)
+                    if let Some(state_str) = self.npc_behavioral_state.get_ulid(&ulid_bytes) {
+                        if let Ok(current_state) = state_str.parse::<i32>() {
+                            // Remove WALKING and ATTACKING, add IDLE (keep COMBAT flag if present)
+                            let new_state = (current_state & !(NPCState::WALKING.bits() as i32 | NPCState::ATTACKING.bits() as i32)) | NPCState::IDLE.bits() as i32;
+                            let ulid_hex = bytes_to_hex(&ulid_bytes);
+                            godot_print!("[RUST WAYPOINT] ULID {} - Reached waypoint: old_state={}, new_state={}", &ulid_hex[..8], current_state, new_state);
+                            self.npc_behavioral_state.insert_ulid(&ulid_bytes, new_state.to_string());
                         }
                     }
                 }
@@ -1812,15 +2095,26 @@ impl NPCDataWarehouse {
     /// Called every frame during combat tick
     /// Animation names match SpriteFrames: "idle", "walking", "attacking", "hurt", "dead"
     fn update_npc_animations(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) {
-        // TEMPORARY: Disable animation updates - animations are set during activate()
-        return;
-
-        #[allow(unreachable_code)]
         for (ulid_bytes, _, _, _static_state, _old_behavioral_state, _, _, _) in npcs {
             // Fetch the CURRENT behavioral state (not the stale one from npcs array)
             // This is important because apply_waypoint_movement() may have updated it
             let behavioral_state = if let Some(state_str) = self.npc_behavioral_state.get_ulid(ulid_bytes) {
-                state_str.parse::<i32>().unwrap_or(NPCState::IDLE.bits() as i32)
+                let state = state_str.parse::<i32>().unwrap_or(NPCState::IDLE.bits() as i32);
+
+                // Debug: Log state reads for first few times
+                static mut STATE_READ_COUNT: u32 = 0;
+                unsafe {
+                    STATE_READ_COUNT += 1;
+                    if STATE_READ_COUNT <= 20 {
+                        let ulid_hex = bytes_to_hex(ulid_bytes);
+                        godot_print!("[RUST STATE READ] ULID {} - read state: {}, IDLE: {}, WALKING: {}",
+                            &ulid_hex[..8], state,
+                            (state & NPCState::IDLE.bits() as i32) != 0,
+                            (state & NPCState::WALKING.bits() as i32) != 0
+                        );
+                    }
+                }
+                state
             } else {
                 NPCState::IDLE.bits() as i32
             };
@@ -1838,24 +2132,25 @@ impl NPCDataWarehouse {
                 "idle"
             };
 
-            // Debug: Log animation updates (disabled)
-            // static mut ANIM_UPDATE_COUNT: u32 = 0;
-            // unsafe {
-            //     ANIM_UPDATE_COUNT += 1;
-            //     if ANIM_UPDATE_COUNT <= 50 {
-            //         let ulid_hex = bytes_to_hex(ulid_bytes);
-            //         godot_print!("[RUST ANIM] ULID {} - animation: '{}', behavioral_state: {}, IDLE: {}, WALKING: {}",
-            //             &ulid_hex[24..], animation_name, behavioral_state,
-            //             (behavioral_state & NPCState::IDLE.bits() as i32) != 0,
-            //             (behavioral_state & NPCState::WALKING.bits() as i32) != 0
-            //         );
-            //     }
-            // }
+            // Debug: Log animation updates
+            static mut ANIM_UPDATE_COUNT: u32 = 0;
+            unsafe {
+                ANIM_UPDATE_COUNT += 1;
+                if ANIM_UPDATE_COUNT <= 50 {
+                    let ulid_hex = bytes_to_hex(ulid_bytes);
+                    godot_print!("[RUST ANIM] ULID {} - animation: '{}', behavioral_state: {}, IDLE: {}, WALKING: {}",
+                        &ulid_hex[..8], animation_name, behavioral_state,
+                        (behavioral_state & NPCState::IDLE.bits() as i32) != 0,
+                        (behavioral_state & NPCState::WALKING.bits() as i32) != 0
+                    );
+                }
+            }
 
             // Find the NPC in the active pool and update its animation
             for pool_entry in self.active_npc_pool.iter() {
                 let npc = pool_entry.value();
                 if &npc.ulid == ulid_bytes {
+                    // Update animation
                     if let Some(ref sprite) = npc.animated_sprite {
                         let mut sprite_mut = sprite.clone();
                         let new_anim = StringName::from(animation_name);
@@ -1865,6 +2160,12 @@ impl NPCDataWarehouse {
                             sprite_mut.play();
                         }
                     }
+
+                    // Sync behavioral state to GDScript property (for chat UI and other systems)
+                    let mut node = npc.node.clone();
+                    let state_variant = Variant::from(behavioral_state);
+                    let _ = node.set("current_state", &state_variant);
+
                     break;
                 }
             }
@@ -2159,20 +2460,22 @@ impl NPCDataWarehouse {
             return Vec::new(); // Already spawned
         }
 
+        godot_print!("[RUST SPAWN] check_initial_spawn called - checking prerequisites...");
+
         // Check if scene container is set (required for spawning)
         {
-            if let Ok(container_guard) = self.scene_container.lock() {
-                if container_guard.is_none() {
-                    // Container not set yet - likely still in title/intro scene
-                    // Don't mark as done, just skip this tick
-                    return Vec::new();
-                }
-            } else {
+            let container_guard = self.scene_container.read();
+            if container_guard.is_none() {
+                godot_print!("[RUST SPAWN] Scene container not set yet - skipping spawn");
+                // Container not set yet - likely still in title/intro scene
+                // Don't mark as done, just skip this tick
                 return Vec::new();
             }
         }
 
-        // Mark initial spawn as done
+        godot_print!("[RUST SPAWN] Prerequisites met - starting initial spawn!");
+
+        // Mark initial spawn as done FIRST to prevent race conditions
         self.initial_spawn_done.store(true, Ordering::Relaxed);
 
         // Set the timers so regular spawning doesn't trigger immediately
@@ -2190,31 +2493,13 @@ impl NPCDataWarehouse {
         // Spawn 1 warrior on left side (use visible screen area, not world bounds)
         // Allies spawn around x=150 (left side of visible screen)
         let warrior_pos = Vector2::new(150.0, (world_min_y + world_max_y) / 2.0);
-        if let Some(ulid) = self.rust_spawn_npc("warrior", warrior_pos) {
-            // Register warrior for combat
-            self.register_npc_for_combat_internal(
-                &ulid,
-                (NPCStaticState::MELEE | NPCStaticState::ALLY).bits() as i32,
-                NPCState::IDLE.bits() as i32,
-                100.0, // max_hp
-                15.0,  // attack
-                10.0,  // defense
-            );
-        }
+        self.rust_spawn_npc("warrior", warrior_pos);
+        // Note: rust_spawn_npc already registers for combat via register_npc_with_stats
 
         // Spawn 1 archer on left side (slightly behind warrior)
         let archer_pos = Vector2::new(200.0, (world_min_y + world_max_y) / 2.0 + 20.0);
-        if let Some(ulid) = self.rust_spawn_npc("archer", archer_pos) {
-            // Register archer for combat
-            self.register_npc_for_combat_internal(
-                &ulid,
-                (NPCStaticState::RANGED | NPCStaticState::ALLY).bits() as i32,
-                NPCState::IDLE.bits() as i32,
-                80.0,  // max_hp
-                20.0,  // attack
-                5.0,   // defense
-            );
-        }
+        self.rust_spawn_npc("archer", archer_pos);
+        // Note: rust_spawn_npc already registers for combat via register_npc_with_stats
 
         // Spawn 2 random monsters on right side
         use rand::Rng;
@@ -2229,17 +2514,8 @@ impl NPCDataWarehouse {
                 world_min_y + ((i as f32 + 1.0) * (world_max_y - world_min_y) / 3.0)
             );
 
-            if let Some(ulid) = self.rust_spawn_npc(monster_type, monster_pos) {
-                // Register monster for combat
-                self.register_npc_for_combat_internal(
-                    &ulid,
-                    (NPCStaticState::MELEE | NPCStaticState::MONSTER).bits() as i32,
-                    NPCState::IDLE.bits() as i32,
-                    60.0,  // max_hp
-                    12.0,  // attack
-                    8.0,   // defense
-                );
-            }
+            self.rust_spawn_npc(monster_type, monster_pos);
+            // Note: rust_spawn_npc already registers for combat via register_npc_with_stats
         }
 
         godot_print!("[RUST SPAWN] Initial spawn complete: 1 warrior, 1 archer, 2 random monsters");
@@ -2255,12 +2531,9 @@ impl NPCDataWarehouse {
 
         // Check if scene container is set (required for spawning)
         {
-            if let Ok(container_guard) = self.scene_container.lock() {
-                if container_guard.is_none() {
-                    return events; // Container not set yet
-                }
-            } else {
-                return events;
+            let container_guard = self.scene_container.read();
+            if container_guard.is_none() {
+                return events; // Container not set yet
             }
         }
 
@@ -2311,16 +2584,8 @@ impl NPCDataWarehouse {
                     rng.random_range(world_min_y..world_max_y)
                 );
 
-                if let Some(ulid) = self.rust_spawn_npc(monster_type, spawn_pos) {
-                    // Register for combat
-                    self.register_npc_for_combat_internal(
-                        &ulid,
-                        (NPCStaticState::MELEE | NPCStaticState::MONSTER).bits() as i32,
-                        NPCState::IDLE.bits() as i32,
-                        60.0, // max_hp
-                        12.0, // attack
-                        8.0,  // defense
-                    );
+                if let Some(_ulid) = self.rust_spawn_npc(monster_type, spawn_pos) {
+                    // Note: rust_spawn_npc already registers for combat via register_npc_with_stats
                 }
             }
         }
@@ -2337,12 +2602,9 @@ impl NPCDataWarehouse {
 
         // Check if scene container is set (required for spawning)
         {
-            if let Ok(container_guard) = self.scene_container.lock() {
-                if container_guard.is_none() {
-                    return events; // Container not set yet
-                }
-            } else {
-                return events;
+            let container_guard = self.scene_container.read();
+            if container_guard.is_none() {
+                return events; // Container not set yet
             }
         }
 
@@ -2405,34 +2667,8 @@ impl NPCDataWarehouse {
                 rng.random_range(world_min_y..world_max_y)
             );
 
-            if let Some(ulid) = self.rust_spawn_npc(ally_type, spawn_pos) {
-                // Register for combat
-                let (static_state, max_hp, attack, defense) = if ally_type == "warrior" {
-                    (
-                        (NPCStaticState::MELEE | NPCStaticState::ALLY).bits() as i32,
-                        100.0, // max_hp
-                        15.0,  // attack
-                        10.0,  // defense
-                    )
-                } else {
-                    // archer
-                    (
-                        (NPCStaticState::RANGED | NPCStaticState::ALLY).bits() as i32,
-                        80.0,  // max_hp
-                        20.0,  // attack
-                        5.0,   // defense
-                    )
-                };
-
-                self.register_npc_for_combat_internal(
-                    &ulid,
-                    static_state,
-                    NPCState::IDLE.bits() as i32,
-                    max_hp,
-                    attack,
-                    defense,
-                );
-
+            if let Some(_ulid) = self.rust_spawn_npc(ally_type, spawn_pos) {
+                // Note: rust_spawn_npc already registers for combat via register_npc_with_stats
                 godot_print!("[RUST SPAWN] Spawned {} (Warriors: {}/{}, Archers: {}/{})",
                     ally_type, warrior_count, self.max_warriors, archer_count, self.max_archers);
             }

@@ -251,10 +251,14 @@ func set_dialogue_text(text: String) -> void:
 	if not dialogue_text:
 		return
 
-	# Add state-based message if NPC has a current_state
+	# Add state-based message from Rust (single source of truth)
 	var full_text = text
-	if current_npc and "current_state" in current_npc:
-		var state_message = _get_state_message(current_npc.current_state)
+	if current_npc and "ulid" in current_npc and current_npc.ulid.size() > 0:
+		# Query behavioral state from Rust NPCDataWarehouse
+		var rust_state = NPCDataWarehouse.get_npc_behavioral_state(current_npc.ulid)
+		var gdscript_state = current_npc.get("current_state") if current_npc.get("current_state") != null else 0
+
+		var state_message = _get_state_message(rust_state, gdscript_state)
 		if not state_message.is_empty():
 			full_text = text + "\n\n" + state_message
 
@@ -262,24 +266,48 @@ func set_dialogue_text(text: String) -> void:
 	_typewriter_effect(full_text)
 
 
-## Get state-based message from NPCState enum
-func _get_state_message(state: int) -> String:
-	# Map NPCState enum to descriptive messages
-	match state:
-		NPCManager.NPCState.IDLE:
-			return "[i](Currently idle)[/i]"
-		NPCManager.NPCState.WALKING:
-			return "[i](Currently walking around)[/i]"
-		NPCManager.NPCState.ATTACKING:
-			return "[i](Currently attacking!)[/i]"
-		NPCManager.NPCState.COMBAT:
-			return "[i](Currently in combat!)[/i]"
-		NPCManager.NPCState.DAMAGED:
-			return "[i](Just took damage!)[/i]"
-		NPCManager.NPCState.DEAD:
-			return "[i](Deceased)[/i]"
-		_:
-			return "[i](Unknown state: %d)[/i]" % state
+## Get state-based message from NPCState enum (shows both Rust and GDScript states)
+func _get_state_message(rust_state: int, gdscript_state: int) -> String:
+	# Helper to decode state flags into readable string
+	var decode_state = func(state: int) -> String:
+		var flags = []
+		if state & NPCManager.NPCState.IDLE:
+			flags.append("IDLE")
+		if state & NPCManager.NPCState.WALKING:
+			flags.append("WALKING")
+		if state & NPCManager.NPCState.ATTACKING:
+			flags.append("ATTACKING")
+		if state & NPCManager.NPCState.COMBAT:
+			flags.append("COMBAT")
+		if state & NPCManager.NPCState.DAMAGED:
+			flags.append("DAMAGED")
+		if state & NPCManager.NPCState.DEAD:
+			flags.append("DEAD")
+		return " | ".join(flags) if flags.size() > 0 else "NONE"
+
+	# Primary state message from Rust (single source of truth)
+	var primary_message = ""
+	if (rust_state & NPCManager.NPCState.DEAD) != 0:
+		primary_message = "[i](Deceased)[/i]"
+	elif (rust_state & NPCManager.NPCState.DAMAGED) != 0:
+		primary_message = "[i](Just took damage!)[/i]"
+	elif (rust_state & NPCManager.NPCState.ATTACKING) != 0:
+		primary_message = "[i](Currently attacking!)[/i]"
+	elif (rust_state & NPCManager.NPCState.COMBAT) != 0:
+		primary_message = "[i](In combat!)[/i]"
+	elif (rust_state & NPCManager.NPCState.WALKING) != 0:
+		primary_message = "[i](Walking around)[/i]"
+	elif (rust_state & NPCManager.NPCState.IDLE) != 0:
+		primary_message = "[i](Idle)[/i]"
+	else:
+		primary_message = "[i](Unknown state)[/i]"
+
+	# Show state comparison for debugging (can be removed later)
+	var rust_decoded = decode_state.call(rust_state)
+	var gd_decoded = decode_state.call(gdscript_state)
+	var debug_info = "\n[color=gray][font_size=10]Rust: %s | GDScript: %s[/font_size][/color]" % [rust_decoded, gd_decoded]
+
+	return primary_message + debug_info
 
 
 ## Typewriter effect for dialogue text
