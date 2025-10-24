@@ -45,9 +45,6 @@ class_name Cat
 
 @export var experience_to_next_level: int = 100
 
-## NPC Stats reference (assigned by NPCManager)
-var stats: NPCStats = null
-
 ## Cat's faction (ALLY - never targeted by allies)
 var faction: int = 0  # NPCManager.Faction.ALLY
 

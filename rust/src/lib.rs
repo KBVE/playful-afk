@@ -2,6 +2,7 @@ use godot::prelude::*;
 
 mod holymap;
 mod bytemap;
+mod name_generator;
 mod npc_data_warehouse;
 
 struct Godo;

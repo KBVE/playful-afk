@@ -37,12 +37,13 @@ var static_state: int = 0
 ## For RANGED: optimal firing distance (default ~150px)
 @export var attack_range: float = 60.0
 
-## NPC Stats reference (assigned by NPCManager)
-var stats: NPCStats = null
+## ULID for this NPC - used to query Rust NPCDataWarehouse
+## This is the primary identifier for all Rust-side NPC data
+var ulid: PackedByteArray = PackedByteArray()
 
-## Deprecated properties - now using NPCState bitwise flags
-## Faction and combat type are now in current_state
-## Example: MELEE | ALLY | IDLE or RANGED | ALLY | WALKING
+## DEPRECATED: Stats are now managed by Rust NPCDataWarehouse
+## Legacy code may still reference stats, but all data comes from Rust via ULID
+## Query stats via: NPCDataWarehouse.get_npc_stats_dict(ulid)
 
 # Node references
 @onready var animated_sprite: AnimatedSprite2D = $AnimatedSprite2D
@@ -106,8 +107,8 @@ func _register_with_input_manager() -> void:
 
 func _process(delta: float) -> void:
 	# RUST COMBAT: Get waypoint from Rust AI and update state
-	if stats and stats.ulid and not (current_state & NPCManager.NPCState.DEAD):
-		var waypoint = NPCDataWarehouse.get_npc_waypoint(stats.ulid)
+	if ulid.size() > 0 and not (current_state & NPCManager.NPCState.DEAD):
+		var waypoint = NPCDataWarehouse.get_npc_waypoint(ulid)
 		if waypoint.size() == 2:  # Has waypoint from Rust
 			# Calculate direction to waypoint
 			var target_pos = Vector2(waypoint[0], waypoint[1])
@@ -133,8 +134,8 @@ func _process(delta: float) -> void:
 
 	# RUST COMBAT: Sync position to combat system
 	# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
-	if stats and stats.ulid:
-		NPCDataWarehouse.update_npc_position(stats.ulid, position.x, position.y)
+	if ulid.size() > 0:
+		NPCDataWarehouse.update_npc_position(ulid, position.x, position.y)
 
 	# PROJECTILE FIRING: Check if we need to fire a projectile during attack animation
 	if has_meta("pending_projectile") and animated_sprite:
@@ -151,8 +152,8 @@ func _process(delta: float) -> void:
 		# Check if animation stopped playing
 		if not animated_sprite.is_playing():
 			var should_loop = (current_state & NPCManager.NPCState.WALKING) or \
-			                  (current_state & NPCManager.NPCState.IDLE) or \
-			                  (current_state & NPCManager.NPCState.ATTACKING)
+							  (current_state & NPCManager.NPCState.IDLE) or \
+							  (current_state & NPCManager.NPCState.ATTACKING)
 			if should_loop:
 				_update_animation()  # Restart the animation
 		else:
@@ -241,18 +242,29 @@ func attack() -> void:
 
 ## Take damage (attacker parameter is optional for backward compatibility)
 func take_damage(amount: float, attacker: Node2D = null) -> void:
-	# Reduce HP through stats system
-	if not stats:
-		push_warning("NPC has no stats assigned - cannot take damage")
+	# RUST COMBAT: Damage is now handled by Rust NPCDataWarehouse
+	if ulid.size() == 0:
+		push_warning("NPC has no ULID assigned - cannot take damage")
 		return
 
-	stats.hp -= amount
+	# Get current stats from Rust to check HP
+	var stats_dict = NPCDataWarehouse.get_npc_stats_dict(ulid)
+	if stats_dict.is_empty():
+		push_warning("NPC ULID not found in Rust warehouse")
+		return
+
+	var current_hp = stats_dict.get("hp", 0.0)
+	var max_hp = stats_dict.get("max_hp", 100.0)
+	var new_hp = max(0.0, current_hp - amount)
+
+	# Update HP in Rust (Rust handles the actual damage)
+	# TODO: Add update_npc_hp method to Rust if not exists
 
 	# Emit damage signal for NPCManager
-	damage_taken.emit(amount, stats.hp, stats.max_hp)
+	damage_taken.emit(amount, new_hp, max_hp)
 
 	# Check if NPC died
-	if stats.hp <= 0:
+	if new_hp <= 0:
 		# Preserve combat type and faction flags when dying
 		current_state = (current_state & ~NPCManager.NPCState.IDLE & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.ATTACKING) | NPCManager.NPCState.DEAD
 		npc_died.emit()
@@ -261,9 +273,7 @@ func take_damage(amount: float, attacker: Node2D = null) -> void:
 	# Notify NPCManager to set combat target (counter-attack)
 	# Skip if NPC is passive
 	if attacker and NPCManager:
-		var passive = false
-		if has_method("is_passive"):
-			passive = call("is_passive")
+		var passive = (static_state & NPCManager.NPCStaticState.PASSIVE) != 0
 		if not passive:
 			NPCManager.on_npc_damaged(self, attacker)
 
@@ -378,23 +388,23 @@ func is_moving() -> bool:
 
 ## Called when an animation finishes
 func _on_animation_finished() -> void:
-	if not animated_sprite or not stats or not stats.ulid:
+	if not animated_sprite or ulid.size() == 0:
 		return
 
 	# Tell Rust to clear DAMAGED state when hurt animation finishes
 	if animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt"):
-		NPCDataWarehouse.clear_damaged_state(stats.ulid)
+		NPCDataWarehouse.clear_damaged_state(ulid)
 		# Sync state from Rust (using PackedByteArray directly)
-		var new_state = NPCDataWarehouse.get_npc_behavioral_state(stats.ulid)
+		var new_state = NPCDataWarehouse.get_npc_behavioral_state(ulid)
 		current_state = new_state
 		# Update animation to reflect new state (e.g., WALKING after hurt)
 		_update_animation()
 
 	# Tell Rust to clear ATTACKING state when attack animation finishes
 	if animated_sprite.animation == state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking"):
-		NPCDataWarehouse.clear_attacking_state(stats.ulid)
+		NPCDataWarehouse.clear_attacking_state(ulid)
 		# Sync state from Rust (using PackedByteArray directly)
-		var new_state = NPCDataWarehouse.get_npc_behavioral_state(stats.ulid)
+		var new_state = NPCDataWarehouse.get_npc_behavioral_state(ulid)
 		current_state = new_state
 		# Update animation to reflect new state (e.g., WALKING after attack)
 		_update_animation()
@@ -429,8 +439,8 @@ func _fire_pending_projectile() -> void:
 		if arrow:
 			# Store attacker reference and target ULID for collision handling
 			arrow.attacker = self
-			if target and "stats" in target and target.stats:
-				arrow.set_meta("target_ulid", target.stats.ulid)
+			if target and "ulid" in target and target.ulid.size() > 0:
+				arrow.set_meta("target_ulid", target.ulid)
 
 
 ## ============================================================================

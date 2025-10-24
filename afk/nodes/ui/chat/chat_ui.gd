@@ -5,6 +5,10 @@ class_name ChatUI
 ## Left side: NPC portrait (20%)
 ## Right side: Dialogue box with text and buttons (80%)
 
+## DEPRECATED: Preload NPCStats for backward compatibility
+## Stats are now managed by Rust NPCDataWarehouse, but legacy code still uses NPCStats
+const NPCStats = preload("res://nodes/npc/npc_stats.gd")
+
 ## Signals
 signal dialogue_option_selected(option_index: int)
 signal dialogue_closed
@@ -32,7 +36,7 @@ signal dialogue_closed
 ## Current NPC data
 var current_npc_name: String = ""
 var current_npc_sprite: AnimatedSprite2D = null
-var current_npc_stats: NPCStats = null
+var current_npc_ulid: PackedByteArray = PackedByteArray()  # ULID for querying Rust
 var current_npc: Node2D = null  # Reference to the NPC for state checking
 
 ## Animation properties
@@ -59,7 +63,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	# Update stats display in realtime while dialogue is visible
-	if visible and current_npc_stats:
+	if visible and current_npc_ulid.size() == 16:
 		_update_stats_display()
 
 
@@ -69,21 +73,21 @@ func show_dialogue(npc_name: String, npc: Node2D = null) -> void:
 	current_npc_name = npc_name
 	current_npc = npc  # Store NPC reference for state checking
 
-	# Extract NPC stats if available
-	current_npc_stats = null
+	# Extract NPC ULID if available
+	current_npc_ulid = PackedByteArray()
 
-	if npc and "stats" in npc and npc.stats:
-		current_npc_stats = npc.stats
-		_update_stats_display()
+	if npc and "ulid" in npc:
+		current_npc_ulid = npc.ulid
+		if current_npc_ulid.size() == 16:
+			_update_stats_display()
+		else:
+			_clear_stats_display()
 	else:
 		_clear_stats_display()
 
-	# Set NPC name (use generated name from stats if available)
+	# Set NPC name
 	if npc_name_label:
-		if current_npc_stats and not current_npc_stats.npc_name.is_empty():
-			npc_name_label.text = current_npc_stats.npc_name
-		else:
-			npc_name_label.text = npc_name
+		npc_name_label.text = npc_name
 	else:
 		push_error("ChatUI: npc_name_label is null!")
 
@@ -148,7 +152,7 @@ func hide_dialogue() -> void:
 	await fade_out()
 
 	current_npc_name = ""
-	current_npc_stats = null
+	current_npc_ulid = PackedByteArray()
 	current_npc = null  # Clear NPC reference
 
 	# Remove cached sprite from UI (but don't free it - it's cached in NPCManager)
@@ -157,40 +161,56 @@ func hide_dialogue() -> void:
 		current_npc_sprite = null
 
 
-## Update stats display labels from current_npc_stats
+## Update stats display labels by querying Rust using ULID
 func _update_stats_display() -> void:
-	if not current_npc_stats:
+	if current_npc_ulid.size() != 16:
+		print("[ChatUI] No valid ULID (size: %d)" % current_npc_ulid.size())
+		_clear_stats_display()
+		return
+
+	# Query Rust for current HP
+	var current_hp = NPCDataWarehouse.get_npc_hp(current_npc_ulid)
+	print("[ChatUI] Current HP from Rust: ", current_hp)
+
+	# Get full stats from Rust (includes max_hp, attack, defense, etc.)
+	var stats_dict = NPCDataWarehouse.get_npc_stats_dict(current_npc_ulid)
+	print("[ChatUI] Stats dict from Rust: ", stats_dict)
+
+	if stats_dict.is_empty():
+		print("[ChatUI] Stats dict is empty!")
 		_clear_stats_display()
 		return
 
 	# Update HP
 	if hp_label:
-		hp_label.text = "HP: %d/%d" % [current_npc_stats.hp, current_npc_stats.max_hp]
+		var max_hp = stats_dict.get("max_hp", 100)
+		hp_label.text = "HP: %.0f/%.0f" % [current_hp, max_hp]
 
-	# Update Mana
+	# Update Mana (placeholder - not yet in Rust)
 	if mana_label:
-		mana_label.text = "Mana: %d/%d" % [current_npc_stats.mana, current_npc_stats.max_mana]
+		mana_label.text = "Mana: --/--"
 
-	# Update Energy
+	# Update Energy (placeholder - not yet in Rust)
 	if energy_label:
-		energy_label.text = "Energy: %d/%d" % [current_npc_stats.energy, current_npc_stats.max_energy]
+		energy_label.text = "Energy: --/--"
 
-	# Update Hunger
+	# Update Hunger (placeholder - not yet in Rust)
 	if hunger_label:
-		hunger_label.text = "Hunger: %d/100" % current_npc_stats.hunger
+		hunger_label.text = "Hunger: --/100"
 
-	# Update Emotion
+	# Update Emotion (placeholder - not yet in Rust)
 	if emotion_label:
-		var emotion_str = current_npc_stats.get_emotion_string()
-		emotion_label.text = "Emotion: %s" % emotion_str
+		emotion_label.text = "Emotion: --"
 
 	# Update Attack
 	if attack_label:
-		attack_label.text = "Attack: %d" % current_npc_stats.attack
+		var attack = stats_dict.get("attack", 0)
+		attack_label.text = "Attack: %.0f" % attack
 
 	# Update Defense
 	if defense_label:
-		defense_label.text = "Defense: %d" % current_npc_stats.defense
+		var defense = stats_dict.get("defense", 0)
+		defense_label.text = "Defense: %.0f" % defense
 
 
 ## Clear stats display (show default values)

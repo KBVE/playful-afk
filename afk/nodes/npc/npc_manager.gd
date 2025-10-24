@@ -4,6 +4,10 @@ extends Node
 ## Provides centralized access to all NPCs in the game, especially the virtual pet
 ## Access via: NPCManager.cat anywhere in your code
 
+## DEPRECATED: Preload NPCStats for backward compatibility
+## Stats are now managed by Rust NPCDataWarehouse, but legacy code still uses NPCStats
+const NPCStats = preload("res://nodes/npc/npc_stats.gd")
+
 ## ===== NPC STATE SYSTEM =====
 ## Unified bitwise flag system for ALL NPC states, types, and behaviors
 ## Consolidates behavioral states, combat types, and factions into one performant system
@@ -553,47 +557,16 @@ func _calculate_ally_spawn_position() -> Vector2:
 	return Vector2(spawn_x, spawn_y)
 
 
-## Spawn a monster from the pool (called by Rust spawn events)
+## Spawn a monster from the Rust pool (called by Rust spawn events)
 func _spawn_monster(monster_type: String, spawn_pos: Vector2, initial_target: Vector2) -> void:
-	# Find available slot in generic pool
-	for slot in generic_pool:
-		if not slot.get("is_active", false) and slot.get("npc_type") == monster_type:
-			var npc = slot.get("character")
-			if npc and is_instance_valid(npc):
-				# Activate the monster
-				slot["is_active"] = true
-				npc.visible = true
-				npc.process_mode = Node.PROCESS_MODE_INHERIT
-				npc.global_position = spawn_pos
+	# Use Rust pool system to spawn the NPC
+	var ulid_bytes = NPCDataWarehouse.rust_spawn_npc(monster_type, spawn_pos)
 
-				# Initialize stats if needed
-				if "stats" in npc and npc.stats:
-					npc.stats.reset_to_full()
+	if ulid_bytes.size() == 0:
+		push_warning("NPCManager: Failed to spawn %s from Rust pool (pool might be full or not initialized)" % monster_type)
+		return
 
-					# Register with Rust combat system
-					var static_state = npc.get("static_state", NPCStaticState.MELEE | NPCStaticState.MONSTER)
-					var behavioral_state = NPCState.WALKING
-					NPCDataWarehouse.register_npc_for_combat(
-						npc.stats.ulid,
-						static_state,
-						behavioral_state,
-						npc.stats.max_hp,
-						npc.stats.attack,
-						npc.stats.defense
-					)
-
-					# Set initial state
-					if "current_state" in npc:
-						npc.current_state = behavioral_state
-
-					# DEFENSIVE: Confirm spawn to Rust (verifies state is correct)
-					NPCDataWarehouse.confirm_spawn(npc.stats.ulid, monster_type, static_state, behavioral_state)
-
-				return  # Successfully spawned
-
-	# If we get here, no available slot was found (pool is full or type doesn't exist)
-	# Note: Rust will detect missing monsters and try again next tick
-	push_warning("[RUST SPAWN] No available slot for monster type: %s (pool full or no %s slots)" % [monster_type, monster_type])
+	print("[SPAWN] Successfully spawned %s from Rust pool, ULID size: %d" % [monster_type, ulid_bytes.size()])
 
 
 ## ===== STATE HISTORY SYSTEM FUNCTIONS =====
@@ -2000,6 +1973,9 @@ func _initialize_persistent_pool() -> void:
 func _initialize_generic_pool() -> void:
 	generic_pool.clear()
 
+	# DEPRECATED: Monsters are now managed by Rust pools
+	# Only warriors/archers use GDScript pool during migration
+
 	# Pre-allocate warriors (reduced to 1 for debugging)
 	var num_warriors = 1
 	for i in range(num_warriors):
@@ -2010,33 +1986,11 @@ func _initialize_generic_pool() -> void:
 	for i in range(num_archers):
 		_preallocate_generic_npc("archer", num_warriors + i)
 
-	# Pre-allocate chickens (monsters)
-	var num_chickens = 8
-	for i in range(num_chickens):
-		_preallocate_generic_npc("chicken", num_warriors + num_archers + i)
-
-	# Pre-allocate mushrooms (aggressive monsters)
-	var num_mushrooms = 6
-	for i in range(num_mushrooms):
-		_preallocate_generic_npc("mushroom", num_warriors + num_archers + num_chickens + i)
-
-	# Pre-allocate goblins (aggressive monsters - fast glass cannons)
-	var num_goblins = 6
-	for i in range(num_goblins):
-		_preallocate_generic_npc("goblin", num_warriors + num_archers + num_chickens + num_mushrooms + i)
-
-	# Pre-allocate eyebeasts (aggressive flying monsters - ranged glass cannons)
-	var num_eyebeasts = 6
-	for i in range(num_eyebeasts):
-		_preallocate_generic_npc("eyebeast", num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + i)
-
-	# Pre-allocate skeletons (aggressive undead monsters - balanced melee)
-	var num_skeletons = 6
-	for i in range(num_skeletons):
-		_preallocate_generic_npc("skeleton", num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + num_eyebeasts + i)
+	# NOTE: Monsters (chickens, mushrooms, goblins, eyebeasts, skeletons)
+	# are now managed by Rust pools - DO NOT preallocate them here!
 
 	# Fill remaining slots with empty entries
-	var total_preallocated = num_warriors + num_archers + num_chickens + num_mushrooms + num_goblins + num_eyebeasts + num_skeletons
+	var total_preallocated = num_warriors + num_archers
 	for i in range(total_preallocated, MAX_GENERIC_POOL_SIZE):
 		generic_pool.append({
 			"character": null,
@@ -2045,7 +1999,7 @@ func _initialize_generic_pool() -> void:
 			"npc_type": ""
 		})
 
-	# Generic pool initialized silently
+	print("[NPCManager] Generic pool initialized with %d warriors, %d archers (monsters use Rust pools)" % [num_warriors, num_archers])
 
 	# NOTE: Healthbar pool will be initialized when set_layer4_container is called
 
@@ -2121,6 +2075,11 @@ func return_healthbar(npc: Node2D) -> void:
 
 ## Pre-allocate a generic NPC instance (but don't activate it yet)
 func _preallocate_generic_npc(npc_type: String, slot_index: int) -> void:
+	# NOTE: This function is DEPRECATED
+	# Monsters now use the Rust-managed pool system (NPCDataWarehouse)
+	# This function is only kept for warriors/archers during migration
+	# DO NOT use this for monsters - they should come from Rust pools
+
 	if not NPC_REGISTRY.has(npc_type):
 		push_error("NPCManager: Cannot preallocate unknown NPC type: %s" % npc_type)
 		return
@@ -2196,7 +2155,11 @@ func add_persistent_npc(
 		npc.position = position
 		npc.visible = activate
 
-		# Assign stats to NPC (NPC stores reference)
+		# Assign ULID to NPC (primary identifier for Rust data)
+		if "ulid" in npc:
+			npc.ulid = npc_stats.ulid
+
+		# DEPRECATED: Assign stats for backward compatibility
 		if "stats" in npc:
 			npc.stats = npc_stats
 
@@ -2281,7 +2244,11 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	var ulid_key = ULID.to_hex(fresh_stats.ulid)
 	NPCDataWarehouse.store_npc(ulid_key, JSON.stringify(fresh_stats.to_dict()))
 
-	# Assign to NPC
+	# Assign ULID to NPC (primary identifier for Rust data)
+	if "ulid" in npc:
+		npc.ulid = fresh_stats.ulid
+
+	# DEPRECATED: Assign stats for backward compatibility
 	if "stats" in npc:
 		npc.stats = fresh_stats
 

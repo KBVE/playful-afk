@@ -137,8 +137,9 @@ signal modal_opened(modal)
 ## Emitted when a modal is closed. Parameters: (modal: Control)
 signal modal_closed(modal)
 
-## Emitted when NPC dialogue is requested. Parameters: (npc: Node2D, npc_name: String, dialogue_text: String)
-signal npc_dialogue_requested(npc, npc_name, dialogue_text)
+## Emitted when NPC dialogue is requested. Parameters: (npc: Node2D, npc_ulid: PackedByteArray)
+## The npc_ulid can be used to query Rust for NPC data (name, type, stats, etc.)
+signal npc_dialogue_requested(npc, npc_ulid)
 
 ## Emitted when NPC dialogue is closed
 signal npc_dialogue_closed()
@@ -568,8 +569,11 @@ func close_top_ui() -> void:
 # ===== NPC Dialogue Management =====
 
 ## Request NPC dialogue (emits signal that main scene will handle)
-func request_npc_dialogue(npc: Node2D, npc_name: String, dialogue_text: String) -> void:
-	npc_dialogue_requested.emit(npc, npc_name, dialogue_text)
+## Pass the NPC node and its ULID - main scene will query Rust for data
+func request_npc_dialogue(npc: Node2D, npc_ulid: PackedByteArray) -> void:
+	print("[EventManager] request_npc_dialogue called, emitting signal with npc=", npc, " ulid_size=", npc_ulid.size())
+	npc_dialogue_requested.emit(npc, npc_ulid)
+	print("[EventManager] npc_dialogue_requested signal emitted")
 
 
 ## Close NPC dialogue

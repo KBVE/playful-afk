@@ -471,3 +471,31 @@ func projectile_hit(attacker_ulid_bytes: PackedByteArray, target_ulid_bytes: Pac
 func set_world_bounds(min_x: float, max_x: float, min_y: float, max_y: float) -> void:
 	if _warehouse:
 		_warehouse.set_world_bounds(min_x, max_x, min_y, max_y)
+
+## Get NPC stats as a Dictionary (for UI display)
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes
+## Returns: Dictionary with keys: hp, max_hp, attack, defense, name, type, etc.
+func get_npc_stats_dict(ulid_bytes: PackedByteArray) -> Dictionary:
+	if _warehouse:
+		# Get NPC data from Rust (returns JSON string)
+		var npc_json = _warehouse.get_npc(ULID.to_hex(ulid_bytes))
+		if npc_json and npc_json.length() > 0:
+			var json = JSON.new()
+			var error = json.parse(npc_json)
+			if error == OK and json.data is Dictionary:
+				return json.data
+	return {}
+
+
+## Get NPC name by ULID bytes
+func get_npc_name(ulid_bytes: PackedByteArray) -> String:
+	if _warehouse:
+		return _warehouse.get_npc_name(ulid_bytes)
+	return ""
+
+
+## Get NPC type by ULID bytes
+func get_npc_type(ulid_bytes: PackedByteArray) -> String:
+	if _warehouse:
+		return _warehouse.get_npc_type(ulid_bytes)
+	return ""

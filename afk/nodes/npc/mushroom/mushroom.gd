@@ -1,4 +1,4 @@
-extends Monster
+extends NPC
 class_name Mushroom
 
 ## Mushroom NPC - Aggressive Enemy
@@ -6,9 +6,6 @@ class_name Mushroom
 
 ## Emitted when the mushroom is clicked
 signal mushroom_clicked
-
-## Emitted when the mushroom dies
-signal mushroom_died
 
 ## NPC Registry Data - Decentralized configuration
 const NPC_TYPE_ID: String = "mushroom"
@@ -21,19 +18,8 @@ const AI_PROFILE: Dictionary = {
 	"movement_speed": 0.7   # Medium speed
 }
 
-## Create stats for this NPC type
-static func create_stats() -> NPCStats:
-	return NPCStats.new(
-		120.0,  # HP (high - needs to survive against multiple enemies)
-		0.0,    # Mana (mushrooms don't use mana)
-		75.0,   # Energy
-		100.0,  # Hunger
-		8.0,    # Attack (melee damage)
-		8.0,    # Defense (medium)
-		NPCStats.Emotion.NEUTRAL,
-		NPC_TYPE_ID
-	)
-
+## Stats are now managed by Rust NPCDataWarehouse
+## Query via NPCDataWarehouse.get_npc_stats_dict(ulid)
 
 func _init() -> void:
 	# Set mushroom-specific properties
@@ -54,41 +40,6 @@ func _init() -> void:
 	}
 
 
-func _on_ready_complete() -> void:
-	# Stop the state timer for aggressive monsters - they're controlled by NPCManager AI
-	if state_timer:
-		state_timer.stop()
-
-
-func _register_with_input_manager() -> void:
-	if InputManager:
-		InputManager.register_interactive_object(self, 20.0)  # 20 pixel click radius
-
-
-## Override random state change - disabled for aggressive monsters (controlled by NPCManager)
-func _random_state_change() -> void:
-	# AGGRESSIVE monsters are controlled by NPCManager's roaming AI
-	# This prevents conflicts with bounds-safe movement system
-	pass
-
-
-## Override damage behavior - mushrooms don't flee, they fight back
-func _on_take_damage(amount: float) -> void:
-	# Mushrooms are aggressive - they don't flee when hurt
-	# The hurt animation will play via the base Monster class
-	pass
-
-
 ## Override click handler to emit mushroom-specific signal
 func _on_input_manager_clicked() -> void:
 	mushroom_clicked.emit()
-
-
-## Override take_damage to also emit mushroom_died
-func take_damage(amount: float, attacker: Node2D = null) -> void:
-	# Call parent implementation
-	super.take_damage(amount, attacker)
-
-	# Check if we died and emit mushroom-specific signal
-	if stats and stats.hp <= 0:
-		mushroom_died.emit()

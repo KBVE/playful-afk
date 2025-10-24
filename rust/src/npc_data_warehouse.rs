@@ -59,6 +59,8 @@ struct RustNPC {
     animated_sprite: Option<Gd<AnimatedSprite2D>>,
     /// NPC type (warrior, archer, goblin, etc.)
     npc_type: String,
+    /// Generated name for this NPC
+    name: String,
     /// ULID for combat tracking (128-bit / 16 bytes)
     ulid: [u8; 16],
     /// Is this NPC currently active (spawned) or in pool (inactive)?
@@ -68,6 +70,11 @@ struct RustNPC {
 }
 
 impl RustNPC {
+    /// Generate a fantasy name for an NPC based on their type
+    fn generate_name(npc_type: &str) -> String {
+        crate::name_generator::generate_name(npc_type)
+    }
+
     /// Create a new NPC by instantiating a PackedScene
     fn from_scene(scene_path: &str, npc_type: &str, ulid: [u8; 16]) -> Option<Self> {
         // Load the packed scene
@@ -94,54 +101,98 @@ impl RustNPC {
         // Extract stats from the NPC by calling create_stats() static method
         let stats = Self::extract_stats(&mut node, npc_type);
 
+        // Generate a unique name for this NPC
+        let name = Self::generate_name(npc_type);
+
         // Convert first 8 bytes to hex for logging
         let ulid_hex = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
             ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7]);
-        godot_print!("[RUST NPC] Created {} with ULID: {}", npc_type, ulid_hex);
+        godot_print!("[RUST NPC] Created {} '{}' with ULID: {}", npc_type, name, ulid_hex);
 
         Some(Self {
             node,
             animated_sprite,
             npc_type: npc_type.to_string(),
+            name,
             ulid,
             is_active: false,
             stats,
         })
     }
 
-    /// Extract stats from NPC scene by calling create_stats()
+    /// Extract stats from NPC scene - now uses hardcoded stats by type
+    /// GDScript create_stats() has been removed - Rust is the single source of truth
     fn extract_stats(node: &mut Gd<Node2D>, npc_type: &str) -> RustNPCStats {
-        // Default stats (fallback if extraction fails)
-        let mut stats = RustNPCStats {
-            max_hp: 100.0,
-            attack: 10.0,
-            defense: 5.0,
-            static_state: 0,
-        };
-
-        // Get the script attached to this node and call create_stats()
-        let script_var = node.get("script");
-        let stats_obj = script_var.call("create_stats", &[]);
-        // Extract max_hp, attack, defense from stats object
-        let max_hp_var = stats_obj.call("get", &["max_hp".to_variant()]);
-        if let Ok(max_hp) = max_hp_var.try_to::<f32>() {
-            stats.max_hp = max_hp;
-        }
-        let attack_var = stats_obj.call("get", &["attack".to_variant()]);
-        if let Ok(attack) = attack_var.try_to::<f32>() {
-            stats.attack = attack;
-        }
-        let defense_var = stats_obj.call("get", &["defense".to_variant()]);
-        if let Ok(defense) = defense_var.try_to::<f32>() {
-            stats.defense = defense;
-        }
-
-        // Get static_state from the node (set in GDScript _ready())
-        // Note: static_state might not be set until _ready() is called, so we'll set it later
-        // For now, determine it from npc_type
-        stats.static_state = Self::get_static_state_for_type(npc_type);
-
+        // Get stats based on NPC type (hardcoded for now - could be config file later)
+        let stats = Self::get_stats_for_type(npc_type);
         stats
+    }
+
+    /// Get stats based on NPC type (hardcoded for performance)
+    fn get_stats_for_type(npc_type: &str) -> RustNPCStats {
+        match npc_type {
+            // Allies
+            "warrior" => RustNPCStats {
+                max_hp: 200.0,
+                attack: 25.0,
+                defense: 20.0,
+                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::ALLY.bits()) as i32,
+            },
+            "archer" => RustNPCStats {
+                max_hp: 150.0,
+                attack: 12.0,
+                defense: 15.0,
+                static_state: (NPCStaticState::RANGED.bits() | NPCStaticState::ALLY.bits()) as i32,
+            },
+
+            // Monsters
+            "goblin" => RustNPCStats {
+                max_hp: 100.0,
+                attack: 15.0,
+                defense: 8.0,
+                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+            },
+            "skeleton" => RustNPCStats {
+                max_hp: 120.0,
+                attack: 18.0,
+                defense: 10.0,
+                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+            },
+            "mushroom" => RustNPCStats {
+                max_hp: 80.0,
+                attack: 10.0,
+                defense: 5.0,
+                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+            },
+            "eyebeast" => RustNPCStats {
+                max_hp: 150.0,
+                attack: 20.0,
+                defense: 12.0,
+                static_state: (NPCStaticState::RANGED.bits() | NPCStaticState::MONSTER.bits()) as i32,
+            },
+
+            // Passive
+            "chicken" => RustNPCStats {
+                max_hp: 1000.0,
+                attack: 0.0,
+                defense: 2.0,
+                static_state: NPCStaticState::PASSIVE.bits() as i32,
+            },
+            "cat" => RustNPCStats {
+                max_hp: 100.0,
+                attack: 5.0,
+                defense: 5.0,
+                static_state: NPCStaticState::PASSIVE.bits() as i32,
+            },
+
+            // Default to basic stats if unknown type
+            _ => RustNPCStats {
+                max_hp: 100.0,
+                attack: 10.0,
+                defense: 5.0,
+                static_state: NPCStaticState::PASSIVE.bits() as i32,
+            },
+        }
     }
 
     /// Get static state flags based on NPC type
@@ -178,6 +229,18 @@ impl RustNPC {
     fn deactivate(&mut self) {
         self.is_active = false;
         self.node.set_visible(false);
+    }
+
+    /// Reset NPC for reuse (called when returning to pool)
+    /// Resets stats to max but keeps ULID and name
+    fn reset(&mut self) {
+        // Note: ULID and name are preserved for pool reuse
+        // Only reset dynamic state and stats
+        self.is_active = false;
+        self.node.set_visible(false);
+
+        // Stats will be reset in the ByteMaps by the warehouse
+        // The RustNPC just stores the template stats, actual HP is in ByteMaps
     }
 
     /// Play an animation
@@ -638,8 +701,13 @@ pub struct NPCDataWarehouse {
     /// NPC positions (ULID bytes -> "x,y")
     npc_positions: ByteMap,
 
+    /// NPC metadata (ULID bytes -> value string)
+    npc_names: ByteMap,      // ULID -> generated name
+    npc_types: ByteMap,      // ULID -> npc_type (warrior, archer, etc.)
+
     /// NPC combat stats (ULID bytes -> value string)
     npc_hp: ByteMap,
+    npc_max_hp: ByteMap,
     npc_static_state: ByteMap,
     npc_behavioral_state: ByteMap,
     npc_attack: ByteMap,
@@ -683,7 +751,10 @@ impl NPCDataWarehouse {
 
             // Initialize byte-keyed storage
             npc_positions: ByteMap::new(sync_interval_ms),
+            npc_names: ByteMap::new(sync_interval_ms),
+            npc_types: ByteMap::new(sync_interval_ms),
             npc_hp: ByteMap::new(sync_interval_ms),
+            npc_max_hp: ByteMap::new(sync_interval_ms),
             npc_static_state: ByteMap::new(sync_interval_ms),
             npc_behavioral_state: ByteMap::new(sync_interval_ms),
             npc_attack: ByteMap::new(sync_interval_ms),
@@ -842,6 +913,18 @@ impl NPCDataWarehouse {
         // Activate the NPC
         npc.activate(position);
 
+        // Set ULID as a property on the NPC node so GDScript can query Rust for data
+        // Use the existing 'ulid' property defined in npc.gd base class
+        let ulid_bytes = PackedByteArray::from(&ulid[..]);
+        let ulid_variant = ulid_bytes.to_variant();
+        let _ = npc.node.set("ulid", &ulid_variant);
+
+        // Store NPC metadata (name, type) in ByteMaps
+        let npc_name = npc.name.clone();
+        let npc_type_str = npc.npc_type.clone();
+        self.npc_names.insert_ulid(&ulid, npc_name.clone());
+        self.npc_types.insert_ulid(&ulid, npc_type_str.clone());
+
         // Register for combat using the stats extracted during pool initialization
         let npc_stats = npc.stats;
         self.register_npc_with_stats(&ulid, &npc_stats);
@@ -879,15 +962,39 @@ impl NPCDataWarehouse {
             }
         }
 
-        // Deactivate
-        npc.deactivate();
+        // Convert ulid slice to array for ByteMap access
+        let ulid_array: [u8; 16] = if ulid.len() == 16 {
+            ulid.try_into().unwrap_or([0u8; 16])
+        } else {
+            [0u8; 16]
+        };
+
+        // Reset NPC stats in ByteMaps (HP back to max, remove DEAD state)
+        // HP: reset to max_hp
+        let max_hp = npc.stats.max_hp;
+        self.npc_hp.insert_ulid(&ulid_array, max_hp.to_string());
+
+        // Behavioral state: reset to IDLE (0)
+        self.npc_behavioral_state.insert_ulid(&ulid_array, "0".to_string());
+
+        // Cooldown: reset to 0
+        self.npc_cooldown.insert_ulid(&ulid_array, "0".to_string());
+
+        // Note: Keep name and type - they don't change when pooled NPCs respawn
+        // Note: Static state (faction, combat type) never changes
+
+        // Reset the NPC node
+        npc.reset();
 
         // Return to inactive pool
         let npc_type = npc.npc_type.clone();
         if let Some(mut pool_entry) = self.inactive_npc_pool.get_mut(&npc_type) {
             pool_entry.push(npc);
             let ulid_hex = ulid.iter().take(8).map(|b| format!("{:02x}", b)).collect::<String>();
-            godot_print!("[RUST POOL] Despawned {} (ULID: {})", npc_type, ulid_hex);
+            godot_print!("[RUST POOL] Despawned {} '{}' (ULID: {}) - Reset and returned to pool",
+                        npc_type,
+                        self.npc_names.get_ulid(&ulid_array).unwrap_or_else(|| "Unknown".to_string()),
+                        ulid_hex);
             true
         } else {
             godot_error!("[RUST POOL] Cannot return NPC to pool - pool not found for type: {}", npc_type);
@@ -1050,6 +1157,7 @@ impl NPCDataWarehouse {
 
         // All validations passed - register NPC for combat using ByteMap
         self.npc_hp.insert_ulid(ulid, max_hp.to_string());
+        self.npc_max_hp.insert_ulid(ulid, max_hp.to_string());
         self.npc_static_state.insert_ulid(ulid, static_state.to_string());
         self.npc_behavioral_state.insert_ulid(ulid, behavioral_state.to_string());
         self.npc_attack.insert_ulid(ulid, attack.to_string());
@@ -2118,6 +2226,81 @@ impl GodotNPCDataWarehouse {
     pub fn rust_despawn_npc(&self, ulid: PackedByteArray) -> bool {
         let ulid_slice = ulid.as_slice();
         self.warehouse.rust_despawn_npc(ulid_slice)
+    }
+
+    /// Get NPC name by ULID bytes
+    #[func]
+    pub fn get_npc_name(&self, ulid: PackedByteArray) -> GString {
+        if ulid.len() != 16 {
+            return GString::from("");
+        }
+        let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
+        self.warehouse.npc_names.get_ulid(&ulid_bytes)
+            .map(|name| GString::from(name))
+            .unwrap_or_else(|| GString::from(""))
+    }
+
+    /// Get NPC type by ULID bytes
+    #[func]
+    pub fn get_npc_type(&self, ulid: PackedByteArray) -> GString {
+        if ulid.len() != 16 {
+            return GString::from("");
+        }
+        let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
+        self.warehouse.npc_types.get_ulid(&ulid_bytes)
+            .map(|npc_type| GString::from(npc_type))
+            .unwrap_or_else(|| GString::from(""))
+    }
+
+    /// Get NPC stats dictionary by ULID bytes
+    /// Returns a Dictionary with keys: name, type, max_hp, attack, defense
+    #[func]
+    pub fn get_npc_stats_dict(&self, ulid: PackedByteArray) -> Dictionary {
+        let mut dict = Dictionary::new();
+        if ulid.len() != 16 {
+            return dict;
+        }
+        let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
+
+        // Get name
+        if let Some(name) = self.warehouse.npc_names.get_ulid(&ulid_bytes) {
+            dict.set("name", name);
+        }
+
+        // Get type
+        if let Some(npc_type) = self.warehouse.npc_types.get_ulid(&ulid_bytes) {
+            dict.set("type", npc_type);
+        }
+
+        // Get current HP
+        if let Some(hp) = self.warehouse.npc_hp.get_ulid(&ulid_bytes) {
+            if let Ok(hp_val) = hp.parse::<f32>() {
+                dict.set("hp", hp_val);
+            }
+        }
+
+        // Get max HP
+        if let Some(max_hp) = self.warehouse.npc_max_hp.get_ulid(&ulid_bytes) {
+            if let Ok(max_hp_val) = max_hp.parse::<f32>() {
+                dict.set("max_hp", max_hp_val);
+            }
+        }
+
+        // Get attack
+        if let Some(attack) = self.warehouse.npc_attack.get_ulid(&ulid_bytes) {
+            if let Ok(attack_val) = attack.parse::<f32>() {
+                dict.set("attack", attack_val);
+            }
+        }
+
+        // Get defense
+        if let Some(defense) = self.warehouse.npc_defense.get_ulid(&ulid_bytes) {
+            if let Ok(defense_val) = defense.parse::<f32>() {
+                dict.set("defense", defense_val);
+            }
+        }
+
+        dict
     }
 
     /// Store active NPC data

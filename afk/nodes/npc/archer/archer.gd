@@ -21,18 +21,8 @@ const AI_PROFILE: Dictionary = {
 ## Emoji set for archers
 const EMOJIS: Array[String] = ["🏹", "🎯", "👁️", "🌟", "🦅", "🍃", "💨", "🔭"]
 
-## Create stats for this NPC type
-static func create_stats() -> NPCStats:
-	return NPCStats.new(
-		150.0,  # HP - BUFFED (was 80.0)
-		75.0,   # Mana (more than warrior)
-		100.0,  # Energy
-		100.0,  # Hunger
-		12.0,   # Attack (ranged)
-		15.0,   # Defense - BUFFED (was 5.0)
-		NPCStats.Emotion.NEUTRAL,
-		NPC_TYPE_ID
-	)
+## Stats are now managed by Rust NPCDataWarehouse
+## Query via NPCDataWarehouse.get_npc_stats_dict(ulid)
 
 
 func _ready() -> void:

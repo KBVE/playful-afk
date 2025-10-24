@@ -66,6 +66,10 @@ func _ready() -> void:
 	EventManager.npc_dialogue_closed.connect(_on_npc_dialogue_closed)
 	EventManager.escape_pressed.connect(_on_escape_pressed)
 
+	# Connect to InputManager for NPC clicks (handles both GDScript and Rust NPCs)
+	InputManager.object_clicked.connect(_on_object_clicked)
+	print("[MAIN] Connected to InputManager.object_clicked signal")
+
 	# Register Bartender scene and ChatUI with EventManager for centralized visibility management
 	if bartender:
 		EventManager.register_bartender_scene(bartender)
@@ -482,37 +486,116 @@ func _on_ally_died(ally: Node2D, ally_type: String) -> void:
 		print("Archer died - now have %d/%d archers" % [active_archers.size(), MAX_ARCHERS])
 
 
-## Handle NPC clicked - request dialogue via EventManager
-func _on_npc_clicked(npc: Node2D) -> void:
-	if not npc or not "stats" in npc or not npc.stats:
-		push_warning("Clicked NPC has no stats!")
+## Handle object clicked from InputManager
+## Filters for NPCs and forwards to NPC click handler
+func _on_object_clicked(object: Node2D) -> void:
+	print("[MAIN] _on_object_clicked called with object: ", object.name if object else "null")
+
+	if not object:
 		return
 
-	# Get NPC info from stats
-	var npc_name = npc.stats.npc_name
-	var npc_type = npc.stats.npc_type
+	# Check if clicked object is an NPC (has ulid property)
+	var has_ulid = "ulid" in object
+	var is_npc = has_ulid
 
-	# Generate appropriate dialogue based on type
-	var dialogue = ""
-	match npc_type:
-		"warrior":
-			dialogue = "Hello traveler! I am %s, ready to serve!" % npc_name
-		"archer":
-			dialogue = "Greetings! I'm %s, my arrows never miss!" % npc_name
-		_:
-			dialogue = "Hello there!"
+	print("[MAIN] Object is NPC: ", is_npc, " | has ulid: ", has_ulid)
 
-	# Request NPC dialogue via EventManager (pass NPC with stats)
-	EventManager.request_npc_dialogue(npc, npc_name, dialogue)
+	if is_npc:
+		_on_npc_clicked(object)
+
+
+## Handle NPC clicked - request dialogue via EventManager
+func _on_npc_clicked(npc: Node2D) -> void:
+	var npc_script = npc.get_script()
+	var script_path = npc_script.resource_path if npc_script else "no script"
+	print("[MAIN] _on_npc_clicked - npc: ", npc, " script: ", script_path)
+	if not npc:
+		push_warning("Clicked NPC is null!")
+		return
+
+	# Get ULID from NPC
+	if not "ulid" in npc:
+		push_warning("Clicked NPC has no ULID property! Script: %s" % script_path)
+		return
+
+	var ulid_bytes: PackedByteArray = npc.ulid
+	print("[MAIN] NPC ULID size: ", ulid_bytes.size())
+
+	# Validate ULID
+	if ulid_bytes.size() == 0:
+		push_warning("Clicked NPC has empty ULID! Script: %s - This NPC wasn't properly initialized." % script_path)
+		return
+
+	print("[MAIN] NPC clicked, ULID size: ", ulid_bytes.size(), ", passing to EventManager...")
+	EventManager.request_npc_dialogue(npc, ulid_bytes)
+	print("[MAIN] EventManager.request_npc_dialogue called")
 
 
 ## Handle NPC dialogue request from EventManager
-func _on_npc_dialogue_requested(npc: Node2D, npc_name: String, dialogue_text: String) -> void:
-	print("Main: NPC dialogue requested - ", npc_name)
-
+## Query Rust for NPC data using ULID, generate dialogue, and show ChatUI
+func _on_npc_dialogue_requested(npc: Node2D, npc_ulid: PackedByteArray) -> void:
+	print("[MAIN] _on_npc_dialogue_requested called! npc=", npc, " ulid_size=", npc_ulid.size())
 	if not npc or not chat_ui:
 		print("ERROR: npc or chat_ui is null! npc=", npc, " chat_ui=", chat_ui)
 		return
+
+	var npc_name = ""
+	var npc_type = ""
+	var dialogue_text = ""
+
+	# Check if ULID is valid (non-zero)
+	var is_rust_npc = false
+	if npc_ulid.size() == 16:
+		# Check if ULID is non-zero
+		for byte in npc_ulid:
+			if byte != 0:
+				is_rust_npc = true
+				break
+
+	if is_rust_npc:
+		# Query Rust for NPC name and type using ULID
+		print("[MAIN] Querying Rust for NPC data using ULID...")
+		npc_name = NPCDataWarehouse.get_npc_name(npc_ulid)
+		npc_type = NPCDataWarehouse.get_npc_type(npc_ulid)
+		print("[MAIN] Got from Rust - name: '%s', type: '%s'" % [npc_name, npc_type])
+
+		# Fallback: get class name as type
+		if npc_type == "":
+			npc_type = npc.get_class().to_lower()
+
+		# Fallback: generate generic name
+		if npc_name == "":
+			npc_name = npc_type.capitalize() + " NPC"
+
+		print("[MAIN] Resolved NPC: %s (type: %s)" % [npc_name, npc_type])
+	else:
+		# Fallback to old GDScript stats system
+		if "stats" in npc and npc.stats:
+			npc_name = npc.stats.npc_name
+			npc_type = npc.stats.npc_type
+			print("[MAIN] Legacy NPC: %s (type: %s)" % [npc_name, npc_type])
+		else:
+			push_warning("No valid ULID and NPC has no stats!")
+			return
+
+	# Generate appropriate dialogue based on type
+	match npc_type:
+		"warrior":
+			dialogue_text = "Hello traveler! I am %s, ready to serve!" % npc_name
+		"archer":
+			dialogue_text = "Greetings! I'm %s, my arrows never miss!" % npc_name
+		"goblin":
+			dialogue_text = "*Growls* %s hungers for battle!" % npc_name
+		"mushroom":
+			dialogue_text = "*Spore sounds* I am %s..." % npc_name
+		"skeleton":
+			dialogue_text = "*Rattles bones* %s rises again..." % npc_name
+		"eyebeast":
+			dialogue_text = "*Stares intensely* %s sees all..." % npc_name
+		_:
+			dialogue_text = "Hello there! I'm %s." % npc_name
+
+	print("Main: NPC dialogue requested - %s: %s" % [npc_name, dialogue_text])
 
 	# Prepare chat UI with NPC data (ChatUI will use cached sprite from NPCManager)
 	chat_ui.show_dialogue(npc_name, npc)
