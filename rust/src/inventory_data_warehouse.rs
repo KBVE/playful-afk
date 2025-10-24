@@ -178,6 +178,10 @@ pub struct InventoryDataWarehouse {
     item_store: HolyMap<[u8; 16], InventoryItem>,
     /// Byte-based mirror for fast Godot lookups / serialization cache.
     byte_index: ByteMap,
+    /// Fast in-memory cache for direct iteration and modification.
+    inventory_cache: DashMap<[u8; 16], InventoryItem>,
+    /// Reverse lookup from ULID -> slot for quick slot updates.
+    ulid_to_slot: DashMap<[u8; 16], InventorySlotId>,
 }
 
 impl InventoryDataWarehouse {
@@ -187,22 +191,51 @@ impl InventoryDataWarehouse {
             slot_index: HolyMap::new(sync_interval_ms),
             item_store: HolyMap::new(sync_interval_ms),
             byte_index: ByteMap::new(sync_interval_ms),
+            inventory_cache: DashMap::new(),
+            ulid_to_slot: DashMap::new(),
         }
     }
 
     /// Store/update an inventory entry (slot + ULID + payload).
     pub fn store_item(&self, slot: InventorySlotId, ulid: [u8; 16], item: InventoryItem) {
-        self.slot_index.insert(slot, ulid);
-        self.item_store.insert(ulid, item.clone());
+        let mut sanitized_item = item;
 
-        if let Some(serialized) = serialize_inventory_item(&item) {
+        if sanitized_item.amount < 0 {
+            godot_error!(
+                "InventoryDataWarehouse: negative amount ({}) for ULID {:?}; clamping to zero",
+                sanitized_item.amount,
+                ulid
+            );
+            sanitized_item.amount = 0;
+        }
+
+        self.slot_index.insert(slot, ulid);
+        self.item_store.insert(ulid, sanitized_item.clone());
+        self.inventory_cache.insert(ulid, sanitized_item.clone());
+
+        if let Some(previous_slot) = self.ulid_to_slot.insert(ulid, slot) {
+            if previous_slot != slot {
+                self.slot_index.remove(&previous_slot);
+            }
+        }
+
+        if let Some(serialized) = serialize_inventory_item(&sanitized_item) {
             self.byte_index.insert_ulid(&ulid, serialized);
         }
     }
 
     /// Fetch inventory data by ULID (returns current copy).
     pub fn get_item(&self, ulid: &[u8; 16]) -> Option<InventoryItem> {
-        self.item_store.get(ulid)
+        self.inventory_cache
+            .get(ulid)
+            .map(|item| item.clone())
+            .or_else(|| {
+                self.item_store.get(ulid).map(|item| {
+                    // Back-fill cache to keep stores consistent for future reads.
+                    self.inventory_cache.insert(*ulid, item.clone());
+                    item
+                })
+            })
     }
 
     /// Fetch serialized JSON representation by ULID (for direct FFI transfer).
@@ -213,6 +246,80 @@ impl InventoryDataWarehouse {
     /// Resolve the ULID assigned to a particular inventory slot.
     pub fn get_slot_ulid(&self, slot: InventorySlotId) -> Option<[u8; 16]> {
         self.slot_index.get(&slot)
+    }
+
+    /// Reduce quantities for all items flagged with SPOILS.
+    ///
+    /// `amount_or_percent` - interprets as flat amount when `percent == false`.
+    /// When `percent == true`, treated as percentage (e.g. 1 == 1%).
+    /// Returns the number of stacks updated.
+    pub fn process_spoilage(&self, amount_or_percent: i64, percent: bool) -> usize {
+        if amount_or_percent <= 0 {
+            return 0;
+        }
+
+        let effective_value = if percent && amount_or_percent > 100 {
+            godot_warn!(
+                "InventoryDataWarehouse: spoilage percent {} > 100, clamping to 100",
+                amount_or_percent
+            );
+            100
+        } else {
+            amount_or_percent
+        };
+
+        let mut updated = 0usize;
+
+        for entry in self.inventory_cache.iter_mut() {
+            let update = {
+                let mut entry = entry;
+
+                if !entry.value().state.contains(InventoryState::SPOILS) {
+                    None
+                } else {
+                    let current_amount = entry.value().amount.max(0);
+                    if current_amount == 0 {
+                        None
+                    } else {
+                        let reduction = if percent {
+                            let reduction =
+                                ((current_amount as i128 * effective_value as i128) / 100) as i64;
+                            reduction.max(0)
+                        } else {
+                            effective_value
+                        };
+
+                        if reduction <= 0 {
+                            None
+                        } else {
+                            let new_amount = current_amount.saturating_sub(reduction);
+                            if new_amount == current_amount {
+                                None
+                            } else {
+                                entry.value_mut().amount = new_amount;
+                                let ulid = *entry.key();
+                                let updated_item = entry.value().clone();
+                                Some((ulid, updated_item))
+                            }
+                        }
+                    }
+                }
+            };
+
+            if let Some((ulid, updated_item)) = update {
+                let slot = self.ulid_to_slot.get(&ulid).map(|guard| *guard.value());
+                self.item_store.insert(ulid, updated_item.clone());
+                if let Some(serialized) = serialize_inventory_item(&updated_item) {
+                    self.byte_index.insert_ulid(&ulid, serialized);
+                }
+                if let Some(slot) = slot {
+                    self.slot_index.insert(slot, ulid);
+                }
+                updated += 1;
+            }
+        }
+
+        updated
     }
 }
 
@@ -263,7 +370,20 @@ impl GodotInventoryDataWarehouse {
             .unwrap_or_else(|| InventoryItem::new(kind.clone(), 0, InventoryState::NONE));
 
         item.name = kind;
-        let mut desired_state = InventoryState::from_bits_retain(state_bits);
+        let mut desired_state = match InventoryState::from_bits(state_bits) {
+            Some(bits) => bits,
+            None => {
+                if state_bits != 0 {
+                    godot_error!(
+                        "InventoryDataWarehouse: state bits {:#010b} include unknown flags; truncating",
+                        state_bits
+                    );
+                }
+                let masked_bits = state_bits & InventoryState::all().bits();
+                InventoryState::from_bits(masked_bits).unwrap_or(InventoryState::NONE)
+            }
+        };
+
         if desired_state == InventoryState::NONE {
             desired_state = item.state;
         }
@@ -359,5 +479,17 @@ impl GodotInventoryDataWarehouse {
                 );
                 PackedByteArray::new()
             })
+    }
+
+    #[func]
+    fn process_spoilage(&self, amount: i64, percent: bool) -> i64 {
+        if amount <= 0 {
+            godot_error!(
+                "InventoryDataWarehouse: process_spoilage requires positive amount, received {}",
+                amount
+            );
+            return 0;
+        }
+        self.warehouse.process_spoilage(amount, percent) as i64
     }
 }

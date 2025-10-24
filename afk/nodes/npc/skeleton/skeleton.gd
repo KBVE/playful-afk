@@ -34,10 +34,10 @@ func _init() -> void:
 	# State-to-animation mapping (skeleton has all 5 animations)
 	state_to_animation = {
 		NPCManager.NPCState.IDLE: "idle",
-		NPCManager.NPCState.WALKING: "walk",
-		NPCManager.NPCState.ATTACKING: "attack",
+		NPCManager.NPCState.WALKING: "walking",
+		NPCManager.NPCState.ATTACKING: "attacking",
 		NPCManager.NPCState.DAMAGED: "hurt",
-		NPCManager.NPCState.DEAD: "death"
+		NPCManager.NPCState.DEAD: "dead"
 	}
 
 

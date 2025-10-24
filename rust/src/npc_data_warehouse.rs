@@ -103,6 +103,9 @@ impl RustNPC {
             }
         };
 
+        // Make invisible initially (will be made visible on spawn)
+        node.set_visible(false);
+
         // Find the AnimatedSprite2D child node
         let animated_sprite = node.try_get_node_as::<AnimatedSprite2D>("AnimatedSprite2D");
 
@@ -284,7 +287,19 @@ impl RustNPC {
         self.is_active = true;
         self.node.set_visible(true);
         self.node.set_global_position(position);
-        godot_print!("[RUST NPC] Activated {} at {:?}", self.npc_type, position);
+
+        // Start with idle animation when spawning
+        if let Some(ref sprite) = self.animated_sprite {
+            let mut sprite_mut = sprite.clone();
+            sprite_mut.set_animation(&StringName::from("idle"));
+            sprite_mut.play();
+            godot_print!("[RUST NPC] Set animation to 'idle' and playing");
+        } else {
+            godot_warn!("[RUST NPC] No AnimatedSprite2D found for {}!", self.npc_type);
+        }
+
+        godot_print!("[RUST NPC] Activated {} at {:?}, visible={}",
+            self.npc_type, position, self.node.is_visible());
     }
 
     /// Deactivate this NPC (return to pool)
@@ -1319,6 +1334,12 @@ impl NPCDataWarehouse {
         // 2. Calculate movement for all NPCs (pursue nearest hostile)
         self.calculate_movement_directions(&active_npcs);
 
+        // 2.5. Apply waypoint movement (move NPCs towards their waypoints)
+        self.apply_waypoint_movement(_delta);
+
+        // 2.6. Update animations based on behavioral state (Rust controls animations)
+        self.update_npc_animations(&active_npcs);
+
         // 3. Find combat pairs (proximity + hostility checks)
         let combat_pairs = self.find_combat_pairs(&active_npcs);
 
@@ -1492,8 +1513,8 @@ impl NPCDataWarehouse {
 
     /// Calculate movement directions for all NPCs (pursue nearest hostile)
     /// Stores movement direction in HolyMap as "move_dir:ulid" -> "x,y"
-    fn calculate_movement_directions(&self, npcs: &[(String, f32, f32, i32, i32, f32, f32, f32)]) {
-        for (ulid_a, x_a, y_a, static_state_a, behavioral_state_a, _, _, _) in npcs {
+    fn calculate_movement_directions(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) {
+        for (ulid_bytes_a, x_a, y_a, static_state_a, behavioral_state_a, _, _, _) in npcs {
             // Skip if dead
             if (*behavioral_state_a & NPCState::DEAD.bits() as i32) != 0 {
                 continue;
@@ -1504,12 +1525,15 @@ impl NPCDataWarehouse {
                 continue;
             }
 
+            // Convert ULID bytes to hex for storage keys (only once)
+            let ulid_hex_a = bytes_to_hex(ulid_bytes_a);
+
             let mut nearest_hostile: Option<(f32, f32, f32)> = None; // (x, y, distance)
             let mut nearest_distance = f32::MAX;
 
             // Find nearest hostile NPC
-            for (ulid_b, x_b, y_b, static_state_b, behavioral_state_b, _, _, _) in npcs {
-                if ulid_a == ulid_b {
+            for (ulid_bytes_b, x_b, y_b, static_state_b, behavioral_state_b, _, _, _) in npcs {
+                if ulid_bytes_a == ulid_bytes_b {
                     continue; // Skip self
                 }
 
@@ -1567,9 +1591,16 @@ impl NPCDataWarehouse {
 
                             // Store retreat waypoint (clamped)
                             self.storage.insert(
-                                SafeString(format!("waypoint:{}", ulid_a)),
+                                SafeString(format!("waypoint:{}", ulid_hex_a)),
                                 SafeValue(format!("{},{}", clamped_x, clamped_y))
                             );
+
+                            // Update behavioral state to WALKING | COMBAT (remove IDLE)
+                            let current_state = *behavioral_state_a;
+                            let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
+                                | NPCState::WALKING.bits() as i32
+                                | NPCState::COMBAT.bits() as i32;
+                            self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
                         }
                     } else if distance > attack_range {
                         // TOO FAR - Move toward target to get in range
@@ -1583,12 +1614,25 @@ impl NPCDataWarehouse {
                         let clamped_y = target_y.clamp(min_y, max_y);
 
                         self.storage.insert(
-                            SafeString(format!("waypoint:{}", ulid_a)),
+                            SafeString(format!("waypoint:{}", ulid_hex_a)),
                             SafeValue(format!("{},{}", clamped_x, clamped_y))
                         );
+
+                        // Update behavioral state to WALKING | COMBAT (remove IDLE)
+                        let current_state = *behavioral_state_a;
+                        let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
+                            | NPCState::WALKING.bits() as i32
+                            | NPCState::COMBAT.bits() as i32;
+                        self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
                     } else {
                         // OPTIMAL RANGE (100-200px) - Stop and shoot
-                        self.storage.remove(&SafeString(format!("waypoint:{}", ulid_a)));
+                        self.storage.remove(&SafeString(format!("waypoint:{}", ulid_hex_a)));
+
+                        // Update behavioral state to COMBAT only (remove WALKING, remove IDLE)
+                        let current_state = *behavioral_state_a;
+                        let new_state = (current_state & !(NPCState::IDLE.bits() as i32) & !(NPCState::WALKING.bits() as i32))
+                            | NPCState::COMBAT.bits() as i32;
+                        self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
                     }
                 } else {
                     // MELEE/MAGIC units: Simple pursue behavior (original logic)
@@ -1603,68 +1647,211 @@ impl NPCDataWarehouse {
                         let clamped_y = target_y.clamp(min_y, max_y);
 
                         self.storage.insert(
-                            SafeString(format!("waypoint:{}", ulid_a)),
+                            SafeString(format!("waypoint:{}", ulid_hex_a)),
                             SafeValue(format!("{},{}", clamped_x, clamped_y))
                         );
+
+                        // Update behavioral state to WALKING | COMBAT (remove IDLE)
+                        let current_state = *behavioral_state_a;
+                        let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
+                            | NPCState::WALKING.bits() as i32
+                            | NPCState::COMBAT.bits() as i32;
+                        self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
                     } else {
                         // In range - stop moving
-                        self.storage.remove(&SafeString(format!("waypoint:{}", ulid_a)));
+                        self.storage.remove(&SafeString(format!("waypoint:{}", ulid_hex_a)));
+
+                        // Update behavioral state to COMBAT only (remove WALKING, remove IDLE)
+                        let current_state = *behavioral_state_a;
+                        let new_state = (current_state & !(NPCState::IDLE.bits() as i32) & !(NPCState::WALKING.bits() as i32))
+                            | NPCState::COMBAT.bits() as i32;
+                        self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
                     }
                 }
             } else {
-                // No enemies - clear waypoint
-                self.storage.remove(&SafeString(format!("waypoint:{}", ulid_a)));
+                // No enemies - clear waypoint and return to IDLE
+                self.storage.remove(&SafeString(format!("waypoint:{}", ulid_hex_a)));
+
+                // Update behavioral state to IDLE (remove WALKING, remove COMBAT)
+                let current_state = *behavioral_state_a;
+                let new_state = (current_state & !(NPCState::WALKING.bits() as i32) & !(NPCState::COMBAT.bits() as i32))
+                    | NPCState::IDLE.bits() as i32;
+                self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
+            }
+        }
+    }
+
+    /// Apply waypoint movement - move NPCs towards their waypoints
+    /// Called every combat tick with delta time
+    /// Rust directly updates both the position data AND the Node2D visual position
+    fn apply_waypoint_movement(&self, delta_time: f32) {
+        const MOVEMENT_SPEED: f32 = 30.0; // pixels per second
+
+        for entry in self.active_combat_npcs.iter() {
+            let ulid_hex = entry.key();
+
+            // Convert hex to bytes
+            let ulid_bytes = match hex_to_bytes(ulid_hex) {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+
+            // Get current position from npc_positions ByteMap (stored as "x,y")
+            let pos_str = self.npc_positions.get_ulid(&ulid_bytes).unwrap_or_default();
+            let coords: Vec<&str> = pos_str.split(',').collect();
+            if coords.len() != 2 {
+                continue;
+            }
+            let current_x: f32 = coords[0].parse().unwrap_or(0.0);
+            let current_y: f32 = coords[1].parse().unwrap_or(0.0);
+
+            // Get waypoint from storage (stored as "waypoint:{ulid_hex}" -> "x,y")
+            let waypoint_key = SafeString(format!("waypoint:{}", ulid_hex));
+            if let Some(waypoint_value) = self.storage.get(&waypoint_key) {
+                let waypoint_coords: Vec<&str> = waypoint_value.0.split(',').collect();
+                if waypoint_coords.len() != 2 {
+                    continue;
+                }
+                let target_x: f32 = waypoint_coords[0].parse().unwrap_or(0.0);
+                let target_y: f32 = waypoint_coords[1].parse().unwrap_or(0.0);
+
+                // Calculate direction to waypoint
+                let dx = target_x - current_x;
+                let dy = target_y - current_y;
+                let distance = (dx * dx + dy * dy).sqrt();
+
+                if distance > 1.0 {
+                    // Move towards waypoint
+                    let move_distance = MOVEMENT_SPEED * delta_time;
+                    let move_ratio = (move_distance / distance).min(1.0);
+
+                    let new_x = current_x + dx * move_ratio;
+                    let new_y = current_y + dy * move_ratio;
+
+                    // Update position in npc_positions ByteMap
+                    self.npc_positions.insert_ulid(&ulid_bytes, format!("{},{}", new_x, new_y));
+
+                    // Update Node2D visual position directly from Rust
+                    for pool_entry in self.active_npc_pool.iter() {
+                        let npc = pool_entry.value();
+                        if &npc.ulid == &ulid_bytes {
+                            let mut node_mut = npc.node.clone();
+                            node_mut.set_global_position(Vector2::new(new_x, new_y));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Update NPC animations based on behavioral state (Rust controls animations)
+    /// Called every frame during combat tick
+    /// Animation names match SpriteFrames: "idle", "walking", "attacking", "hurt", "dead"
+    fn update_npc_animations(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) {
+        for (ulid_bytes, _, _, _static_state, behavioral_state, _, _, _) in npcs {
+            // Determine animation based on behavioral state (priority order)
+            let animation_name = if (*behavioral_state & NPCState::DEAD.bits() as i32) != 0 {
+                "dead"
+            } else if (*behavioral_state & NPCState::DAMAGED.bits() as i32) != 0 {
+                "hurt"
+            } else if (*behavioral_state & NPCState::ATTACKING.bits() as i32) != 0 {
+                "attacking"
+            } else if (*behavioral_state & NPCState::WALKING.bits() as i32) != 0 {
+                "walking"
+            } else {
+                "idle"
+            };
+
+            // Find the NPC in the active pool and update its animation
+            for pool_entry in self.active_npc_pool.iter() {
+                let npc = pool_entry.value();
+                if &npc.ulid == ulid_bytes {
+                    if let Some(ref sprite) = npc.animated_sprite {
+                        let mut sprite_mut = sprite.clone();
+                        let current_anim = sprite_mut.get_animation();
+                        let new_anim = StringName::from(animation_name);
+                        // Only update if animation changed (avoid redundant calls)
+                        if current_anim != new_anim {
+                            sprite_mut.set_animation(&new_anim);
+                            sprite_mut.play();
+                        }
+                    }
+                    break;
+                }
             }
         }
     }
 
     /// Get all active NPCs with their positions
-    /// Returns: Vec<(ulid, x, y, static_state, behavioral_state, hp, attack, defense)>
-    fn get_active_npcs_with_positions(&self) -> Vec<(String, f32, f32, i32, i32, f32, f32, f32)> {
+    /// Returns: Vec<(ulid_bytes, x, y, static_state, behavioral_state, hp, attack, defense)>
+    fn get_active_npcs_with_positions(&self) -> Vec<([u8; 16], f32, f32, i32, i32, f32, f32, f32)> {
         let mut npcs = Vec::new();
 
         // Iterate over active combat NPCs DashMap
         for entry in self.active_combat_npcs.iter() {
-            let ulid = entry.key();
+            let ulid_hex = entry.key();
 
-            // Get position
-            let pos = self.get_npc_position_internal(ulid);
+            // Convert hex to bytes (only once per NPC)
+            let ulid_bytes = match hex_to_bytes(ulid_hex) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    self.log_error_once("invalid_ulid", ulid_hex,
+                        &format!("[COMBAT ERROR] Invalid ULID hex: {}", &ulid_hex[0..8.min(ulid_hex.len())]));
+                    continue;
+                }
+            };
+
+            // Get position using ByteMap (takes bytes directly)
+            let pos = self.npc_positions.get_ulid(&ulid_bytes)
+                .and_then(|pos_str| {
+                    let parts: Vec<&str> = pos_str.split(',').collect();
+                    if parts.len() == 2 {
+                        if let (Ok(x), Ok(y)) = (parts[0].parse::<f32>(), parts[1].parse::<f32>()) {
+                            return Some((x, y));
+                        }
+                    }
+                    None
+                });
+
             if pos.is_none() {
-                // DEFENSIVE: Log missing position once per NPC using error_log HolyMap
-                self.log_error_once("missing_position", ulid,
-                    &format!("[COMBAT ERROR] NPC {} registered for combat but has no position - skipping from combat pairs",
-                        &ulid[0..8.min(ulid.len())]));
+                self.log_error_once("missing_position", ulid_hex,
+                    &format!("[COMBAT ERROR] NPC {} has no position - skipping from combat",
+                        &ulid_hex[0..8.min(ulid_hex.len())]));
                 continue;
             }
             let (x, y) = pos.unwrap();
 
-            // Get static state (combat type + faction - immutable)
-            let static_state = self.get_stat_value(ulid, "static_state")
-                .unwrap_or(0.0) as i32;
+            // Get behavioral state from ByteMap
+            let behavioral_state = self.npc_behavioral_state.get_ulid(&ulid_bytes)
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(0);
 
-            // Get behavioral state (IDLE, WALKING, etc. - changes during gameplay)
-            let behavioral_state = self.get_stat_value(ulid, "behavioral_state")
-                .unwrap_or(0.0) as i32;
-
-            // Skip if dead (check behavioral state for DEAD flag)
+            // Skip if dead
             if (behavioral_state & NPCState::DEAD.bits() as i32) != 0 {
                 continue;
             }
 
-            // Get combat stats
-            let hp = self.get_stat_value(ulid, "hp").unwrap_or(100.0);
-            let attack = self.get_stat_value(ulid, "attack").unwrap_or(10.0);
-            let defense = self.get_stat_value(ulid, "defense").unwrap_or(5.0);
+            // Get combat stats from ByteMap
+            let (hp, attack, defense, static_state) = if let Some(stats_json) = self.npc_combat_stats.get_ulid(&ulid_bytes) {
+                if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                    (combat_stats.hp, combat_stats.attack, combat_stats.defense, combat_stats.static_state)
+                } else {
+                    (100.0, 10.0, 5.0, 0)
+                }
+            } else {
+                (100.0, 10.0, 5.0, 0)
+            };
 
-            npcs.push((ulid.clone(), x, y, static_state, behavioral_state, hp, attack, defense));
+            npcs.push((ulid_bytes, x, y, static_state, behavioral_state, hp, attack, defense));
         }
 
         npcs
     }
 
     /// Find combat pairs based on proximity and faction hostility
-    /// Returns: Vec<(attacker_ulid, target_ulid, distance)>
-    fn find_combat_pairs(&self, npcs: &[(String, f32, f32, i32, i32, f32, f32, f32)]) -> Vec<(String, String, f32)> {
+    /// Returns: Vec<(attacker_ulid_hex, target_ulid_hex, distance)>
+    fn find_combat_pairs(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) -> Vec<(String, String, f32)> {
         let mut pairs = Vec::new();
 
         for i in 0..npcs.len() {
@@ -1696,23 +1883,12 @@ impl NPCDataWarehouse {
                 let range_b = Self::get_attack_range(*static_state_b);
 
                 // If in range, add to pairs (both directions possible)
+                // Convert to hex strings only for the final result
                 if distance <= range_a {
-                    // DEFENSIVE: Validate we're not creating self-attack pairs
-                    if ulid_a == ulid_b {
-                        self.log_error_once("self_attack_pair", ulid_a,
-                            &format!("[COMBAT ERROR] Attempted to create self-attack pair for {}", ulid_a));
-                    } else {
-                        pairs.push((ulid_a.clone(), ulid_b.clone(), distance));
-                    }
+                    pairs.push((bytes_to_hex(ulid_a), bytes_to_hex(ulid_b), distance));
                 }
                 if distance <= range_b {
-                    // DEFENSIVE: Validate we're not creating self-attack pairs
-                    if ulid_a == ulid_b {
-                        self.log_error_once("self_attack_pair", ulid_b,
-                            &format!("[COMBAT ERROR] Attempted to create self-attack pair for {}", ulid_b));
-                    } else {
-                        pairs.push((ulid_b.clone(), ulid_a.clone(), distance));
-                    }
+                    pairs.push((bytes_to_hex(ulid_b), bytes_to_hex(ulid_a), distance));
                 }
             }
         }
@@ -2933,16 +3109,27 @@ impl GodotNPCDataWarehouse {
 
     /// Get NPC position
     /// Usage: var pos = NPCDataWarehouse.get_npc_position(ulid)
+    /// Accepts ULID as PackedByteArray (16 bytes)
     #[func]
-    pub fn get_npc_position(&self, ulid: GString) -> PackedFloat32Array {
-        if let Some((x, y)) = self.warehouse.get_npc_position_internal(&ulid.to_string()) {
-            let mut arr = PackedFloat32Array::new();
-            arr.push(x);
-            arr.push(y);
-            arr
-        } else {
-            PackedFloat32Array::new()
+    pub fn get_npc_position(&self, ulid: PackedByteArray) -> PackedFloat32Array {
+        if ulid.len() != 16 {
+            return PackedFloat32Array::new();
         }
+        let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
+
+        // Get position from npc_positions ByteMap (stored as "x,y")
+        if let Some(pos_str) = self.warehouse.npc_positions.get_ulid(&ulid_bytes) {
+            let coords: Vec<&str> = pos_str.split(',').collect();
+            if coords.len() == 2 {
+                if let (Ok(x), Ok(y)) = (coords[0].parse::<f32>(), coords[1].parse::<f32>()) {
+                    let mut arr = PackedFloat32Array::new();
+                    arr.push(x);
+                    arr.push(y);
+                    return arr;
+                }
+            }
+        }
+        PackedFloat32Array::new()
     }
 
     // ===== ULID FUNCTIONS =====

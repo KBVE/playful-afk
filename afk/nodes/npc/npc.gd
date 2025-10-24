@@ -106,73 +106,9 @@ func _register_with_input_manager() -> void:
 
 
 func _process(delta: float) -> void:
-	# RUST COMBAT: Get waypoint from Rust AI and update state
-	if ulid.size() > 0 and not (current_state & NPCManager.NPCState.DEAD):
-		var waypoint = NPCDataWarehouse.get_npc_waypoint(ulid)
-		if waypoint.size() == 2:  # Has waypoint from Rust
-			# Calculate direction to waypoint
-			var target_pos = Vector2(waypoint[0], waypoint[1])
-			var direction = (target_pos - global_position).normalized()
-			_move_direction = direction
-
-			# Set target position for smooth movement
-			target_position_x = waypoint[0]
-
-			# Set WALKING state (preserving other flags)
-			if not (current_state & NPCManager.NPCState.WALKING):
-				current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING | NPCManager.NPCState.COMBAT
-				_update_animation()  # Update animation immediately when state changes
-		else:  # No waypoint - stay idle (if not attacking)
-			if not (current_state & NPCManager.NPCState.ATTACKING):
-				if current_state & NPCManager.NPCState.WALKING:
-					# Transitioning from WALKING to IDLE
-					current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.COMBAT) | NPCManager.NPCState.IDLE
-					_update_animation()  # Update animation immediately when state changes
-
-	# Update movement
-	_update_movement(delta)
-
-	# RUST COMBAT: Sync position to combat system
-	# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
-	if ulid.size() > 0:
-		NPCDataWarehouse.update_npc_position(ulid, position.x, position.y)
-
-	# PROJECTILE FIRING: Check if we need to fire a projectile during attack animation
-	if has_meta("pending_projectile") and animated_sprite:
-		if animated_sprite.animation == "attacking" and animated_sprite.is_playing():
-			# Fire projectile at frame 5 (mid-animation, when arrow is released)
-			var current_frame = animated_sprite.frame
-			if current_frame == 5 and not has_meta("projectile_fired"):
-				_fire_pending_projectile()
-				set_meta("projectile_fired", true)  # Only fire once per attack
-
-	# Ensure animations match current state
-	# Fix for: animations stopping or getting stuck on wrong animation
-	if animated_sprite:
-		# Check if animation stopped playing
-		if not animated_sprite.is_playing():
-			var should_loop = (current_state & NPCManager.NPCState.WALKING) or \
-							  (current_state & NPCManager.NPCState.IDLE) or \
-							  (current_state & NPCManager.NPCState.ATTACKING)
-			if should_loop:
-				_update_animation()  # Restart the animation
-		else:
-			# Animation is playing - verify it matches current state
-			var expected_anim = ""
-			if current_state & NPCManager.NPCState.DEAD:
-				expected_anim = state_to_animation.get(NPCManager.NPCState.DEAD, "dead")
-			elif current_state & NPCManager.NPCState.DAMAGED:
-				expected_anim = state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt")
-			elif current_state & NPCManager.NPCState.ATTACKING:
-				expected_anim = state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking")
-			elif current_state & NPCManager.NPCState.WALKING:
-				expected_anim = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
-			elif current_state & NPCManager.NPCState.IDLE:
-				expected_anim = state_to_animation.get(NPCManager.NPCState.IDLE, "idle")
-
-			# If animation doesn't match state, update it
-			if expected_anim != "" and animated_sprite.animation != expected_anim:
-				_update_animation()
+	# RUST COMBAT: Rust controls everything - animations, movement, and position updates
+	# GDScript does nothing here - Rust updates Node2D directly via pooling system
+	pass
 
 
 func _physics_process(delta: float) -> void:

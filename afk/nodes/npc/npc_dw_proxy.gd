@@ -411,8 +411,8 @@ func update_npc_position(ulid_bytes: PackedByteArray, x: float, y: float) -> voi
 	if _warehouse:
 		_warehouse.update_npc_position(ulid_bytes, x, y)
 
-## Get NPC position
-func get_npc_position(ulid: String) -> PackedFloat32Array:
+## Get NPC position (accepts ULID as PackedByteArray)
+func get_npc_position(ulid: PackedByteArray) -> PackedFloat32Array:
 	if _warehouse:
 		return _warehouse.get_npc_position(ulid)
 	return PackedFloat32Array()
