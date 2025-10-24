@@ -1966,7 +1966,8 @@ impl NPCDataWarehouse {
     /// Called every combat tick with delta time
     /// Rust directly updates both the position data AND the Node2D visual position
     fn apply_waypoint_movement(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)], delta_time: f32) {
-        const MOVEMENT_SPEED: f32 = 30.0; // pixels per second
+        const MOVEMENT_SPEED: f32 = 80.0; // pixels per second (increased for smoother visible movement)
+        const LERP_WEIGHT: f32 = 0.15; // Smoothing factor (0.0 = no movement, 1.0 = instant)
 
         static mut MOVEMENT_LOG_COUNT: u32 = 0;
         unsafe {
@@ -2020,15 +2021,15 @@ impl NPCDataWarehouse {
                 let distance = (dx * dx + dy * dy).sqrt();
 
                 if distance > 1.0 {
-                    // Move towards waypoint
+                    // Calculate target position with smooth movement
                     let move_distance = MOVEMENT_SPEED * delta_time;
                     let move_ratio = (move_distance / distance).min(1.0);
 
-                    let new_x = current_x + dx * move_ratio;
-                    let new_y = current_y + dy * move_ratio;
+                    let target_x = current_x + dx * move_ratio;
+                    let target_y = current_y + dy * move_ratio;
 
-                    // Update position in npc_positions ByteMap
-                    self.npc_positions.insert_ulid(&ulid_bytes, format!("{},{}", new_x, new_y));
+                    // Update position in npc_positions ByteMap (data store)
+                    self.npc_positions.insert_ulid(&ulid_bytes, format!("{},{}", target_x, target_y));
 
                     // Set WALKING state since NPC is actually moving
                     if let Some(state_str) = self.npc_behavioral_state.get_ulid(&ulid_bytes) {
@@ -2041,7 +2042,7 @@ impl NPCDataWarehouse {
                         }
                     }
 
-                    // Update Node2D visual position directly from Rust (use local position)
+                    // Update Node2D visual position with lerp for smooth interpolation
                     static mut NPC_SEARCH_COUNT: u32 = 0;
                     let mut found = false;
                     for pool_entry in self.active_npc_pool.iter() {
@@ -2049,7 +2050,13 @@ impl NPCDataWarehouse {
                         if &npc.ulid == ulid_bytes {
                             // Clone the Gd handle (creates new reference to same node)
                             let mut node = npc.node.clone();
-                            node.set_position(Vector2::new(new_x, new_y));
+                            let current_visual_pos = node.get_position();
+
+                            // Lerp from current visual position to target position for smooth movement
+                            let lerped_x = current_visual_pos.x + (target_x - current_visual_pos.x) * LERP_WEIGHT;
+                            let lerped_y = current_visual_pos.y + (target_y - current_visual_pos.y) * LERP_WEIGHT;
+
+                            node.set_position(Vector2::new(lerped_x, lerped_y));
                             found = true;
 
                             static mut NODE_UPDATE_COUNT: u32 = 0;
@@ -2057,8 +2064,8 @@ impl NPCDataWarehouse {
                                 NODE_UPDATE_COUNT += 1;
                                 if NODE_UPDATE_COUNT <= 5 {
                                     let actual_pos = node.get_position();
-                                    godot_print!("[RUST MOVEMENT] Set position to ({:.1}, {:.1}), actual: ({:.1}, {:.1})",
-                                        new_x, new_y, actual_pos.x, actual_pos.y);
+                                    godot_print!("[RUST MOVEMENT] Lerped position to ({:.1}, {:.1}), actual: ({:.1}, {:.1})",
+                                        lerped_x, lerped_y, actual_pos.x, actual_pos.y);
                                 }
                             }
                             break;
@@ -2150,7 +2157,7 @@ impl NPCDataWarehouse {
             for pool_entry in self.active_npc_pool.iter() {
                 let npc = pool_entry.value();
                 if &npc.ulid == ulid_bytes {
-                    // Update animation
+                    // Update animation and sprite direction
                     if let Some(ref sprite) = npc.animated_sprite {
                         let mut sprite_mut = sprite.clone();
                         let new_anim = StringName::from(animation_name);
@@ -2159,6 +2166,65 @@ impl NPCDataWarehouse {
                         if !sprite_mut.is_playing() {
                             sprite_mut.play();
                         }
+
+                        // SPRITE FLIPPING: Determine which way the sprite should face
+                        // Check if NPC has a movement target (waypoint or combat target)
+                        let ulid_hex = bytes_to_hex(ulid_bytes);
+                        let waypoint_key = SafeString(format!("waypoint:{}", ulid_hex));
+                        let move_dir_key = SafeString(format!("move_dir:{}", ulid_hex));
+
+                        // Check movement direction or waypoint to determine facing
+                        let should_flip = if let Some(move_dir) = self.storage.get(&move_dir_key) {
+                            // Has movement direction - parse it
+                            let parts: Vec<&str> = move_dir.0.split(',').collect();
+                            if parts.len() == 2 {
+                                if let Ok(dir_x) = parts[0].parse::<f32>() {
+                                    dir_x < 0.0 // Flip if moving left (negative x)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else if let Some(waypoint) = self.storage.get(&waypoint_key) {
+                            // Has waypoint - compare with current position
+                            let current_pos = self.npc_positions.get_ulid(ulid_bytes);
+                            if let Some(current_pos_str) = current_pos {
+                                let current_parts: Vec<&str> = current_pos_str.split(',').collect();
+                                let waypoint_parts: Vec<&str> = waypoint.0.split(',').collect();
+                                if current_parts.len() == 2 && waypoint_parts.len() == 2 {
+                                    if let (Ok(curr_x), Ok(target_x)) = (
+                                        current_parts[0].parse::<f32>(),
+                                        waypoint_parts[0].parse::<f32>()
+                                    ) {
+                                        target_x < curr_x // Flip if target is to the left
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            // Default: face right (don't flip) for allies, face left (flip) for monsters
+                            let static_state = if let Some(stats_json) = self.npc_combat_stats.get_ulid(ulid_bytes) {
+                                if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                                    combat_stats.static_state
+                                } else {
+                                    0
+                                }
+                            } else {
+                                0
+                            };
+
+                            let is_monster = (static_state & NPCStaticState::MONSTER.bits() as i32) != 0;
+                            is_monster // Monsters face left by default (flip), allies face right
+                        };
+
+                        // Apply horizontal flip
+                        sprite_mut.set_flip_h(should_flip);
                     }
 
                     // Sync behavioral state to GDScript property (for chat UI and other systems)
