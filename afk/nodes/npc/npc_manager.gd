@@ -4,9 +4,7 @@ extends Node
 ## Provides centralized access to all NPCs in the game, especially the virtual pet
 ## Access via: NPCManager.cat anywhere in your code
 
-## DEPRECATED: Preload NPCStats for backward compatibility
-## Stats are now managed by Rust NPCDataWarehouse, but legacy code still uses NPCStats
-const NPCStats = preload("res://nodes/npc/npc_stats.gd")
+## RUST COMBAT: NPCStats removed - all stats managed by Rust NPCDataWarehouse
 
 ## ===== NPC STATE SYSTEM =====
 ## Unified bitwise flag system for ALL NPC states, types, and behaviors
@@ -176,12 +174,7 @@ var _npc_scenes: Dictionary = {}
 var ui_sprite_cache: Dictionary = {}
 
 ## ===== DUAL POOL SYSTEM =====
-
-## PERSISTENT POOL - Named NPCs with permanent stats (companions, named characters)
-## Pool stores character instances, stats stored separately by ULID
-## Example: "Warrior Companion", "Archer Guard", "Merchant Bob"
-const MAX_PERSISTENT_POOL_SIZE: int = 8
-var persistent_pool: Array[Dictionary] = []  # Each entry: {character, ulid, is_active, npc_type, npc_name, ...}
+## Pools are now handled by Rust NPCDataWarehouse
 
 ## GENERIC POOL - Temporary NPCs with fresh stats each spawn (enemies, random NPCs)
 ## Pool recycles character instances, new stats generated per spawn
@@ -241,8 +234,7 @@ func _ready() -> void:
 	# Initialize the cat (virtual pet)
 	_initialize_cat()
 	# Initialize character pool (empty slots)
-	# Initialize dual pool system
-	_initialize_persistent_pool()
+	# Initialize dual pool system (pools now handled by Rust)
 	_initialize_generic_pool()
 
 	# Initialize UI sprite cache (create pre-cloned sprites for UI)
@@ -273,14 +265,6 @@ func _ready() -> void:
 	if EventManager:
 		# Listen to state change requests from EventManager (debounced pathway)
 		EventManager.npc_state_change_requested.connect(_handle_state_change_request)
-
-	# Connect to CombatManager for bidirectional communication
-	if CombatManager:
-		# Listen to combat events from CombatManager
-		CombatManager.combat_started.connect(_on_combat_started)
-		CombatManager.combat_ended.connect(_on_combat_ended)
-		CombatManager.damage_dealt.connect(_on_damage_dealt)
-		CombatManager.target_killed.connect(_on_target_killed)
 
 	# RUST COMBAT: Enable combat system
 	NPCDataWarehouse.start_combat_system()
@@ -481,40 +465,6 @@ func _complete_npc_despawn(npc: Node2D) -> void:
 			found_in_pool = true
 			break
 
-	# If not found in generic pool, search persistent pool (allies)
-	if not found_in_pool:
-		for slot in persistent_pool:
-			if slot.has("character") and slot["character"] == npc:
-				if slot.has("npc_type"):
-					npc_type = slot["npc_type"]
-
-				# Deactivate and hide
-				slot["is_active"] = false
-				npc.visible = false
-				npc.position = Vector2.ZERO
-				npc.process_mode = Node.PROCESS_MODE_DISABLED
-
-				# Clean up stats and ULID
-				if "stats" in npc and npc.stats:
-					var ulid_key = ULID.to_hex(npc.stats.ulid)
-					# Unregister from Rust combat system (if not already done)
-					NPCDataWarehouse.unregister_npc_from_combat(npc.stats.ulid)
-					# Remove from Rust NPCDataWarehouse
-					NPCDataWarehouse.remove_npc(ulid_key)
-					# Clean up historic_state entry
-					historic_state.erase(ulid_key)
-					# Reset stats for future reuse
-					npc.stats.reset_to_full()
-					npc.stats = null
-
-				# Reset states
-				if "current_state" in npc:
-					npc.current_state = NPCState.IDLE
-				if "static_state" in npc:
-					pass  # Keep static_state, it's immutable
-
-				break
-
 	# Note: Monster respawning is handled by EventManager's spawn wave system
 	# NPCManager just despawns dead monsters and returns them to the pool
 	# EventManager will spawn new monsters based on wave timing and game state
@@ -571,7 +521,7 @@ func _spawn_monster(monster_type: String, spawn_pos: Vector2, initial_target: Ve
 
 ## ===== STATE HISTORY SYSTEM FUNCTIONS =====
 
-## Handle state change requests from other systems (CombatManager, AnimationManager, etc.)
+## Handle state change requests from other systems
 ## This is the ONLY way external systems should modify NPC state
 ## Maintains historic_state, previous_state, and current_state
 func _handle_state_change_request(npc: Node2D, new_state: int, reason: String) -> void:
@@ -612,30 +562,7 @@ func get_state_entry_by_ulid(ulid_hex: String) -> Dictionary:
 	return historic_state.get(ulid_hex, {})
 
 
-## ===== COMBAT EVENT HANDLERS (from CombatManager) =====
-
-func _on_combat_started(attacker: Node2D, target: Node2D) -> void:
-	# Forward to EventManager for other systems to react
-	if EventManager:
-		EventManager.combat_started.emit(attacker, target)
-
-
-func _on_combat_ended(attacker: Node2D, target: Node2D) -> void:
-	# Forward to EventManager for other systems to react
-	if EventManager:
-		EventManager.combat_ended.emit(attacker, target)
-
-
-func _on_damage_dealt(attacker: Node2D, target: Node2D, damage: float) -> void:
-	# Forward to EventManager for other systems to react
-	if EventManager:
-		EventManager.damage_dealt.emit(attacker, target, damage)
-
-
-func _on_target_killed(attacker: Node2D, target: Node2D) -> void:
-	# Forward to EventManager for other systems to react
-	if EventManager:
-		EventManager.target_killed.emit(attacker, target)
+## ===== COMBAT EVENT HANDLERS =====
 
 
 ## ===== NPC REGISTRY HELPER FUNCTIONS =====
@@ -884,10 +811,6 @@ func set_layer4_container(container: Node2D) -> void:
 func set_background_reference(background: Control) -> void:
 	background_reference = background
 
-	for slot in persistent_pool:
-		if slot["character"] and not slot["character"].get_parent():
-			foreground_container.add_child(slot["character"])
-
 
 ## ===== SAFE MOVEMENT HELPERS =====
 
@@ -961,13 +884,14 @@ func move_npc_to_position_safe(npc: Node2D, target_x: float, target_y: float = -
 
 ## Initialize the AI system
 func _initialize_ai_system() -> void:
-	# Create AI update timer
-	_ai_timer = Timer.new()
-	_ai_timer.wait_time = AI_UPDATE_INTERVAL
-	_ai_timer.one_shot = false
-	_ai_timer.timeout.connect(_on_ai_timer_timeout)
-	add_child(_ai_timer)
-	_ai_timer.start()
+	# RUST AI: GDScript AI disabled - Rust now handles NPC behavior and movement
+	# Create AI update timer (disabled)
+	# _ai_timer = Timer.new()
+	# _ai_timer.wait_time = AI_UPDATE_INTERVAL
+	# _ai_timer.one_shot = false
+	# _ai_timer.timeout.connect(_on_ai_timer_timeout)
+	# add_child(_ai_timer)
+	# _ai_timer.start()
 
 	# Create Z-index update timer for depth sorting
 	_z_index_timer = Timer.new()
@@ -977,7 +901,7 @@ func _initialize_ai_system() -> void:
 	add_child(_z_index_timer)
 	_z_index_timer.start()
 
-	# AI system initialized silently
+	# AI system initialized silently (Rust-controlled)
 
 
 ## Initialize Emoji Manager for chat bubbles
@@ -1219,250 +1143,6 @@ func _update_npc_ai(npc: Node2D) -> void:
 	# Old GDScript combat logic removed - Rust handles target finding, movement, and attacks
 	# Combat events from Rust are handled in _handle_combat_event()
 
-	# OLD GDSCRIPT COMBAT (DISABLED - Rust now handles this)
-	if false and CombatManager:
-		# Don't do anything if currently attacking (animation playing)
-		if CombatManager.has_state(npc, NPCManager.NPCState.ATTACKING):
-			return
-
-		# Find nearest enemy
-		var target = CombatManager.find_nearest_target(npc, 300.0)
-
-		if target:
-			# Get NPC's combat type from bitwise state flags
-			var has_combat_type = npc.current_state & (NPCStaticState.MELEE | NPCStaticState.RANGED | NPCStaticState.MAGIC | NPCStaticState.HEALER)
-
-			# MELEE COMBAT (Warriors, Knights, etc.)
-			if npc.current_state & NPCStaticState.MELEE:
-				var movement_target = _get_movement_target(npc)
-				var distance_to_target = npc.global_position.distance_to(target.global_position)
-				var melee_range = npc.attack_range if "attack_range" in npc else 60.0
-
-				# IMPORTANT: Flip sprite to face target BEFORE checking can_melee_attack
-				# The facing check happens inside can_melee_attack, so we need to face first
-				if "animated_sprite" in npc and npc.animated_sprite:
-					var to_target = target.global_position - npc.global_position
-					# Only flip if significant horizontal movement (prevents flickering during vertical movement)
-					if abs(to_target.normalized().x) > 0.3:
-						npc.animated_sprite.flip_h = to_target.x < 0
-
-				if CombatManager.can_melee_attack(npc, target):
-					# In range and facing - ATTACK!
-					# Stop warrior movement before attacking (warrior must stand still to swing)
-					if movement_target.has_method("stop_auto_movement"):
-						movement_target.stop_auto_movement()
-
-					# Stop monster movement (clear direction)
-					if (npc.current_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
-						npc._move_direction = Vector2.ZERO
-
-					# Set NPC to attacking state (triggers attack animation)
-					# IMPORTANT: Preserve combat type and faction flags!
-					if "current_state" in npc:
-						# Remove IDLE/WALKING, add COMBAT and ATTACKING (bitwise)
-						var new_state = (npc.current_state & ~NPCState.IDLE & ~NPCState.WALKING) | NPCState.COMBAT | NPCState.ATTACKING
-						_change_npc_state(npc, new_state, "start_attack")
-						ai_state["current_state"] = npc.current_state
-
-					# Execute combat logic (damage calculation, state tracking)
-					CombatManager.start_melee_attack(npc, target)
-					ai_state["combat_target"] = target
-					ai_state["time_until_next_change"] = 2.0
-					return
-				# Check if warrior is in combat range but on cooldown - STAY IN POSITION
-				elif distance_to_target <= melee_range:
-					# Warrior is close enough to attack but on cooldown
-					# Stop movement and wait for cooldown
-					if movement_target.has_method("stop_auto_movement"):
-						movement_target.stop_auto_movement()
-					ai_state["combat_target"] = target
-					ai_state["time_until_next_change"] = 0.5  # Check again soon
-					return
-				else:
-					# Not in range - move towards enemy
-					# Only issue new movement command if:
-					# 1. No combat target set yet, OR
-					# 2. Target has moved significantly (>20px), OR
-					# 3. NPC is idle (not currently moving)
-					var should_move = false
-					var last_target = ai_state.get("combat_target")
-					var is_moving = movement_target.has_method("is_moving") and movement_target.is_moving()
-
-					if last_target == null or last_target != target:
-						should_move = true  # New target
-					elif not is_moving:
-						should_move = true  # NPC stopped moving
-					elif last_target.global_position.distance_to(target.global_position) > 20.0:
-						should_move = true  # Target moved significantly
-
-					if should_move:
-						# NPCs with controllers (warriors, archers)
-						if movement_target.has_method("move_to_position"):
-							movement_target.move_to_position(target.global_position.x)
-							_ai_tween_y_position(npc, target.global_position.y, ai_state)
-							ai_state["combat_target"] = target
-							ai_state["last_combat_target_pos"] = target.global_position
-							ai_state["time_until_next_change"] = 2.0
-						# Monsters without controllers - use direct movement
-						elif (npc.current_state & NPCStaticState.MONSTER) and "_move_direction" in npc:
-							var direction = (target.global_position - npc.global_position).normalized()
-							npc._move_direction = direction
-
-							# Add COMBAT and WALKING flags (bitwise)
-							var new_state = (npc.current_state & ~NPCState.IDLE) | NPCState.COMBAT | NPCState.WALKING
-							_change_npc_state(npc, new_state, "monster_move_to_combat")
-							ai_state["current_state"] = npc.current_state
-
-							ai_state["combat_target"] = target
-							ai_state["last_combat_target_pos"] = target.global_position
-							ai_state["time_until_next_change"] = 2.0
-					return
-
-			# RANGED COMBAT + KITING (Archers, Crossbowmen, etc.)
-			elif npc.current_state & NPCStaticState.RANGED:
-				var movement_target = _get_movement_target(npc)
-				var distance_to_target = npc.global_position.distance_to(target.global_position)
-				var ranged_range = npc.attack_range if "attack_range" in npc else 150.0
-				var max_range = ranged_range * 2.0  # Double optimal = maximum shooting distance
-
-				# Flip sprite to face target
-				if "animated_sprite" in npc and npc.animated_sprite:
-					var to_target = target.global_position - npc.global_position
-					npc.animated_sprite.flip_h = to_target.x < 0
-
-				# Too close! RETREAT (kiting behavior)
-				if CombatManager.should_archer_retreat(npc, target):
-					# Calculate retreat direction considering ALL nearby enemies (not just one)
-					var retreat_direction = Vector2.ZERO
-					var nearby_enemies: Array[Node2D] = []
-
-					# Find all enemies within threat range (150px)
-					var all_potential_targets = CombatManager.find_all_valid_targets(npc, 150.0)
-					for enemy in all_potential_targets:
-						if is_instance_valid(enemy):
-							nearby_enemies.append(enemy)
-
-					# Calculate weighted retreat direction away from all threats
-					if nearby_enemies.size() > 0:
-						for enemy in nearby_enemies:
-							var to_enemy = npc.global_position - enemy.global_position
-							var distance = to_enemy.length()
-							# Closer enemies have more weight (inverse distance)
-							var weight = 1.0 / max(distance, 1.0)
-							retreat_direction += to_enemy.normalized() * weight
-						retreat_direction = retreat_direction.normalized()
-					else:
-						# Fallback: just move away from primary target
-						retreat_direction = (npc.global_position - target.global_position).normalized()
-
-					# Use health-based kiting range (extends range when hurt)
-					var retreat_distance = CombatManager.get_optimal_kiting_range(npc)
-					var retreat_pos = npc.global_position + (retreat_direction * retreat_distance)
-
-					# Clamp retreat position to safe rectangle bounds
-					if background_reference and background_reference.has_method("is_in_safe_rectangle"):
-						# If retreat position is out of safe bounds, try to find a valid position
-						if not background_reference.is_in_safe_rectangle(retreat_pos):
-							# Try moving parallel to the enemy instead of directly away
-							var parallel_right = Vector2(-retreat_direction.y, retreat_direction.x)
-							var parallel_left = Vector2(retreat_direction.y, -retreat_direction.x)
-
-							# Try right parallel
-							var alt_pos1 = npc.global_position + (parallel_right * retreat_distance * 0.5)
-							if background_reference.is_in_safe_rectangle(alt_pos1):
-								retreat_pos = alt_pos1
-							# Try left parallel
-							elif background_reference.is_in_safe_rectangle(npc.global_position + (parallel_left * retreat_distance * 0.5)):
-								retreat_pos = npc.global_position + (parallel_left * retreat_distance * 0.5)
-							# Last resort: move toward nearest safe rectangle edge
-							else:
-								if background_reference.has_method("get_random_safe_position"):
-									retreat_pos = background_reference.get_random_safe_position()
-								else:
-									retreat_pos = npc.global_position
-
-					# Only retreat if not already retreating or target moved significantly
-					var should_retreat = false
-					var last_retreat_pos = ai_state.get("last_retreat_pos", Vector2.ZERO)
-					var last_retreat_time = ai_state.get("last_retreat_time", 0.0)
-					var current_time = Time.get_ticks_msec() / 1000.0
-					var is_moving = movement_target.has_method("is_moving") and movement_target.is_moving()
-
-					# Add cooldown to prevent excessive retreat recalculations (reduces tweaking)
-					var retreat_cooldown = 0.5  # Only update retreat every 0.5 seconds
-					var time_since_last_retreat = current_time - last_retreat_time
-
-					if not is_moving and time_since_last_retreat >= retreat_cooldown:
-						should_retreat = true  # Not currently moving and cooldown passed
-					elif retreat_pos.distance_to(last_retreat_pos) > 50.0 and time_since_last_retreat >= retreat_cooldown:
-						should_retreat = true  # Retreat position changed significantly (increased from 20 to 50px)
-
-					if should_retreat and movement_target.has_method("move_to_position"):
-						movement_target.move_to_position(retreat_pos.x)
-						_ai_tween_y_position(npc, retreat_pos.y, ai_state)
-						ai_state["combat_target"] = target
-						ai_state["last_retreat_pos"] = retreat_pos
-						ai_state["last_retreat_time"] = current_time
-						ai_state["time_until_next_change"] = 1.0
-					return
-
-				# In good range - ATTACK!
-				elif CombatManager.can_ranged_attack(npc, target):
-					# Stop archer movement before attacking (archer must stand still to shoot)
-					if movement_target.has_method("stop_auto_movement"):
-						movement_target.stop_auto_movement()
-
-					# Set NPC to attacking state (triggers attack animation)
-					# IMPORTANT: Preserve combat type and faction flags!
-					if "current_state" in npc:
-						# Remove IDLE/WALKING, add ATTACKING, preserve combat type and faction
-						var new_state = (npc.current_state & ~NPCState.IDLE & ~NPCState.WALKING) | NPCState.ATTACKING
-						_change_npc_state(npc, new_state, "ranged_start_attack")
-
-					# Execute combat logic (projectile firing, state tracking)
-					CombatManager.start_ranged_attack(npc, target, "arrow")
-					ai_state["time_until_next_change"] = 2.0
-					return
-
-				# Too far - move closer
-				elif distance_to_target > max_range:
-					# Only move if not already pursuing or target moved significantly
-					var should_pursue = false
-					var last_target = ai_state.get("combat_target")
-					var is_pursuing = movement_target.has_method("is_moving") and movement_target.is_moving()
-
-					if last_target == null or last_target != target:
-						should_pursue = true  # New target
-					elif not is_pursuing:
-						should_pursue = true  # Stopped moving
-					elif last_target.global_position.distance_to(target.global_position) > 20.0:
-						should_pursue = true  # Target moved significantly
-
-					if should_pursue and movement_target.has_method("move_to_position"):
-						movement_target.move_to_position(target.global_position.x)
-						_ai_tween_y_position(npc, target.global_position.y, ai_state)
-						ai_state["combat_target"] = target
-						ai_state["last_combat_target_pos"] = target.global_position
-						ai_state["time_until_next_change"] = 2.0
-					return
-
-		# No enemies nearby - exit combat mode
-		else:
-			# Clear combat target from AI state so monsters can resume roaming
-			if ai_state.has("combat_target"):
-				ai_state.erase("combat_target")
-
-			# Clear CombatManager combat state
-			if CombatManager.is_in_combat(npc):
-				CombatManager.end_combat(npc)
-
-			# Restore proper behavioral state after combat
-			if "current_state" in npc:
-				# Remove COMBAT/ATTACKING/WALKING, add IDLE
-				var new_state = (npc.current_state & ~NPCState.COMBAT & ~NPCState.ATTACKING & ~NPCState.WALKING) | NPCState.IDLE
-				_change_npc_state(npc, new_state, "end_combat")
-				ai_state["current_state"] = npc.current_state
-
 	# "CALL FOR HELP" SYSTEM - Move toward nearby faction allies in combat to assist
 	# Works for both ALLY and MONSTER factions
 	# Only NPCs that are idle (not already in combat) can respond
@@ -1500,8 +1180,8 @@ func _update_npc_ai(npc: Node2D) -> void:
 				if other_faction_flags != my_faction_flags or my_faction_flags == 0:
 					continue
 
-				# Check if ally is in combat
-				if CombatManager and CombatManager.is_in_combat(other_npc):
+				# Check if ally is in combat (has COMBAT state flag)
+				if other_npc.current_state & NPCState.COMBAT:
 					var distance = npc.global_position.distance_to(other_npc.global_position)
 
 					# Found nearby faction ally in combat - move to assist
@@ -1904,13 +1584,8 @@ func _update_character_z_index(character: Node2D) -> void:
 func _update_all_characters_z_index() -> void:
 	var max_z_index = 0
 
-	# Update all pooled characters from generic and persistent pools
+	# Update all pooled characters from generic pool
 	for slot in generic_pool:
-		if slot["is_active"] and slot["character"] != null:
-			_update_character_z_index(slot["character"])
-			max_z_index = max(max_z_index, slot["character"].z_index)
-
-	for slot in persistent_pool:
 		if slot["is_active"] and slot["character"] != null:
 			_update_character_z_index(slot["character"])
 			max_z_index = max(max_z_index, slot["character"].z_index)
@@ -1922,52 +1597,10 @@ func _update_all_characters_z_index() -> void:
 
 ## ===== STATS CREATION =====
 
-## Create stats for a specific NPC type with configured values
-## Now reads from decentralized NPC class static methods
-func _create_stats_for_type(npc_type: String) -> NPCStats:
-	# Get the NPC class from registry
-	if not NPC_REGISTRY.has(npc_type):
-		push_error("NPCManager: Cannot create stats for unknown NPC type: %s" % npc_type)
-		return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
-
-	# Load the scene and get the script
-	var scene_path = NPC_REGISTRY[npc_type]["scene"]
-	var npc_scene = load(scene_path) as PackedScene
-	if not npc_scene:
-		push_error("NPCManager: Failed to load scene for NPC type: %s" % npc_type)
-		return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
-
-	# Get the script from the scene's root node
-	var temp_instance = npc_scene.instantiate()
-	var npc_script = temp_instance.get_script()
-	temp_instance.free()
-
-	# Call the static create_stats() method if it exists
-	if npc_script and npc_script.has_method("create_stats"):
-		return npc_script.create_stats()
-
-	# Fallback to default stats
-	push_error("NPCManager: NPC type '%s' missing create_stats() method" % npc_type)
-	return NPCStats.new(100.0, 100.0, 100.0, 100.0, 10.0, 5.0, NPCStats.Emotion.NEUTRAL, npc_type)
+## RUST COMBAT: Stats creation removed - handled by Rust NPCDataWarehouse
 
 
 ## ===== DUAL POOL MANAGEMENT =====
-
-## Initialize the persistent pool with empty slots
-func _initialize_persistent_pool() -> void:
-	persistent_pool.clear()
-	for i in range(MAX_PERSISTENT_POOL_SIZE):
-		persistent_pool.append({
-			"character": null,
-			"ulid": "",  # ULID key to look up stats in stats_database
-			"is_active": false,
-			"slot": i,
-			"npc_type": "",
-			"npc_name": "",  # Display name (e.g., "Warrior Companion")
-			"movement_bounds": Vector2(100.0, 1052.0)
-		})
-	# Persistent pool initialized silently
-
 
 ## Initialize the generic pool with pre-allocated NPCs
 func _initialize_generic_pool() -> void:
@@ -2092,76 +1725,6 @@ func _preallocate_generic_npc(npc_type: String, slot_index: int) -> void:
 	})
 
 
-## Add a persistent NPC (keeps stats across activations)
-func add_persistent_npc(
-	npc_type: String,
-	npc_name: String,
-	position: Vector2,
-	initial_stats: NPCStats = null,
-	activate: bool = true,
-	movement_bounds: Vector2 = Vector2(100.0, 1052.0)
-) -> Node2D:
-	# Find empty slot in persistent pool
-	var slot_index = -1
-	for i in range(persistent_pool.size()):
-		if persistent_pool[i]["character"] == null:
-			slot_index = i
-			break
-
-	if slot_index == -1:
-		push_error("NPCManager: Persistent pool is full!")
-		return null
-
-	# Create NPC instance
-	if not NPC_REGISTRY.has(npc_type):
-		push_error("NPCManager: Unknown NPC type: %s" % npc_type)
-		return null
-
-	var npc_scene = load(NPC_REGISTRY[npc_type]["scene"])
-	var npc = npc_scene.instantiate()
-
-	# Create or assign stats
-	var npc_stats = initial_stats if initial_stats else NPCStats.new()
-
-	# MIGRATION: Store stats in Rust NPCDataWarehouse
-	var ulid_key = ULID.to_hex(npc_stats.ulid)
-	NPCDataWarehouse.store_npc(ulid_key, JSON.stringify(npc_stats.to_dict()))
-
-	# Store in persistent pool
-	var slot = persistent_pool[slot_index]
-	slot["character"] = npc
-	slot["ulid"] = npc_stats.ulid  # Store ULID reference
-	slot["is_active"] = activate
-	slot["npc_type"] = npc_type
-	slot["npc_name"] = npc_name
-	slot["movement_bounds"] = movement_bounds
-
-	# Add to scene
-	if foreground_container:
-		foreground_container.add_child(npc)
-		npc.position = position
-		npc.visible = activate
-
-		# Assign ULID to NPC (primary identifier for Rust data)
-		if "ulid" in npc:
-			npc.ulid = npc_stats.ulid
-
-		# DEPRECATED: Assign stats for backward compatibility
-		if "stats" in npc:
-			npc.stats = npc_stats
-
-		# Set z-index
-		_update_character_z_index(npc)
-
-		# Register AI if active
-		if activate:
-			register_npc_ai(npc, npc_type)
-
-
-	# Added persistent NPC silently
-	return npc
-
-
 ## Get a generic NPC from pool (creates fresh stats each time)
 ## Y bounds are now dynamically queried from background heightmap based on movement
 func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector2 = Vector2.ZERO) -> Node2D:
@@ -2225,19 +1788,19 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 	var npc = slot["character"]
 
 	# Generate FRESH stats for this spawn with random name (configured per NPC type)
-	var fresh_stats = _create_stats_for_type(npc_type)
+	#var fresh_stats = _create_stats_for_type(npc_type)
 
 	# Store in Rust NPCDataWarehouse (use hex string as key)
-	var ulid_key = ULID.to_hex(fresh_stats.ulid)
-	NPCDataWarehouse.store_npc(ulid_key, JSON.stringify(fresh_stats.to_dict()))
+	#var ulid_key = ULID.to_hex(fresh_stats.ulid)
+	#NPCDataWarehouse.store_npc(ulid_key, JSON.stringify(fresh_stats.to_dict()))
 
 	# Assign ULID to NPC (primary identifier for Rust data)
-	if "ulid" in npc:
-		npc.ulid = fresh_stats.ulid
+	#if "ulid" in npc:
+	#	npc.ulid = fresh_stats.ulid
 
 	# DEPRECATED: Assign stats for backward compatibility
-	if "stats" in npc:
-		npc.stats = fresh_stats
+	#if "stats" in npc:
+	#	npc.stats = fresh_stats
 
 	# Activate NPC
 	slot["is_active"] = true
@@ -2285,18 +1848,18 @@ func get_generic_npc(npc_type: String, position: Vector2, initial_target: Vector
 
 	# RUST COMBAT: Register NPC with combat system
 	# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
-	NPCDataWarehouse.register_npc_for_combat(
-		fresh_stats.ulid,
-		static_state,
-		behavioral_state,
-		fresh_stats.max_hp,
-		fresh_stats.attack,
-		fresh_stats.defense
-	)
+	#NPCDataWarehouse.register_npc_for_combat(
+		#fresh_stats.ulid,
+		#static_state,
+		#behavioral_state,
+		#fresh_stats.max_hp,
+		#fresh_stats.attack,
+		#fresh_stats.defense
+	#)
 
 	# RUST COMBAT: Set initial position
 	# Pass raw ULID bytes (PackedByteArray) instead of hex string for performance
-	NPCDataWarehouse.update_npc_position(fresh_stats.ulid, position.x, position.y)
+	#NPCDataWarehouse.update_npc_position(fresh_stats.ulid, position.x, position.y)
 
 	# Register with AI system for autonomous behavior (Y queried from heightmap)
 	register_npc_ai(npc, npc_type)
@@ -2464,59 +2027,15 @@ func print_pool_stats() -> void:
 	print("==================================")
 
 
-## Get NPC stats by binary ULID
-func get_stats(ulid: PackedByteArray) -> NPCStats:
-	var ulid_key = ULID.to_hex(ulid)
-	return get_stats_by_key(ulid_key)
+## RUST COMBAT: Stats functions removed - use Rust NPCDataWarehouse directly
+# func get_stats(ulid: PackedByteArray):
+# func get_stats_by_key(ulid_key: String):
+# func get_persistent_npc_stats_by_name(npc_name: String):
 
 
-## Get NPC stats by hex string key (for internal use)
-func get_stats_by_key(ulid_key: String) -> NPCStats:
-	# MIGRATION: Fetch from Rust NPCDataWarehouse
-	var json_str = NPCDataWarehouse.get_npc(ulid_key)
-	if json_str == "":
-		return null
-
-	var json = JSON.new()
-	var parse_result = json.parse(json_str)
-	if parse_result != OK:
-		push_error("Failed to parse NPC stats JSON for ULID: %s" % ulid_key)
-		return null
-
-	var stats = NPCStats.new()
-	stats.from_dict(json.data)
-	return stats
-
-
-## Get persistent NPC stats by name
-func get_persistent_npc_stats_by_name(npc_name: String) -> NPCStats:
-	for slot in persistent_pool:
-		if slot["npc_name"] == npc_name and slot.has("ulid"):
-			var ulid_key = slot["ulid"]
-			return get_stats_by_key(ulid_key)
-	return null
-
-
-## Save all NPC stats (only persistent NPCs need to be saved)
+## RUST COMBAT: Save function disabled - Rust handles persistence
 func save_all_stats() -> Dictionary:
-	var saved_data = {}
-
-	# MIGRATION: Only save persistent NPCs (generic NPCs are ephemeral)
-	# Fetch stats from Rust NPCDataWarehouse
-	for slot in persistent_pool:
-		if slot.has("ulid"):
-			var ulid_key = slot["ulid"]
-			var stats = get_stats_by_key(ulid_key)
-
-			if stats:
-				saved_data[ulid_key] = {
-					"stats": stats.to_dict(),
-					"npc_name": slot["npc_name"],
-					"npc_type": slot["npc_type"],
-					"is_persistent": true
-				}
-
-	return saved_data
+	return {}
 
 
 ## ===== UI SPRITE CACHE SYSTEM =====

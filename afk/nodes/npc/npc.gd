@@ -117,51 +117,10 @@ func _physics_process(delta: float) -> void:
 
 
 func _update_animation() -> void:
-	if not animated_sprite or not animated_sprite.sprite_frames:
-		return
-
-	# Since states are bitwise, check individual flags with priority order
-	# Priority: DEAD > DAMAGED > ATTACKING > WALKING > IDLE
-	# Early exit pattern for common cases (optimized for performance)
-	var animation_name: String = ""
-
-	# Debug tracking (not used, kept for potential debugging)
-	# Check if this is an ally (warrior/archer) using static_state
-	var is_warrior_or_archer = (static_state & NPCManager.NPCStaticState.ALLY) != 0
-	var is_actually_moving = current_speed > 0.1
-
-	# Check high-priority states first (less common, but more important)
-	if current_state & NPCManager.NPCState.DEAD:
-		animation_name = state_to_animation.get(NPCManager.NPCState.DEAD, "dead")
-	elif current_state & NPCManager.NPCState.DAMAGED:
-		animation_name = state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt")
-	elif current_state & NPCManager.NPCState.ATTACKING:
-		animation_name = state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking")
-	# IMPORTANT: If actually moving (speed > 0), ALWAYS show walking animation
-	# This ensures archers kiting in combat still show walking animation
-	elif current_speed > 5.0:
-		animation_name = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
-		# Also set WALKING state if not already set (defensive fix for archers)
-		if not (current_state & NPCManager.NPCState.WALKING):
-			current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING
-	# Check common states (most frequent cases)
-	elif current_state & NPCManager.NPCState.WALKING:
-		animation_name = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
-	elif current_state & NPCManager.NPCState.IDLE:
-		animation_name = state_to_animation.get(NPCManager.NPCState.IDLE, "idle")
-	else:
-		animation_name = "idle"  # Fallback to idle
-		# Force IDLE state to fix this edge case - remove all other behavioral states first
-		current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.ATTACKING & ~NPCManager.NPCState.DAMAGED) | NPCManager.NPCState.IDLE
-
-	# Play animation if it exists, otherwise fallback to idle
-	# Only call play() if animation has changed to avoid restarting the same animation
-	if animated_sprite.sprite_frames.has_animation(animation_name):
-		if animated_sprite.animation != animation_name:
-			animated_sprite.play(animation_name)
-	elif animated_sprite.sprite_frames.has_animation("idle"):
-		if animated_sprite.animation != "idle":
-			animated_sprite.play("idle")
+	# RUST COMBAT: Rust controls all animations directly
+	# GDScript no longer manages animations - Rust updates AnimatedSprite2D directly
+	# This function is kept for compatibility but does nothing
+	pass
 
 
 ## Attack action (can be overridden by subclasses)
@@ -245,14 +204,8 @@ func move_to_position(target_x: float) -> void:
 	# Start from zero speed for smooth acceleration
 	current_speed = 0.0
 
-	# Update state to trigger walking animation
-	# Don't change state if currently attacking (let attack animation finish)
-	if CombatManager and CombatManager.has_state(self, NPCManager.NPCState.ATTACKING):
-		print("NPC movement queued - waiting for attack to finish")
-		return  # Don't interrupt attack animation
-
-	# Preserve combat type and faction flags when transitioning to WALKING
-	current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING
+	# RUST COMBAT: State management now handled by Rust
+	# GDScript no longer manages NPC states during movement
 
 	# Emit signal to AI System
 	movement_started.emit(target_x)

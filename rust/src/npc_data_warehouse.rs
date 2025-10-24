@@ -286,7 +286,8 @@ impl RustNPC {
     fn activate(&mut self, position: Vector2) {
         self.is_active = true;
         self.node.set_visible(true);
-        self.node.set_global_position(position);
+        // Use local position (relative to parent Layer4Objects) not global
+        self.node.set_position(position);
 
         // Start with idle animation when spawning
         if let Some(ref sprite) = self.animated_sprite {
@@ -298,7 +299,7 @@ impl RustNPC {
             godot_warn!("[RUST NPC] No AnimatedSprite2D found for {}!", self.npc_type);
         }
 
-        godot_print!("[RUST NPC] Activated {} at {:?}, visible={}",
+        godot_print!("[RUST NPC] Activated {} at local position {:?}, visible={}",
             self.npc_type, position, self.node.is_visible());
     }
 
@@ -969,10 +970,20 @@ impl NPCDataWarehouse {
 
         let ulid = npc.ulid;
 
+        // Set ULID as a property on the NPC node BEFORE adding to tree
+        // Use the existing 'ulid' property defined in npc.gd base class
+        let ulid_bytes = PackedByteArray::from(&ulid[..]);
+        let ulid_variant = ulid_bytes.to_variant();
+        let _ = npc.node.set("ulid", &ulid_variant);
+
         // Add NPC to scene tree if container is set
         if let Ok(mut container_guard) = self.scene_container.lock() {
             if let Some(ref mut container) = *container_guard {
+                let container_path = container.get_path();
                 container.add_child(&npc.node);
+                let node_path = npc.node.get_path();
+                godot_print!("[RUST POOL] Added {} to scene tree: container={}, node_path={}",
+                    npc_type, container_path, node_path);
             } else {
                 godot_error!("[RUST POOL] Cannot spawn NPC - scene container not set!");
                 return None;
@@ -982,14 +993,8 @@ impl NPCDataWarehouse {
             return None;
         }
 
-        // Activate the NPC
+        // Activate the NPC AFTER adding to tree (important for visibility to work)
         npc.activate(position);
-
-        // Set ULID as a property on the NPC node so GDScript can query Rust for data
-        // Use the existing 'ulid' property defined in npc.gd base class
-        let ulid_bytes = PackedByteArray::from(&ulid[..]);
-        let ulid_variant = ulid_bytes.to_variant();
-        let _ = npc.node.set("ulid", &ulid_variant);
 
         // Store NPC metadata (name, type) in ByteMaps
         let npc_name = npc.name.clone();
@@ -1335,7 +1340,7 @@ impl NPCDataWarehouse {
         self.calculate_movement_directions(&active_npcs);
 
         // 2.5. Apply waypoint movement (move NPCs towards their waypoints)
-        self.apply_waypoint_movement(_delta);
+        self.apply_waypoint_movement(&active_npcs, _delta);
 
         // 2.6. Update animations based on behavioral state (Rust controls animations)
         self.update_npc_animations(&active_npcs);
@@ -1514,6 +1519,14 @@ impl NPCDataWarehouse {
     /// Calculate movement directions for all NPCs (pursue nearest hostile)
     /// Stores movement direction in HolyMap as "move_dir:ulid" -> "x,y"
     fn calculate_movement_directions(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) {
+        // static mut DIR_LOG_COUNT: u32 = 0;
+        // unsafe {
+        //     DIR_LOG_COUNT += 1;
+        //     if DIR_LOG_COUNT == 1 {
+        //         godot_print!("[RUST CALC] calculate_movement_directions called with {} NPCs", npcs.len());
+        //     }
+        // }
+
         for (ulid_bytes_a, x_a, y_a, static_state_a, behavioral_state_a, _, _, _) in npcs {
             // Skip if dead
             if (*behavioral_state_a & NPCState::DEAD.bits() as i32) != 0 {
@@ -1555,6 +1568,18 @@ impl NPCDataWarehouse {
             }
 
             // Calculate waypoint (target position to move toward)
+            // static mut HOSTILE_LOG_COUNT: u32 = 0;
+            // unsafe {
+            //     HOSTILE_LOG_COUNT += 1;
+            //     if HOSTILE_LOG_COUNT < 5 {
+            //         if nearest_hostile.is_some() {
+            //             godot_print!("[RUST HOSTILE] Found hostile target");
+            //         } else {
+            //             godot_print!("[RUST HOSTILE] No hostile target found");
+            //         }
+            //     }
+            // }
+
             if let Some((target_x, target_y, distance)) = nearest_hostile {
                 // Get attack range for this NPC
                 let attack_range = Self::get_attack_range(*static_state_a);
@@ -1595,11 +1620,12 @@ impl NPCDataWarehouse {
                                 SafeValue(format!("{},{}", clamped_x, clamped_y))
                             );
 
-                            // Update behavioral state to WALKING | COMBAT (remove IDLE)
+                            // Update behavioral state to COMBAT only (remove IDLE)
+                            // WALKING will be set in apply_waypoint_movement when actually moving
                             let current_state = *behavioral_state_a;
                             let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
-                                | NPCState::WALKING.bits() as i32
                                 | NPCState::COMBAT.bits() as i32;
+
                             self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
                         }
                     } else if distance > attack_range {
@@ -1618,10 +1644,10 @@ impl NPCDataWarehouse {
                             SafeValue(format!("{},{}", clamped_x, clamped_y))
                         );
 
-                        // Update behavioral state to WALKING | COMBAT (remove IDLE)
+                        // Update behavioral state to COMBAT only (remove IDLE)
+                        // WALKING will be set in apply_waypoint_movement when actually moving
                         let current_state = *behavioral_state_a;
                         let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
-                            | NPCState::WALKING.bits() as i32
                             | NPCState::COMBAT.bits() as i32;
                         self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
                     } else {
@@ -1651,10 +1677,10 @@ impl NPCDataWarehouse {
                             SafeValue(format!("{},{}", clamped_x, clamped_y))
                         );
 
-                        // Update behavioral state to WALKING | COMBAT (remove IDLE)
+                        // Update behavioral state to COMBAT only (remove IDLE)
+                        // WALKING will be set in apply_waypoint_movement when actually moving
                         let current_state = *behavioral_state_a;
                         let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
-                            | NPCState::WALKING.bits() as i32
                             | NPCState::COMBAT.bits() as i32;
                         self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
                     } else {
@@ -1676,6 +1702,15 @@ impl NPCDataWarehouse {
                 let current_state = *behavioral_state_a;
                 let new_state = (current_state & !(NPCState::WALKING.bits() as i32) & !(NPCState::COMBAT.bits() as i32))
                     | NPCState::IDLE.bits() as i32;
+
+                // static mut IDLE_LOG_COUNT: u32 = 0;
+                // unsafe {
+                //     IDLE_LOG_COUNT += 1;
+                //     if IDLE_LOG_COUNT < 5 { // Log first few times
+                //         godot_print!("[RUST MOVEMENT] No enemies found, setting NPC to IDLE (was: {}, now: {})", current_state, new_state);
+                //     }
+                // }
+
                 self.npc_behavioral_state.insert_ulid(ulid_bytes_a, new_state.to_string());
             }
         }
@@ -1684,22 +1719,32 @@ impl NPCDataWarehouse {
     /// Apply waypoint movement - move NPCs towards their waypoints
     /// Called every combat tick with delta time
     /// Rust directly updates both the position data AND the Node2D visual position
-    fn apply_waypoint_movement(&self, delta_time: f32) {
+    fn apply_waypoint_movement(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)], delta_time: f32) {
         const MOVEMENT_SPEED: f32 = 30.0; // pixels per second
 
-        for entry in self.active_combat_npcs.iter() {
-            let ulid_hex = entry.key();
+        // static mut MOVEMENT_LOG_COUNT: u32 = 0;
+        // unsafe {
+        //     MOVEMENT_LOG_COUNT += 1;
+        //     if MOVEMENT_LOG_COUNT == 1 {
+        //         godot_print!("[RUST MOVEMENT] apply_waypoint_movement called with {} NPCs", npcs.len());
+        //     }
+        // }
 
-            // Convert hex to bytes
-            let ulid_bytes = match hex_to_bytes(ulid_hex) {
-                Ok(bytes) => bytes,
-                Err(_) => continue,
-            };
+        for (ulid_bytes, _x, _y, _static_state, _behavioral_state, _, _, _) in npcs {
+            // Convert bytes to hex for storage key lookup
+            let ulid_hex = bytes_to_hex(ulid_bytes);
 
             // Get current position from npc_positions ByteMap (stored as "x,y")
             let pos_str = self.npc_positions.get_ulid(&ulid_bytes).unwrap_or_default();
             let coords: Vec<&str> = pos_str.split(',').collect();
             if coords.len() != 2 {
+                // static mut POS_FAIL_COUNT: u32 = 0;
+                // unsafe {
+                //     POS_FAIL_COUNT += 1;
+                //     if POS_FAIL_COUNT < 3 {
+                //         godot_print!("[RUST MOVEMENT] Invalid position for NPC: '{}'", pos_str);
+                //     }
+                // }
                 continue;
             }
             let current_x: f32 = coords[0].parse().unwrap_or(0.0);
@@ -1708,6 +1753,13 @@ impl NPCDataWarehouse {
             // Get waypoint from storage (stored as "waypoint:{ulid_hex}" -> "x,y")
             let waypoint_key = SafeString(format!("waypoint:{}", ulid_hex));
             if let Some(waypoint_value) = self.storage.get(&waypoint_key) {
+                // static mut WAYPOINT_FOUND_COUNT: u32 = 0;
+                // unsafe {
+                //     WAYPOINT_FOUND_COUNT += 1;
+                //     if WAYPOINT_FOUND_COUNT < 3 {
+                //         godot_print!("[RUST MOVEMENT] Found waypoint: {}", waypoint_value.0);
+                //     }
+                // }
                 let waypoint_coords: Vec<&str> = waypoint_value.0.split(',').collect();
                 if waypoint_coords.len() != 2 {
                     continue;
@@ -1731,12 +1783,23 @@ impl NPCDataWarehouse {
                     // Update position in npc_positions ByteMap
                     self.npc_positions.insert_ulid(&ulid_bytes, format!("{},{}", new_x, new_y));
 
-                    // Update Node2D visual position directly from Rust
+                    // Set WALKING state since NPC is actually moving
+                    if let Some(state_str) = self.npc_behavioral_state.get_ulid(&ulid_bytes) {
+                        if let Ok(current_state) = state_str.parse::<i32>() {
+                            // Add WALKING flag if not already set
+                            if (current_state & NPCState::WALKING.bits() as i32) == 0 {
+                                let new_state = current_state | NPCState::WALKING.bits() as i32;
+                                self.npc_behavioral_state.insert_ulid(&ulid_bytes, new_state.to_string());
+                            }
+                        }
+                    }
+
+                    // Update Node2D visual position directly from Rust (use local position)
                     for pool_entry in self.active_npc_pool.iter() {
                         let npc = pool_entry.value();
-                        if &npc.ulid == &ulid_bytes {
+                        if &npc.ulid == ulid_bytes {
                             let mut node_mut = npc.node.clone();
-                            node_mut.set_global_position(Vector2::new(new_x, new_y));
+                            node_mut.set_position(Vector2::new(new_x, new_y));
                             break;
                         }
                     }
@@ -1749,19 +1812,45 @@ impl NPCDataWarehouse {
     /// Called every frame during combat tick
     /// Animation names match SpriteFrames: "idle", "walking", "attacking", "hurt", "dead"
     fn update_npc_animations(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) {
-        for (ulid_bytes, _, _, _static_state, behavioral_state, _, _, _) in npcs {
+        // TEMPORARY: Disable animation updates - animations are set during activate()
+        return;
+
+        #[allow(unreachable_code)]
+        for (ulid_bytes, _, _, _static_state, _old_behavioral_state, _, _, _) in npcs {
+            // Fetch the CURRENT behavioral state (not the stale one from npcs array)
+            // This is important because apply_waypoint_movement() may have updated it
+            let behavioral_state = if let Some(state_str) = self.npc_behavioral_state.get_ulid(ulid_bytes) {
+                state_str.parse::<i32>().unwrap_or(NPCState::IDLE.bits() as i32)
+            } else {
+                NPCState::IDLE.bits() as i32
+            };
+
             // Determine animation based on behavioral state (priority order)
-            let animation_name = if (*behavioral_state & NPCState::DEAD.bits() as i32) != 0 {
+            let animation_name = if (behavioral_state & NPCState::DEAD.bits() as i32) != 0 {
                 "dead"
-            } else if (*behavioral_state & NPCState::DAMAGED.bits() as i32) != 0 {
+            } else if (behavioral_state & NPCState::DAMAGED.bits() as i32) != 0 {
                 "hurt"
-            } else if (*behavioral_state & NPCState::ATTACKING.bits() as i32) != 0 {
+            } else if (behavioral_state & NPCState::ATTACKING.bits() as i32) != 0 {
                 "attacking"
-            } else if (*behavioral_state & NPCState::WALKING.bits() as i32) != 0 {
+            } else if (behavioral_state & NPCState::WALKING.bits() as i32) != 0 {
                 "walking"
             } else {
                 "idle"
             };
+
+            // Debug: Log animation updates (disabled)
+            // static mut ANIM_UPDATE_COUNT: u32 = 0;
+            // unsafe {
+            //     ANIM_UPDATE_COUNT += 1;
+            //     if ANIM_UPDATE_COUNT <= 50 {
+            //         let ulid_hex = bytes_to_hex(ulid_bytes);
+            //         godot_print!("[RUST ANIM] ULID {} - animation: '{}', behavioral_state: {}, IDLE: {}, WALKING: {}",
+            //             &ulid_hex[24..], animation_name, behavioral_state,
+            //             (behavioral_state & NPCState::IDLE.bits() as i32) != 0,
+            //             (behavioral_state & NPCState::WALKING.bits() as i32) != 0
+            //         );
+            //     }
+            // }
 
             // Find the NPC in the active pool and update its animation
             for pool_entry in self.active_npc_pool.iter() {
@@ -1769,11 +1858,10 @@ impl NPCDataWarehouse {
                 if &npc.ulid == ulid_bytes {
                     if let Some(ref sprite) = npc.animated_sprite {
                         let mut sprite_mut = sprite.clone();
-                        let current_anim = sprite_mut.get_animation();
                         let new_anim = StringName::from(animation_name);
-                        // Only update if animation changed (avoid redundant calls)
-                        if current_anim != new_anim {
-                            sprite_mut.set_animation(&new_anim);
+                        // Always set animation (Godot is smart about redundant calls)
+                        sprite_mut.set_animation(&new_anim);
+                        if !sprite_mut.is_playing() {
                             sprite_mut.play();
                         }
                     }
@@ -2099,8 +2187,9 @@ impl NPCDataWarehouse {
         let world_min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
         let world_max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
 
-        // Spawn 1 warrior on left side
-        let warrior_pos = Vector2::new(world_min_x + 50.0, (world_min_y + world_max_y) / 2.0);
+        // Spawn 1 warrior on left side (use visible screen area, not world bounds)
+        // Allies spawn around x=150 (left side of visible screen)
+        let warrior_pos = Vector2::new(150.0, (world_min_y + world_max_y) / 2.0);
         if let Some(ulid) = self.rust_spawn_npc("warrior", warrior_pos) {
             // Register warrior for combat
             self.register_npc_for_combat_internal(
@@ -2113,8 +2202,8 @@ impl NPCDataWarehouse {
             );
         }
 
-        // Spawn 1 archer on left side
-        let archer_pos = Vector2::new(world_min_x + 100.0, (world_min_y + world_max_y) / 2.0 + 20.0);
+        // Spawn 1 archer on left side (slightly behind warrior)
+        let archer_pos = Vector2::new(200.0, (world_min_y + world_max_y) / 2.0 + 20.0);
         if let Some(ulid) = self.rust_spawn_npc("archer", archer_pos) {
             // Register archer for combat
             self.register_npc_for_combat_internal(
@@ -2134,8 +2223,9 @@ impl NPCDataWarehouse {
 
         for i in 0..2 {
             let monster_type = monster_types[rng.random_range(0..monster_types.len())];
+            // Spawn monsters on right side of visible screen (around x=1000-1100)
             let monster_pos = Vector2::new(
-                world_max_x - 50.0,
+                1050.0,
                 world_min_y + ((i as f32 + 1.0) * (world_max_y - world_min_y) / 3.0)
             );
 
@@ -2213,11 +2303,11 @@ impl NPCDataWarehouse {
             let world_min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
             let world_max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
 
-            // Spawn each monster directly
+            // Spawn each monster directly (right side of visible screen)
             for _ in 0..wave_size {
                 let monster_type = monster_types[rng.random_range(0..monster_types.len())];
                 let spawn_pos = Vector2::new(
-                    world_max_x - 50.0,
+                    1050.0, // Right side of screen
                     rng.random_range(world_min_y..world_max_y)
                 );
 
@@ -2307,11 +2397,11 @@ impl NPCDataWarehouse {
             let world_min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
             let world_max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
 
-            // Spawn ally on left side
+            // Spawn ally on left side (visible screen area)
             use rand::Rng;
             let mut rng = rand::rng();
             let spawn_pos = Vector2::new(
-                world_min_x + 50.0,
+                150.0, // Left side of screen
                 rng.random_range(world_min_y..world_max_y)
             );
 

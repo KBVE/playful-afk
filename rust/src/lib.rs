@@ -3,6 +3,7 @@ use godot::prelude::*;
 mod holymap;
 mod bytemap;
 mod name_generator;
+mod inventory_data_warehouse;
 mod npc_data_warehouse;
 
 struct Godo;

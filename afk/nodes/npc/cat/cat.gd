@@ -214,25 +214,6 @@ func _on_pet_fed(food_item: Dictionary) -> void:
 
 ## Check for nearby enemies and call for help if found
 func _check_for_danger() -> void:
-	if not CombatManager:
-		return
-
-	# Find nearest enemy within danger range
-	var nearest_enemy = CombatManager.find_nearest_target(self, DANGER_RANGE)
-
-	if nearest_enemy and is_instance_valid(nearest_enemy):
-		# Enemy detected! Spawn catflag rally point near the enemy (with bounds checking)
-		# The flag itself will call for help (CASTABLE behavior)
-		if EnvironmentManager:
-			# Calculate flag position: between cat and enemy, closer to enemy
-			var flag_pos = global_position.lerp(nearest_enemy.global_position, 0.7)
-
-			# Ensure flag position is in safe bounds
-			if NPCManager:
-				flag_pos = NPCManager.clamp_to_safe_bounds(flag_pos)
-
-			var flag = EnvironmentManager.spawn_object("catflag", flag_pos)
-			if not flag:
-				push_warning("Cat: Failed to place rally flag (flag may already be on map)")
-		else:
-			push_error("Cat: EnvironmentManager not available!")
+	# RUST COMBAT: CombatManager removed - danger detection disabled for now
+	# TODO: Implement danger detection in Rust or via NPCManager
+	pass

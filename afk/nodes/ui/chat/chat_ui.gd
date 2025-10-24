@@ -5,9 +5,7 @@ class_name ChatUI
 ## Left side: NPC portrait (20%)
 ## Right side: Dialogue box with text and buttons (80%)
 
-## DEPRECATED: Preload NPCStats for backward compatibility
-## Stats are now managed by Rust NPCDataWarehouse, but legacy code still uses NPCStats
-const NPCStats = preload("res://nodes/npc/npc_stats.gd")
+## RUST COMBAT: Stats are now managed by Rust NPCDataWarehouse
 
 ## Signals
 signal dialogue_option_selected(option_index: int)

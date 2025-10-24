@@ -2,7 +2,7 @@ extends Node
 
 ## GameplayCache - Centralized performance cache for gameplay systems
 ## Autoload singleton that caches frequently-accessed game state
-## Used by NPCManager, CombatManager, and other gameplay systems
+## Used by NPCManager and other gameplay systems
 
 signal viewport_resized(new_size: Vector2)
 

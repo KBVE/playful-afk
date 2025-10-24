@@ -6,7 +6,6 @@ use ulid::Ulid;
 use once_cell::sync::Lazy;
 use dashmap::DashMap;
 use std::sync::Arc;
-use godot::classes::PackedByteArray;
 use godot::prelude::*;
 
 // ============================================================================

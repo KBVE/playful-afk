@@ -26,6 +26,15 @@ echo "AFK dir:    $AFK_DIR"
 echo "Plugin dir: $PLUGIN_DIR"
 echo ""
 
+# Pre-flight: terminate running Godot instances to avoid locking dylibs
+echo "Pre-flight: checking for running Godot instances..."
+if pkill -9 godot >/dev/null 2>&1; then
+    echo "  ✓ Terminated existing Godot processes"
+else
+    echo "  ℹ No running Godot processes found (or unable to terminate)"
+fi
+echo ""
+
 # Step 1: Create plugin directory structure
 echo "[1/4] Creating plugin directories..."
 mkdir -p "$PLUGIN_DIR/bin/debug"
