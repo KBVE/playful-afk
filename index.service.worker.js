@@ -4,7 +4,7 @@
 // Incrementing CACHE_VERSION will kick off the install event and force
 // previously cached resources to be updated from the network.
 /** @type {string} */
-const CACHE_VERSION = '1761285123|7260238';
+const CACHE_VERSION = '1761290545|7081018';
 /** @type {string} */
 const CACHE_PREFIX = 'afk-sw-cache-';
 const CACHE_NAME = CACHE_PREFIX + CACHE_VERSION;
