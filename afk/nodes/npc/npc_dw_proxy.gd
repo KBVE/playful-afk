@@ -33,6 +33,25 @@ func _ready() -> void:
 	print("NPCDataWarehouse Singleton: Initializing Rust backend...")
 	_warehouse = GodotNPCDataWarehouse.new()
 	add_child(_warehouse)
+
+	# Initialize NPC pools immediately (before combat tick can run)
+	# This prevents race conditions where combat tries to spawn before pools exist
+	print("[NPCDataWarehouse] Pre-initializing NPC pools...")
+
+	# Allies
+	_warehouse.initialize_npc_pool("warrior", 10, "res://nodes/npc/warrior/warrior.tscn")
+	_warehouse.initialize_npc_pool("archer", 10, "res://nodes/npc/archer/archer.tscn")
+
+	# Monsters
+	_warehouse.initialize_npc_pool("goblin", 10, "res://nodes/npc/goblin/goblin.tscn")
+	_warehouse.initialize_npc_pool("mushroom", 10, "res://nodes/npc/mushroom/mushroom.tscn")
+	_warehouse.initialize_npc_pool("skeleton", 10, "res://nodes/npc/skeleton/skeleton.tscn")
+	_warehouse.initialize_npc_pool("eyebeast", 10, "res://nodes/npc/eyebeast/eyebeast.tscn")
+
+	# Passive
+	_warehouse.initialize_npc_pool("chicken", 5, "res://nodes/npc/chicken/chicken.tscn")
+
+	print("[NPCDataWarehouse] NPC pools pre-initialized successfully!")
 	print("NPCDataWarehouse Singleton: Ready!")
 
 
@@ -42,6 +61,40 @@ func register_pool(npc_type: String, max_size: int, scene_path: String) -> void:
 		_warehouse.register_pool(npc_type, max_size, scene_path)
 	else:
 		push_error("NPCDataWarehouse: Warehouse not initialized!")
+
+
+# ===== Rust NPC Pool System Methods =====
+
+## Initialize an NPC pool (pre-create NPCs)
+## Call this on game start for each NPC type
+func initialize_npc_pool(npc_type: String, pool_size: int, scene_path: String) -> void:
+	if _warehouse:
+		_warehouse.initialize_npc_pool(npc_type, pool_size, scene_path)
+	else:
+		push_error("NPCDataWarehouse: Warehouse not initialized!")
+
+
+## Set the scene container where NPCs will be added as children
+func set_scene_container(container: Node2D) -> void:
+	if _warehouse:
+		_warehouse.set_scene_container(container)
+	else:
+		push_error("NPCDataWarehouse: Warehouse not initialized!")
+
+
+## Spawn an NPC from the Rust pool
+## Returns the ULID bytes of the spawned NPC, or empty PackedByteArray if failed
+func rust_spawn_npc(npc_type: String, position: Vector2) -> PackedByteArray:
+	if _warehouse:
+		return _warehouse.rust_spawn_npc(npc_type, position)
+	return PackedByteArray()
+
+
+## Despawn an NPC and return it to the pool
+func rust_despawn_npc(ulid: PackedByteArray) -> bool:
+	if _warehouse:
+		return _warehouse.rust_despawn_npc(ulid)
+	return false
 
 
 ## Store active NPC data
@@ -257,7 +310,7 @@ func get_combat_type(state: int) -> int:
 		return _warehouse.get_combat_type(state)
 	return 0
 
-## Enter combat state (removes IDLE, WANDERING; adds COMBAT)
+## Enter combat state (removes IDLE; adds COMBAT)
 func enter_combat_state(current_state: int) -> int:
 	if _warehouse:
 		return _warehouse.enter_combat_state(current_state)
@@ -269,7 +322,7 @@ func exit_combat_state(current_state: int) -> int:
 		return _warehouse.exit_combat_state(current_state)
 	return current_state
 
-## Start attacking (adds ATTACKING, removes IDLE/WANDERING)
+## Start attacking (adds ATTACKING, removes IDLE)
 func start_attack(current_state: int) -> int:
 	if _warehouse:
 		return _warehouse.start_attack(current_state)

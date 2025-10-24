@@ -256,13 +256,11 @@ func _random_state_change() -> void:
 	# 70% chance to idle, 30% chance to walk (using modulo for fun!)
 	var should_walk = (randi() % 10) >= 7  # 3 out of 10 numbers (7,8,9) = 30%
 
-	# Wandering monsters should have WANDERING flag set
-	# WALKING is just the movement component
 	if should_walk:
-		current_state = NPCManager.NPCState.WALKING | NPCManager.NPCState.WANDERING
+		current_state = NPCManager.NPCState.WALKING
 		_move_direction = Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized()
 	else:
-		current_state = NPCManager.NPCState.IDLE | NPCManager.NPCState.WANDERING
+		current_state = NPCManager.NPCState.IDLE
 		_move_direction = Vector2.ZERO
 
 	# Randomize next state change time

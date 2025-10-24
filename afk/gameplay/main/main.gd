@@ -86,8 +86,9 @@ func _ready() -> void:
 	# Enable spawn processing after initial setup
 	EventManager.set_spawn_enabled(true)
 
-	# Setup ally respawn timer (still handled locally for counting)
-	_setup_ally_respawn_checker()
+	# RUST COMBAT: Ally spawning is now handled by Rust (disabled GDScript ally respawn timer)
+	# Rust handles all spawning (allies + monsters) with proper timing and caps
+	# _setup_ally_respawn_checker()  # DISABLED
 
 
 func _setup_pet() -> void:
@@ -127,6 +128,11 @@ func _setup_character_pool() -> void:
 		NPCManager.set_layer4_container(background.layer4_objects)
 		NPCManager.set_background_reference(background)  # For heightmap queries during AI movement
 
+		# RUST POOL: Set scene container in Rust so it can add/remove NPCs
+		# NOTE: Pools are pre-initialized in NPCDataWarehouse singleton's _ready()
+		# This just sets the container where NPCs will be added
+		NPCDataWarehouse.set_scene_container(background.layer4_objects)
+
 		# Set projectile container for arrows and other projectiles (reparents existing arrows)
 		if ProjectileManager:
 			ProjectileManager.set_projectile_container(background.layer4_objects)
@@ -135,367 +141,27 @@ func _setup_character_pool() -> void:
 		if EnvironmentManager:
 			EnvironmentManager.set_environment_container(background.layer4_objects)
 
-		# RUST COMBAT: Set world bounds from BackgroundManager safe_rectangle
+		# RUST COMBAT: Set world bounds from BackgroundManager (simple 4 bounds)
 		# This ensures Rust waypoint clamping uses the actual background's playable area
-		if BackgroundManager and BackgroundManager.safe_rectangle.has_area():
-			var rect = BackgroundManager.safe_rectangle
+		if BackgroundManager:
 			NPCDataWarehouse.set_world_bounds(
-				rect.position.x,
-				rect.position.x + rect.size.x,
-				rect.position.y,
-				rect.position.y + rect.size.y
+				BackgroundManager.min_x,
+				BackgroundManager.max_x,
+				BackgroundManager.min_y,
+				BackgroundManager.max_y
 			)
-			print("[MAIN] Set Rust world bounds from BackgroundManager: ", rect)
-		else:
-			push_warning("[MAIN] BackgroundManager safe_rectangle not available, using default Rust bounds")
+			print("[MAIN] Set Rust world bounds: X(%f to %f), Y(%f to %f)" % [
+				BackgroundManager.min_x, BackgroundManager.max_x,
+				BackgroundManager.min_y, BackgroundManager.max_y
+			])
 	else:
 		push_error("Layer4Objects not found in background!")
 		return
 
-	# Spawn NPCs using the generic pool system (with stats)
-	# Use background heightmap for accurate Y positioning - can spawn anywhere!
-	var viewport_size = get_viewport_rect().size
-
-	# Define wide spawn range - use almost full screen width
-	var spawn_x_min = 50.0
-	var spawn_x_max = viewport_size.x - 50.0
-
-	# Spawn 1 warrior for debugging
-	var num_warriors = 1
-	for i in range(num_warriors):
-		# Try to find a valid spawn position inside the walkable polygon
-		var spawn_pos = Vector2.ZERO
-		var is_valid = false
-		var attempts = 0
-
-		while attempts < 20 and not is_valid:
-			# Spread evenly across full width
-			var x_pos = spawn_x_min + (i * (spawn_x_max - spawn_x_min) / (num_warriors - 1))
-
-			# Add some random variation to X (±50px)
-			x_pos += randf_range(-50.0, 50.0)
-			x_pos = clamp(x_pos, spawn_x_min, spawn_x_max)
-
-			# Get Y bounds at this X position
-			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
-			var min_y = y_bounds.x
-			var max_y = y_bounds.y
-			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
-			var random_y = randf_range(bottom_70_percent, max_y)
-
-			spawn_pos = Vector2(x_pos, random_y)
-
-			# Check if position is inside walkable area
-			if background.has_method("is_position_in_walkable_area"):
-				is_valid = background.is_position_in_walkable_area(spawn_pos)
-			else:
-				is_valid = true  # Fallback
-
-			attempts += 1
-
-		if is_valid:
-			# Convert global spawn position to Layer4Objects local coordinates
-			var spawn_pos_local = spawn_pos
-			if background.layer4_objects:
-				spawn_pos_local = background.layer4_objects.to_local(spawn_pos)
-
-			var warrior = NPCManager.get_generic_npc("warrior", spawn_pos_local)
-			if warrior:
-				warrior.scale = Vector2(1, 1)  # Normal size for better collision/combat
-				warrior.set_physics_process(false)
-				warrior.set_player_controlled(false)
-				warrior.warrior_clicked.connect(func(): _on_npc_clicked(warrior))
-
-				# Connect death signal for respawn tracking
-				if warrior.has_signal("npc_died"):
-					if not warrior.npc_died.is_connected(_on_ally_died):
-						warrior.npc_died.connect(_on_ally_died.bind(warrior, "warrior"))
-
-				active_warriors.append(warrior)
-		else:
-			push_warning("Could not find valid spawn position for warrior %d" % i)
-
-	# Spawn 0 archers for debugging
-	var num_archers = 0
-	for i in range(num_archers):
-		# Try to find a valid spawn position inside the walkable polygon
-		var spawn_pos = Vector2.ZERO
-		var is_valid = false
-		var attempts = 0
-
-		while attempts < 20 and not is_valid:
-			# Spread evenly across full width (offset slightly from warriors)
-			var offset = (spawn_x_max - spawn_x_min) / (num_archers * 2)
-			var x_pos = spawn_x_min + offset + (i * (spawn_x_max - spawn_x_min) / num_archers)
-
-			# Add some random variation to X (±50px)
-			x_pos += randf_range(-50.0, 50.0)
-			x_pos = clamp(x_pos, spawn_x_min, spawn_x_max)
-
-			# Get Y bounds at this X position
-			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
-			var min_y = y_bounds.x
-			var max_y = y_bounds.y
-			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
-			var random_y = randf_range(bottom_70_percent, max_y)
-
-			spawn_pos = Vector2(x_pos, random_y)
-
-			# Check if position is inside walkable area
-			if background.has_method("is_position_in_walkable_area"):
-				is_valid = background.is_position_in_walkable_area(spawn_pos)
-			else:
-				is_valid = true  # Fallback
-
-			attempts += 1
-
-		if is_valid:
-			# Convert global spawn position to Layer4Objects local coordinates
-			var spawn_pos_local = spawn_pos
-			if background.layer4_objects:
-				spawn_pos_local = background.layer4_objects.to_local(spawn_pos)
-
-			var archer = NPCManager.get_generic_npc("archer", spawn_pos_local)
-			if archer:
-				archer.scale = Vector2(1, 1)  # Normal size for better collision/combat
-				archer.set_physics_process(false)
-				archer.set_player_controlled(false)
-				archer.archer_clicked.connect(func(): _on_npc_clicked(archer))
-
-				# Connect death signal for respawn tracking
-				if archer.has_signal("npc_died"):
-					if not archer.npc_died.is_connected(_on_ally_died):
-						archer.npc_died.connect(_on_ally_died.bind(archer, "archer"))
-
-				active_archers.append(archer)
-		else:
-			push_warning("Could not find valid spawn position for archer %d" % i)
-
-	# Spawn 1 chicken for combat testing
-	var chicken_spawn_pos = Vector2.ZERO
-	var chicken_is_valid = false
-	var chicken_attempts = 0
-
-	while chicken_attempts < 20 and not chicken_is_valid:
-		# Spawn in center of screen
-		var x_pos = viewport_size.x / 2 + randf_range(-100.0, 100.0)
-		var y_bounds = background.get_walkable_y_bounds(x_pos)
-		# Spawn in lower 70% of walkable area to avoid floating appearance on hills
-		var min_y = y_bounds.x
-		var max_y = y_bounds.y
-		var bottom_70_percent = min_y + (max_y - min_y) * 0.3
-		var random_y = randf_range(bottom_70_percent, max_y)
-
-		chicken_spawn_pos = Vector2(x_pos, random_y)
-
-		# Check if position is inside walkable area
-		if background.has_method("is_position_in_walkable_area"):
-			chicken_is_valid = background.is_position_in_walkable_area(chicken_spawn_pos)
-		else:
-			chicken_is_valid = true
-
-		chicken_attempts += 1
-
-	if chicken_is_valid:
-		# Convert global spawn position to Layer4Objects local coordinates
-		var chicken_spawn_pos_local = chicken_spawn_pos
-		if background.layer4_objects:
-			chicken_spawn_pos_local = background.layer4_objects.to_local(chicken_spawn_pos)
-
-		var chicken = NPCManager.get_generic_npc("chicken", chicken_spawn_pos_local)
-		if chicken:
-			chicken.scale = Vector2(1, 1)  # Normal size to match warriors/archers
-			chicken.set_physics_process(false)
-			if chicken.has_signal("chicken_clicked"):
-				chicken.chicken_clicked.connect(func(): _on_npc_clicked(chicken))
-	else:
-		push_warning("Could not find valid spawn position for chicken")
-
-	# Spawn 1 initial mushroom
-	for m in range(1):
-		var mushroom_spawn_pos = Vector2.ZERO
-		var mushroom_is_valid = false
-		var mushroom_attempts = 0
-
-		while mushroom_attempts < 20 and not mushroom_is_valid:
-			# Spawn spread across the screen
-			var x_pos = viewport_size.x * (0.3 + (m * 0.2)) + randf_range(-50.0, 50.0)
-			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
-			var min_y = y_bounds.x
-			var max_y = y_bounds.y
-			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
-			var random_y = randf_range(bottom_70_percent, max_y)
-
-			mushroom_spawn_pos = Vector2(x_pos, random_y)
-
-			# Check if position is inside walkable area
-			if background.has_method("is_position_in_walkable_area"):
-				mushroom_is_valid = background.is_position_in_walkable_area(mushroom_spawn_pos)
-			else:
-				mushroom_is_valid = true
-
-			mushroom_attempts += 1
-
-		if mushroom_is_valid:
-			# Convert global spawn position to Layer4Objects local coordinates
-			var mushroom_spawn_pos_local = mushroom_spawn_pos
-			if background.layer4_objects:
-				mushroom_spawn_pos_local = background.layer4_objects.to_local(mushroom_spawn_pos)
-
-			var mushroom = NPCManager.get_generic_npc("mushroom", mushroom_spawn_pos_local)
-			if mushroom:
-				mushroom.scale = Vector2(1, 1)
-				mushroom.set_physics_process(false)
-				if mushroom.has_signal("mushroom_died"):
-					if not mushroom.mushroom_died.is_connected(_on_monster_died):
-						mushroom.mushroom_died.connect(_on_monster_died.bind(mushroom))
-				if mushroom.has_signal("mushroom_clicked"):
-					if not mushroom.mushroom_clicked.is_connected(_on_npc_clicked):
-						mushroom.mushroom_clicked.connect(func(): _on_npc_clicked(mushroom))
-				active_monsters.append(mushroom)
-		else:
-			push_warning("Could not find valid spawn position for mushroom %d" % m)
-
-	# Spawn 1 initial goblin
-	for g in range(1):
-		var goblin_spawn_pos = Vector2.ZERO
-		var goblin_is_valid = false
-		var goblin_attempts = 0
-
-		while goblin_attempts < 20 and not goblin_is_valid:
-			# Spawn spread across the screen (offset from mushrooms)
-			var x_pos = viewport_size.x * (0.4 + (g * 0.2)) + randf_range(-50.0, 50.0)
-			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
-			var min_y = y_bounds.x
-			var max_y = y_bounds.y
-			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
-			var random_y = randf_range(bottom_70_percent, max_y)
-
-			goblin_spawn_pos = Vector2(x_pos, random_y)
-
-			# Check if position is inside walkable area
-			if background.has_method("is_position_in_walkable_area"):
-				goblin_is_valid = background.is_position_in_walkable_area(goblin_spawn_pos)
-			else:
-				goblin_is_valid = true
-
-			goblin_attempts += 1
-
-		if goblin_is_valid:
-			# Convert global spawn position to Layer4Objects local coordinates
-			var goblin_spawn_pos_local = goblin_spawn_pos
-			if background.layer4_objects:
-				goblin_spawn_pos_local = background.layer4_objects.to_local(goblin_spawn_pos)
-
-			var goblin = NPCManager.get_generic_npc("goblin", goblin_spawn_pos_local)
-			if goblin:
-				goblin.scale = Vector2(1, 1)
-				goblin.set_physics_process(false)
-				if goblin.has_signal("goblin_died"):
-					if not goblin.goblin_died.is_connected(_on_monster_died):
-						goblin.goblin_died.connect(_on_monster_died.bind(goblin))
-				if goblin.has_signal("goblin_clicked"):
-					if not goblin.goblin_clicked.is_connected(_on_npc_clicked):
-						goblin.goblin_clicked.connect(func(): _on_npc_clicked(goblin))
-				active_monsters.append(goblin)
-		else:
-			push_warning("Could not find valid spawn position for goblin %d" % g)
-
-	# Spawn 1 initial eyebeast
-	for e in range(1):
-		var eyebeast_spawn_pos = Vector2.ZERO
-		var eyebeast_is_valid = false
-		var eyebeast_attempts = 0
-
-		while eyebeast_attempts < 20 and not eyebeast_is_valid:
-			# Spawn spread across the screen (offset from goblins)
-			var x_pos = viewport_size.x * (0.3 + (e * 0.25)) + randf_range(-50.0, 50.0)
-			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
-			var min_y = y_bounds.x
-			var max_y = y_bounds.y
-			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
-			var random_y = randf_range(bottom_70_percent, max_y)
-
-			eyebeast_spawn_pos = Vector2(x_pos, random_y)
-
-			# Check if position is inside walkable area
-			if background.has_method("is_position_in_walkable_area"):
-				eyebeast_is_valid = background.is_position_in_walkable_area(eyebeast_spawn_pos)
-			else:
-				eyebeast_is_valid = true
-
-			eyebeast_attempts += 1
-
-		if eyebeast_is_valid:
-			# Convert global spawn position to Layer4Objects local coordinates
-			var eyebeast_spawn_pos_local = eyebeast_spawn_pos
-			if background.layer4_objects:
-				eyebeast_spawn_pos_local = background.layer4_objects.to_local(eyebeast_spawn_pos)
-
-			var eyebeast = NPCManager.get_generic_npc("eyebeast", eyebeast_spawn_pos_local)
-			if eyebeast:
-				eyebeast.scale = Vector2(1, 1)
-				eyebeast.set_physics_process(false)
-				if eyebeast.has_signal("eyebeast_died"):
-					if not eyebeast.eyebeast_died.is_connected(_on_monster_died):
-						eyebeast.eyebeast_died.connect(_on_monster_died.bind(eyebeast))
-				if eyebeast.has_signal("eyebeast_clicked"):
-					if not eyebeast.eyebeast_clicked.is_connected(_on_npc_clicked):
-						eyebeast.eyebeast_clicked.connect(func(): _on_npc_clicked(eyebeast))
-				active_monsters.append(eyebeast)
-		else:
-			push_warning("Could not find valid spawn position for eyebeast %d" % e)
-
-	# Spawn 1 initial skeleton
-	for s in range(1):
-		var skeleton_spawn_pos = Vector2.ZERO
-		var skeleton_is_valid = false
-		var skeleton_attempts = 0
-
-		while skeleton_attempts < 20 and not skeleton_is_valid:
-			# Spawn spread across the screen (offset from eyebeasts)
-			var x_pos = viewport_size.x * (0.25 + (s * 0.3)) + randf_range(-50.0, 50.0)
-			var y_bounds = background.get_walkable_y_bounds(x_pos)
-			# Spawn in lower 70% of walkable area to avoid floating appearance on hills
-			var min_y = y_bounds.x
-			var max_y = y_bounds.y
-			var bottom_70_percent = min_y + (max_y - min_y) * 0.3
-			var random_y = randf_range(bottom_70_percent, max_y)
-
-			skeleton_spawn_pos = Vector2(x_pos, random_y)
-
-			# Check if position is inside walkable area
-			if background.has_method("is_position_in_walkable_area"):
-				skeleton_is_valid = background.is_position_in_walkable_area(skeleton_spawn_pos)
-			else:
-				skeleton_is_valid = true
-
-			skeleton_attempts += 1
-
-		if skeleton_is_valid:
-			# Convert global spawn position to Layer4Objects local coordinates
-			var skeleton_spawn_pos_local = skeleton_spawn_pos
-			if background.layer4_objects:
-				skeleton_spawn_pos_local = background.layer4_objects.to_local(skeleton_spawn_pos)
-
-			var skeleton = NPCManager.get_generic_npc("skeleton", skeleton_spawn_pos_local)
-			if skeleton:
-				skeleton.scale = Vector2(1, 1)
-				skeleton.set_physics_process(false)
-				if skeleton.has_signal("skeleton_died"):
-					if not skeleton.skeleton_died.is_connected(_on_monster_died):
-						skeleton.skeleton_died.connect(_on_monster_died.bind(skeleton))
-				if skeleton.has_signal("skeleton_clicked"):
-					if not skeleton.skeleton_clicked.is_connected(_on_npc_clicked):
-						skeleton.skeleton_clicked.connect(func(): _on_npc_clicked(skeleton))
-				active_monsters.append(skeleton)
-		else:
-			push_warning("Could not find valid spawn position for skeleton %d" % s)
+	# RUST COMBAT: All NPC spawning (allies + monsters) is now handled by Rust
+	# NPCs are spawned directly from Rust pools without GDScript involvement
+	# Pools were pre-initialized in NPCDataWarehouse singleton's _ready()
+	print("[MAIN] Character pool setup complete - Rust NPC system ready")
 
 
 func _start_cat_movement() -> void:

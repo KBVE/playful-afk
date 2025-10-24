@@ -5,7 +5,7 @@ class_name EmojiManager
 ## Uses a pool of 4 reusable emoji bubbles
 ## Shows emojis 10% of the time on NPC state changes
 
-## State-to-Emoji mapping
+## State-to-Emoji mapping (SIMPLIFIED)
 const STATE_EMOJIS: Dictionary = {
 	NPCManager.NPCState.IDLE: "😌",       # Relaxed face
 	NPCManager.NPCState.WALKING: "🚶",    # Walking person
@@ -13,9 +13,6 @@ const STATE_EMOJIS: Dictionary = {
 	NPCManager.NPCState.COMBAT: "💥",     # Collision/combat
 	NPCManager.NPCState.DAMAGED: "😵",    # Dizzy face (just got hit)
 	NPCManager.NPCState.DEAD: "💀",       # Skull
-	NPCManager.NPCState.WANDERING: "🤔",  # Thinking face
-	NPCManager.NPCState.RETREATING: "😰", # Anxious/scared face
-	NPCManager.NPCState.PURSUING: "😠",   # Angry face (chasing)
 }
 
 ## Default emoji set (fallback if NPC doesn't have EMOJIS constant)

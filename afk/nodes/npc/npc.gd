@@ -200,11 +200,15 @@ func _update_animation() -> void:
 		animation_name = state_to_animation.get(NPCManager.NPCState.DAMAGED, "hurt")
 	elif current_state & NPCManager.NPCState.ATTACKING:
 		animation_name = state_to_animation.get(NPCManager.NPCState.ATTACKING, "attacking")
+	# IMPORTANT: If actually moving (speed > 0), ALWAYS show walking animation
+	# This ensures archers kiting in combat still show walking animation
+	elif current_speed > 5.0:
+		animation_name = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
+		# Also set WALKING state if not already set (defensive fix for archers)
+		if not (current_state & NPCManager.NPCState.WALKING):
+			current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING
 	# Check common states (most frequent cases)
 	elif current_state & NPCManager.NPCState.WALKING:
-		animation_name = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
-	# If actually moving (speed > 0), always show walking animation regardless of state
-	elif current_speed > 5.0:
 		animation_name = state_to_animation.get(NPCManager.NPCState.WALKING, "walking")
 	elif current_state & NPCManager.NPCState.IDLE:
 		animation_name = state_to_animation.get(NPCManager.NPCState.IDLE, "idle")
@@ -302,8 +306,7 @@ func move_to_position(target_x: float) -> void:
 		return  # Don't interrupt attack animation
 
 	# Preserve combat type and faction flags when transitioning to WALKING
-	# Add WAYPOINT flag to prevent AI from interrupting movement
-	current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING | NPCManager.NPCState.WAYPOINT
+	current_state = (current_state & ~NPCManager.NPCState.IDLE) | NPCManager.NPCState.WALKING
 
 	# Emit signal to AI System
 	movement_started.emit(target_x)
@@ -350,9 +353,8 @@ func _complete_movement() -> void:
 	current_speed = 0.0
 	# Only set to IDLE if not currently attacking
 	if not (current_state & NPCManager.NPCState.ATTACKING):
-		# Preserve combat type and faction flags when transitioning to IDLE
-		# Clear WAYPOINT, WALKING, RETREATING, PURSUING flags
-		current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.WAYPOINT & ~NPCManager.NPCState.RETREATING & ~NPCManager.NPCState.PURSUING) | NPCManager.NPCState.IDLE
+		# Clear WALKING flag
+		current_state = (current_state & ~NPCManager.NPCState.WALKING) | NPCManager.NPCState.IDLE
 	movement_completed.emit(position.x)
 
 
@@ -365,9 +367,8 @@ func stop_auto_movement() -> void:
 	current_speed = 0.0
 	# Only set to IDLE if not currently attacking
 	if not (current_state & NPCManager.NPCState.ATTACKING):
-		# Preserve combat type and faction flags when transitioning to IDLE
-		# Clear WAYPOINT, WALKING, RETREATING, PURSUING flags
-		current_state = (current_state & ~NPCManager.NPCState.WALKING & ~NPCManager.NPCState.WAYPOINT & ~NPCManager.NPCState.RETREATING & ~NPCManager.NPCState.PURSUING) | NPCManager.NPCState.IDLE
+		# Clear WALKING flag
+		current_state = (current_state & ~NPCManager.NPCState.WALKING) | NPCManager.NPCState.IDLE
 
 
 ## Check if currently moving
@@ -414,6 +415,12 @@ func _fire_pending_projectile() -> void:
 	var target = projectile_data.get("target")
 	var target_pos = projectile_data.get("target_pos", Vector2.ZERO)
 	var speed = projectile_data.get("speed", 300.0)
+
+	# IMPORTANT: Face the target before firing
+	# This ensures the archer sprite is flipped correctly
+	if animated_sprite and target_pos != Vector2.ZERO:
+		var direction_to_target = (target_pos - global_position).normalized()
+		animated_sprite.flip_h = direction_to_target.x < 0
 
 	# Fire projectile from ProjectileManager
 	if ProjectileManager and projectile_type == "arrow":

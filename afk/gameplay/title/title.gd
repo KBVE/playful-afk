@@ -309,7 +309,7 @@ func _test_npc_data_warehouse() -> void:
 		)
 	)
 	var goblin_state = NPCDataWarehouse.combine_states(
-		NPCDataWarehouse.get_state("WANDERING"),
+		NPCDataWarehouse.get_state("IDLE"),
 		NPCDataWarehouse.combine_states(
 			NPCDataWarehouse.get_state("MELEE"),
 			NPCDataWarehouse.get_state("MONSTER")

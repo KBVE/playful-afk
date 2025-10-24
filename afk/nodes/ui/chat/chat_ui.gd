@@ -237,16 +237,8 @@ func _get_state_message(state: int) -> String:
 			return "[i](Currently walking around)[/i]"
 		NPCManager.NPCState.ATTACKING:
 			return "[i](Currently attacking!)[/i]"
-		NPCManager.NPCState.WANDERING:
-			return "[i](Currently wandering)[/i]"
 		NPCManager.NPCState.COMBAT:
 			return "[i](Currently in combat!)[/i]"
-		NPCManager.NPCState.RETREATING:
-			return "[i](Currently retreating from danger)[/i]"
-		NPCManager.NPCState.PURSUING:
-			return "[i](Currently pursuing a target)[/i]"
-		NPCManager.NPCState.HURT:
-			return "[i](Currently hurt and recovering)[/i]"
 		NPCManager.NPCState.DAMAGED:
 			return "[i](Just took damage!)[/i]"
 		NPCManager.NPCState.DEAD:

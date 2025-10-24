@@ -48,12 +48,19 @@ echo ""
 # Step 3: Build for WASM (if emsdk is available)
 echo "[3/4] Building for WASM..."
 if command -v emcc &> /dev/null; then
-    echo "  → Building WASM debug with nightly toolchain..."
-    cargo +nightly build -Zbuild-std --target wasm32-unknown-emscripten
+    echo "  → Building WASM debug with nightly toolchain (size-optimized)..."
+    CARGO_PROFILE_DEV_DEBUG=false \
+    CARGO_PROFILE_DEV_OPT_LEVEL=s \
+    CARGO_PROFILE_DEV_STRIP=debuginfo \
+    CARGO_PROFILE_DEV_PANIC=abort \
+    CARGO_PROFILE_DEV_LTO=thin \
+    CARGO_PROFILE_DEV_CODEGEN_UNITS=1 \
+    CARGO_PROFILE_DEV_INCREMENTAL=false \
+        cargo +nightly build -Zbuild-std=std,panic_abort --target wasm32-unknown-emscripten
     echo "  ✓ WASM debug build complete"
 
     echo "  → Building WASM release with nightly toolchain..."
-    cargo +nightly build -Zbuild-std --target wasm32-unknown-emscripten --release
+    cargo +nightly build -Zbuild-std=std,panic_abort --target wasm32-unknown-emscripten --release
     echo "  ✓ WASM release build complete"
 else
     echo "  ⚠ WASM build skipped (emsdk not found)"
@@ -89,8 +96,12 @@ else
 fi
 
 # WASM (Note: emscripten builds use godo.wasm, not libgodo.wasm)
-if [ -f "$TARGET_DIR/wasm32-unknown-emscripten/debug/godo.wasm" ]; then
-    cp "$TARGET_DIR/wasm32-unknown-emscripten/debug/godo.wasm" "$PLUGIN_DIR/bin/debug/"
+WASM_DEBUG_PATH="$TARGET_DIR/wasm32-unknown-emscripten/dev-wasm/godo.wasm"
+if [ ! -f "$WASM_DEBUG_PATH" ]; then
+    WASM_DEBUG_PATH="$TARGET_DIR/wasm32-unknown-emscripten/debug/godo.wasm"
+fi
+if [ -f "$WASM_DEBUG_PATH" ]; then
+    cp "$WASM_DEBUG_PATH" "$PLUGIN_DIR/bin/debug/"
     echo "  ✓ Copied: godo.wasm (debug)"
 fi
 

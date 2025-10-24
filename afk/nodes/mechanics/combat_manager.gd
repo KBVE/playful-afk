@@ -18,8 +18,7 @@ signal target_killed(attacker: Node2D, target: Node2D)
 const FACING_THRESHOLD: float = 0.85  # Dot product threshold for "facing" (stricter, ~30 degrees)
 const ATTACK_COOLDOWN: float = 1.5  # Seconds between attacks
 
-## Health thresholds for state changes
-const HURT_HEALTH_THRESHOLD: float = 0.3  # Below 30% HP triggers HURT state
+## Health thresholds for state changes (SIMPLIFIED - no more HURT state)
 
 ## NOTE: NPCState bitwise flags are defined in NPCManager
 ## Includes behavioral states, combat types, and factions - all unified in NPCState enum
@@ -283,13 +282,10 @@ func should_archer_retreat(attacker: Node2D, target: Node2D) -> bool:
 	return distance < min_range
 
 
-## Check if NPC is hurt (low health - below 30%)
+## Check if NPC is hurt (low health - DEPRECATED, kept for compatibility)
 func is_hurt(npc: Node2D) -> bool:
-	if not npc or not "stats" in npc or not npc.stats:
-		return false
-
-	var health_percent = npc.stats.hp / npc.stats.max_hp
-	return health_percent <= HURT_HEALTH_THRESHOLD
+	# SIMPLIFIED: No longer using HURT state flag
+	return false
 
 
 ## Get optimal kiting range based on NPC health state
@@ -418,8 +414,6 @@ func apply_damage(attacker: Node2D, target: Node2D, damage: float) -> void:
 	if target.has_method("take_damage"):
 		target.take_damage(damage, attacker)  # Pass attacker for counter-attack
 		damage_dealt.emit(attacker, target, damage)
-		# Update HURT state based on target's health
-		_update_hurt_state(target)
 
 		# Check if target died
 		if "stats" in target and target.stats:
@@ -544,8 +538,8 @@ func is_in_combat(attacker: Node2D) -> bool:
 ## Get NPC combat state flags (from active_combatants)
 func get_combat_state(attacker: Node2D) -> int:
 	if active_combatants.has(attacker):
-		return active_combatants[attacker].get("state_flags", NPCManager.NPCState.WANDERING)
-	return NPCManager.NPCState.WANDERING
+		return active_combatants[attacker].get("state_flags", NPCManager.NPCState.IDLE)
+	return NPCManager.NPCState.IDLE
 
 
 ## Check if NPC has specific state flag
@@ -629,20 +623,10 @@ func _get_npc_combat_type(npc: Node2D) -> int:
 	return 0  # No combat type (passive)
 
 
-## Update HURT state flag based on NPC health
+## Update HURT state flag based on NPC health (DEPRECATED - no longer used)
 func _update_hurt_state(npc: Node2D) -> void:
-	if not npc or not "stats" in npc or not npc.stats:
-		return
-
-	# Check if NPC is hurt (low health)
-	if is_hurt(npc):
-		# Add HURT flag to combat state if in active_combatants
-		if active_combatants.has(npc):
-			active_combatants[npc]["state_flags"] |= NPCManager.NPCState.HURT
-	else:
-		# Remove HURT flag if health recovered
-		if active_combatants.has(npc):
-			active_combatants[npc]["state_flags"] &= ~NPCManager.NPCState.HURT
+	# SIMPLIFIED: HURT state removed, this is now a no-op
+	pass
 
 
 ## Calculate bow offset position based on archer's facing direction
@@ -718,14 +702,14 @@ func get_npc_state(npc: Node2D) -> int:
 
 ## Get animation state string from NPCState flags (for setting npc.current_state)
 ## Priority: ATTACKING > WALKING > IDLE
-## Note: COMBAT, WANDERING, RETREATING, PURSUING don't map to animations - they're behavioral states
+## Note: COMBAT doesn't map to animations - it's a behavioral state
 func get_animation_state_string(npc: Node2D) -> String:
 	var state = get_npc_state(npc)
 
 	# Attack animation takes priority
 	if state & NPCManager.NPCState.ATTACKING:
 		return "Attacking"
-	# Walking animation (used for WALKING, RETREATING, PURSUING)
+	# Walking animation
 	elif state & NPCManager.NPCState.WALKING:
 		return "Walking"
 	# Default to idle

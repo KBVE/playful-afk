@@ -1,11 +1,14 @@
 extends Node
 
-## BackgroundManager - Centralized Background & Bounds Management
-## Autoload singleton that manages safe zones and bounds for all NPCs
-## Access via: BackgroundManager.is_in_safe_zone(pos) anywhere in your code
+## BackgroundManager - Simple Rectangle Bounds for NPCs
+## Autoload singleton that manages a simple rectangular safe zone
+## Access via: BackgroundManager.clamp_to_bounds(pos) anywhere in your code
 
-## Safe rectangle for NPC movement (calculated by active background)
-var safe_rectangle: Rect2 = Rect2()
+## Simple rectangle bounds - 4 values: min_x, max_x, min_y, max_y
+var min_x: float = -200.0
+var max_x: float = 1480.0
+var min_y: float = 514.0
+var max_y: float = 640.0
 
 ## Reference to the active background scene
 var active_background: Control = null
@@ -20,55 +23,37 @@ func _ready() -> void:
 func register_background(background: Control) -> void:
 	active_background = background
 
-	# If background has a safe_rectangle, use it
+	# If background has a safe_rectangle, extract the 4 bounds
 	if "safe_rectangle" in background:
-		safe_rectangle = background.safe_rectangle
-		print("BackgroundManager: Registered background with safe zone: ", safe_rectangle)
+		var rect: Rect2 = background.safe_rectangle
+		min_x = rect.position.x
+		max_x = rect.position.x + rect.size.x
+		min_y = rect.position.y
+		max_y = rect.position.y + rect.size.y
+		print("BackgroundManager: Bounds set to X(%f to %f), Y(%f to %f)" % [min_x, max_x, min_y, max_y])
 
 
-## Check if position is in the safe rectangle (fastest check)
+## Check if position is in bounds
 func is_in_safe_zone(pos: Vector2) -> bool:
-	return safe_rectangle.has_point(pos)
+	return pos.x >= min_x and pos.x <= max_x and pos.y >= min_y and pos.y <= max_y
 
 
-## Get walkable Y bounds at a specific X position
-## Returns Vector2(min_y, max_y) where NPCs can walk
-func get_walkable_y_bounds(screen_x: float) -> Vector2:
-	if active_background and active_background.has_method("get_walkable_y_bounds"):
-		return active_background.get_walkable_y_bounds(screen_x)
+## Clamp position to bounds (move NPC back into safe zone if outside)
+func clamp_to_bounds(pos: Vector2) -> Vector2:
+	return Vector2(
+		clamp(pos.x, min_x, max_x),
+		clamp(pos.y, min_y, max_y)
+	)
 
-	# Fallback: use safe rectangle bounds
-	return Vector2(safe_rectangle.position.y, safe_rectangle.position.y + safe_rectangle.size.y)
+
+## Get walkable Y bounds (for compatibility with existing code)
+func get_walkable_y_bounds(_screen_x: float) -> Vector2:
+	return Vector2(min_y, max_y)
 
 
 ## Get a random position within the safe zone
 func get_random_safe_position() -> Vector2:
-	if safe_rectangle.has_area():
-		var random_x = randf_range(safe_rectangle.position.x, safe_rectangle.position.x + safe_rectangle.size.x)
-		var random_y = randf_range(safe_rectangle.position.y, safe_rectangle.position.y + safe_rectangle.size.y)
-		return Vector2(random_x, random_y)
-
-	# Fallback: return origin
-	push_warning("BackgroundManager: No safe zone defined, returning origin")
-	return Vector2.ZERO
-
-
-## Get a safe waypoint between start and target positions
-func get_safe_waypoint(start_pos: Vector2, target_pos: Vector2) -> Vector2:
-	if active_background and active_background.has_method("get_safe_waypoint"):
-		return active_background.get_safe_waypoint(start_pos, target_pos)
-
-	# Fallback: simple midpoint in safe zone
-	var waypoint_x = lerp(start_pos.x, target_pos.x, 0.5)
-	waypoint_x = clamp(waypoint_x, safe_rectangle.position.x, safe_rectangle.position.x + safe_rectangle.size.x)
-	var waypoint_y = safe_rectangle.position.y + safe_rectangle.size.y * 0.5
-	return Vector2(waypoint_x, waypoint_y)
-
-
-## Check if position is in walkable area (uses background's method if available)
-func is_position_walkable(pos: Vector2) -> bool:
-	if active_background and active_background.has_method("is_position_in_walkable_area"):
-		return active_background.is_position_in_walkable_area(pos)
-
-	# Fallback: simple rectangle check
-	return is_in_safe_zone(pos)
+	return Vector2(
+		randf_range(min_x, max_x),
+		randf_range(min_y, max_y)
+	)

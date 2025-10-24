@@ -239,15 +239,11 @@ func _process(delta: float) -> void:
 	if not spawn_enabled or not background_ref:
 		return
 
-	# Update monster spawn timer
-	monster_spawn_timer += delta
-	if monster_spawn_timer >= MONSTER_SPAWN_INTERVAL:
-		monster_spawn_timer = 0.0
-		var wave_size = randi_range(MIN_WAVE_SIZE, MAX_WAVE_SIZE)
-		for i in range(wave_size):
-			_request_random_monster_spawn()
+	# RUST COMBAT: Monster spawning is now handled by Rust (disabled GDScript spawning)
+	# Rust handles all spawning (allies + monsters) with proper timing and caps
+	# GDScript only handles the spawn event by instantiating NPCs from the pool
 
-	# Update respawn check timer
+	# Update respawn check timer (allies only - monsters handled by Rust)
 	respawn_check_timer += delta
 	if respawn_check_timer >= RESPAWN_CHECK_INTERVAL:
 		respawn_check_timer = 0.0

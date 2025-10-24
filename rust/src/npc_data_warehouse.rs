@@ -1,13 +1,202 @@
 use godot::prelude::*;
+use godot::classes::{PackedScene, Node2D, AnimatedSprite2D};
 use crate::holymap::HolyMap;
+use crate::bytemap::ByteMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering, AtomicU64};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use bitflags::bitflags;
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 
+// ============================================================================
+// ULID CONVERSION HELPERS
+// ============================================================================
+
+/// Convert byte ULID to hex string (32 chars)
+fn bytes_to_hex(bytes: &[u8; 16]) -> String {
+    format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15])
+}
+
+/// Convert hex string (32 chars) to byte ULID
+fn hex_to_bytes(hex: &str) -> Result<[u8; 16], String> {
+    if hex.len() != 32 {
+        return Err(format!("Invalid hex length: {}, expected 32", hex.len()));
+    }
+
+    let mut bytes = [0u8; 16];
+    for i in 0..16 {
+        let byte_str = &hex[i*2..i*2+2];
+        bytes[i] = u8::from_str_radix(byte_str, 16)
+            .map_err(|e| format!("Invalid hex at position {}: {}", i, e))?;
+    }
+    Ok(bytes)
+}
+
+// ============================================================================
+// RUST NPC SPAWNER - Controls PackedScene instantiation and animation
+// ============================================================================
+
+/// NPC stats stored internally in Rust (avoids GDScript interop during combat)
+#[derive(Clone, Copy)]
+struct RustNPCStats {
+    max_hp: f32,
+    attack: f32,
+    defense: f32,
+    static_state: i32, // Combat type + faction bitflags
+}
+
+/// Rust-controlled NPC instance with direct scene node access
+/// This replaces GDScript pool management - Rust owns the NPCs
+struct RustNPC {
+    /// The root Node2D of the NPC scene
+    node: Gd<Node2D>,
+    /// Reference to the AnimatedSprite2D child for animation control
+    animated_sprite: Option<Gd<AnimatedSprite2D>>,
+    /// NPC type (warrior, archer, goblin, etc.)
+    npc_type: String,
+    /// ULID for combat tracking (128-bit / 16 bytes)
+    ulid: [u8; 16],
+    /// Is this NPC currently active (spawned) or in pool (inactive)?
+    is_active: bool,
+    /// Stats for this NPC (extracted during instantiation)
+    stats: RustNPCStats,
+}
+
+impl RustNPC {
+    /// Create a new NPC by instantiating a PackedScene
+    fn from_scene(scene_path: &str, npc_type: &str, ulid: [u8; 16]) -> Option<Self> {
+        // Load the packed scene
+        let scene = match try_load::<PackedScene>(scene_path) {
+            Ok(s) => s,
+            Err(e) => {
+                godot_error!("[RUST NPC] Failed to load scene {}: {:?}", scene_path, e);
+                return None;
+            }
+        };
+
+        // Instantiate as Node2D
+        let mut node = match scene.try_instantiate_as::<Node2D>() {
+            Some(n) => n,
+            None => {
+                godot_error!("[RUST NPC] Failed to instantiate scene as Node2D: {}", scene_path);
+                return None;
+            }
+        };
+
+        // Find the AnimatedSprite2D child node
+        let animated_sprite = node.try_get_node_as::<AnimatedSprite2D>("AnimatedSprite2D");
+
+        // Extract stats from the NPC by calling create_stats() static method
+        let stats = Self::extract_stats(&mut node, npc_type);
+
+        // Convert first 8 bytes to hex for logging
+        let ulid_hex = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7]);
+        godot_print!("[RUST NPC] Created {} with ULID: {}", npc_type, ulid_hex);
+
+        Some(Self {
+            node,
+            animated_sprite,
+            npc_type: npc_type.to_string(),
+            ulid,
+            is_active: false,
+            stats,
+        })
+    }
+
+    /// Extract stats from NPC scene by calling create_stats()
+    fn extract_stats(node: &mut Gd<Node2D>, npc_type: &str) -> RustNPCStats {
+        // Default stats (fallback if extraction fails)
+        let mut stats = RustNPCStats {
+            max_hp: 100.0,
+            attack: 10.0,
+            defense: 5.0,
+            static_state: 0,
+        };
+
+        // Get the script attached to this node and call create_stats()
+        let script_var = node.get("script");
+        let stats_obj = script_var.call("create_stats", &[]);
+        // Extract max_hp, attack, defense from stats object
+        let max_hp_var = stats_obj.call("get", &["max_hp".to_variant()]);
+        if let Ok(max_hp) = max_hp_var.try_to::<f32>() {
+            stats.max_hp = max_hp;
+        }
+        let attack_var = stats_obj.call("get", &["attack".to_variant()]);
+        if let Ok(attack) = attack_var.try_to::<f32>() {
+            stats.attack = attack;
+        }
+        let defense_var = stats_obj.call("get", &["defense".to_variant()]);
+        if let Ok(defense) = defense_var.try_to::<f32>() {
+            stats.defense = defense;
+        }
+
+        // Get static_state from the node (set in GDScript _ready())
+        // Note: static_state might not be set until _ready() is called, so we'll set it later
+        // For now, determine it from npc_type
+        stats.static_state = Self::get_static_state_for_type(npc_type);
+
+        stats
+    }
+
+    /// Get static state flags based on NPC type
+    fn get_static_state_for_type(npc_type: &str) -> i32 {
+        match npc_type {
+            // Allies (MELEE or RANGED + ALLY)
+            "warrior" => NPCStaticState::MELEE.bits() as i32 | NPCStaticState::ALLY.bits() as i32,
+            "archer" => NPCStaticState::RANGED.bits() as i32 | NPCStaticState::ALLY.bits() as i32,
+
+            // Monsters (various combat types + MONSTER)
+            "goblin" => NPCStaticState::MELEE.bits() as i32 | NPCStaticState::MONSTER.bits() as i32,
+            "skeleton" => NPCStaticState::MELEE.bits() as i32 | NPCStaticState::MONSTER.bits() as i32,
+            "mushroom" => NPCStaticState::RANGED.bits() as i32 | NPCStaticState::MONSTER.bits() as i32,
+            "eyebeast" => NPCStaticState::MAGIC.bits() as i32 | NPCStaticState::MONSTER.bits() as i32,
+
+            // Passive
+            "chicken" => NPCStaticState::PASSIVE.bits() as i32,
+            "cat" => NPCStaticState::PASSIVE.bits() as i32,
+
+            // Default to PASSIVE if unknown
+            _ => NPCStaticState::PASSIVE.bits() as i32,
+        }
+    }
+
+    /// Activate this NPC (spawn it into the world)
+    fn activate(&mut self, position: Vector2) {
+        self.is_active = true;
+        self.node.set_visible(true);
+        self.node.set_global_position(position);
+        godot_print!("[RUST NPC] Activated {} at {:?}", self.npc_type, position);
+    }
+
+    /// Deactivate this NPC (return to pool)
+    fn deactivate(&mut self) {
+        self.is_active = false;
+        self.node.set_visible(false);
+    }
+
+    /// Play an animation
+    fn play_animation(&mut self, animation_name: &str) {
+        if let Some(ref mut sprite) = self.animated_sprite {
+            sprite.set_animation(animation_name);
+            sprite.play();
+        }
+    }
+
+    /// Set sprite flip (for facing direction)
+    fn set_flip_h(&mut self, flip: bool) {
+        if let Some(ref mut sprite) = self.animated_sprite {
+            sprite.set_flip_h(flip);
+        }
+    }
+}
+
+// ============================================================================
 // NPCState bitflags - BEHAVIORAL states only (dynamic, changes during gameplay)
 bitflags! {
     /// NPC behavioral state flags - these change dynamically during gameplay
@@ -15,23 +204,17 @@ bitflags! {
     /// Matches the GDScript NPCState enum in npc_manager.gd
     /// Each NPC can have multiple behavioral states combined via bitwise OR
     ///
-    /// Example: IDLE | WANDERING (idle wandering behavior)
+    /// Example: IDLE (idle behavior)
     ///          WALKING | COMBAT (moving during combat)
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     pub struct NPCState: u32 {
-        // Behavioral States (bits 0-10) - Change during gameplay
-        const IDLE       = 1 << 0;   // 1:      Idle (not moving, not attacking)
-        const WALKING    = 1 << 1;   // 2:      Walking/moving
-        const ATTACKING  = 1 << 2;   // 4:      Currently attacking (animation playing)
-        const WANDERING  = 1 << 3;   // 8:      Normal wandering/idle behavior (no combat)
-        const COMBAT     = 1 << 4;   // 16:     Engaged in combat
-        const RETREATING = 1 << 5;   // 32:     Retreating from enemy (archer kiting)
-        const PURSUING   = 1 << 6;   // 64:     Moving towards enemy
-        const HURT       = 1 << 7;   // 128:    Low health - triggers defensive behavior
-        const DAMAGED    = 1 << 8;   // 256:    Taking damage - plays hurt/damage animation
-        const DEAD       = 1 << 9;   // 512:    Dead - plays death animation
-        const SPAWN      = 1 << 10;  // 1024:   Just spawned - routing to safe zone
-        const WAYPOINT   = 1 << 11;  // 2048:   Following waypoint path
+        // Behavioral States (bits 0-5) - Change during gameplay (SIMPLIFIED)
+        const IDLE       = 1 << 0;   // 1:  Idle (not moving, not attacking)
+        const WALKING    = 1 << 1;   // 2:  Walking/moving
+        const ATTACKING  = 1 << 2;   // 4:  Currently attacking (animation playing)
+        const COMBAT     = 1 << 3;   // 8:  Engaged in combat
+        const DAMAGED    = 1 << 4;   // 16: Taking damage - plays hurt/damage animation
+        const DEAD       = 1 << 5;   // 32: Dead - plays death animation
     }
 }
 
@@ -417,12 +600,51 @@ pub struct NPCDataWarehouse {
     spawn_requests: Arc<AtomicU64>,  // Total spawn requests sent
     spawn_confirmations: Arc<AtomicU64>,  // Total spawns confirmed by GDScript
 
+    /// Initial spawn flag (spawn minimal entities on first tick)
+    initial_spawn_done: Arc<AtomicBool>,
+
     /// World bounds for clamping waypoints (set by GDScript from BackgroundManager)
     /// These can be updated dynamically when background changes
     world_min_x: Arc<std::sync::atomic::AtomicU32>,  // Stored as f32 bits
     world_max_x: Arc<std::sync::atomic::AtomicU32>,
     world_min_y: Arc<std::sync::atomic::AtomicU32>,
     world_max_y: Arc<std::sync::atomic::AtomicU32>,
+
+    // ============================================================================
+    // RUST NPC POOL SYSTEM - Replaces GDScript pool management
+    // ============================================================================
+
+    /// Active NPCs (currently spawned and visible)
+    /// Key: ULID bytes (Vec for HashMap compatibility) -> RustNPC instance
+    active_npc_pool: DashMap<Vec<u8>, RustNPC>,
+
+    /// Inactive NPCs (in pool, ready to spawn)
+    /// Key: NPC type -> Vec of inactive NPCs
+    inactive_npc_pool: DashMap<String, Vec<RustNPC>>,
+
+    /// PackedScene cache (NPC type -> PackedScene)
+    /// Cached to avoid reloading .tscn files repeatedly
+    scene_cache: HolyMap<SafeString, SafeValue>,
+
+    /// Scene tree container node (set by GDScript, NPCs are added as children)
+    /// This is the Layer4Objects container from the background
+    /// Wrapped in Arc<Mutex<>> for thread-safe mutable access
+    scene_container: Arc<Mutex<Option<Gd<Node2D>>>>,
+
+    // ============================================================================
+    // BYTE-KEYED STORAGE - Efficient storage using ULID bytes as keys
+    // ============================================================================
+
+    /// NPC positions (ULID bytes -> "x,y")
+    npc_positions: ByteMap,
+
+    /// NPC combat stats (ULID bytes -> value string)
+    npc_hp: ByteMap,
+    npc_static_state: ByteMap,
+    npc_behavioral_state: ByteMap,
+    npc_attack: ByteMap,
+    npc_defense: ByteMap,
+    npc_cooldown: ByteMap,
 }
 
 impl NPCDataWarehouse {
@@ -447,11 +669,26 @@ impl NPCDataWarehouse {
             max_archers: 6,            // Cap at 6 archers
             spawn_requests: Arc::new(AtomicU64::new(0)),
             spawn_confirmations: Arc::new(AtomicU64::new(0)),
+            initial_spawn_done: Arc::new(AtomicBool::new(false)),
             // Initialize with default world bounds (will be updated by GDScript from BackgroundManager)
             world_min_x: Arc::new(std::sync::atomic::AtomicU32::new(WORLD_MIN_X.to_bits())),
             world_max_x: Arc::new(std::sync::atomic::AtomicU32::new(WORLD_MAX_X.to_bits())),
             world_min_y: Arc::new(std::sync::atomic::AtomicU32::new(WORLD_MIN_Y.to_bits())),
             world_max_y: Arc::new(std::sync::atomic::AtomicU32::new(WORLD_MAX_Y.to_bits())),
+            // Initialize Rust NPC pool system
+            active_npc_pool: DashMap::new(),
+            inactive_npc_pool: DashMap::new(),
+            scene_cache: HolyMap::new(sync_interval_ms),
+            scene_container: Arc::new(Mutex::new(None)),  // Will be set by GDScript via set_scene_container()
+
+            // Initialize byte-keyed storage
+            npc_positions: ByteMap::new(sync_interval_ms),
+            npc_hp: ByteMap::new(sync_interval_ms),
+            npc_static_state: ByteMap::new(sync_interval_ms),
+            npc_behavioral_state: ByteMap::new(sync_interval_ms),
+            npc_attack: ByteMap::new(sync_interval_ms),
+            npc_defense: ByteMap::new(sync_interval_ms),
+            npc_cooldown: ByteMap::new(sync_interval_ms),
         }
     }
 
@@ -524,6 +761,152 @@ impl NPCDataWarehouse {
         self.storage.get(&key).map(|v| v.0.clone())
     }
 
+    // ============================================================================
+    // RUST NPC POOL MANAGEMENT - Replaces GDScript pool system
+    // ============================================================================
+
+    /// Pre-populate the inactive pool with NPCs of a given type
+    /// This loads and instantiates PackedScenes, creating a pool ready for spawning
+    pub fn initialize_npc_pool(&self, npc_type: &str, pool_size: usize, scene_path: &str) {
+        godot_print!("[RUST POOL] Initializing pool for {} (size: {})", npc_type, pool_size);
+
+        // Cache the PackedScene for this NPC type
+        let scene_key = SafeString::from(format!("scene:{}", npc_type));
+        let scene_value = SafeValue::from(scene_path.to_string());
+        self.scene_cache.insert(scene_key, scene_value);
+
+        // Create pool of inactive NPCs
+        let mut pool_vec = Vec::with_capacity(pool_size);
+        for i in 0..pool_size {
+            // Generate ULID as 16 bytes
+            let ulid = ulid::Ulid::new().to_bytes();
+            if let Some(npc) = RustNPC::from_scene(scene_path, npc_type, ulid) {
+                pool_vec.push(npc);
+            } else {
+                godot_error!("[RUST POOL] Failed to create NPC {}/{} for type {}", i+1, pool_size, npc_type);
+            }
+        }
+
+        let created_count = pool_vec.len();
+        self.inactive_npc_pool.insert(npc_type.to_string(), pool_vec);
+        godot_print!("[RUST POOL] Created {} inactive NPCs for type {}", created_count, npc_type);
+    }
+
+    /// Set the scene container (Layer4Objects) where NPCs will be added
+    pub fn set_scene_container(&self, container: Gd<Node2D>) {
+        godot_print!("[RUST POOL] Setting scene container");
+        if let Ok(mut guard) = self.scene_container.lock() {
+            *guard = Some(container);
+        } else {
+            godot_error!("[RUST POOL] Failed to lock scene_container mutex");
+        }
+    }
+
+    /// Spawn an NPC from the inactive pool
+    /// Returns the ULID bytes of the spawned NPC, or None if pool is empty
+    pub fn rust_spawn_npc(&self, npc_type: &str, position: Vector2) -> Option<[u8; 16]> {
+        // Get an inactive NPC from the pool
+        let mut npc = {
+            let mut pool_entry = match self.inactive_npc_pool.get_mut(npc_type) {
+                Some(entry) => entry,
+                None => {
+                    // Pool doesn't exist yet - might be during initialization
+                    godot_warn!("[RUST POOL] No pool found for NPC type: {} (may not be initialized yet)", npc_type);
+                    return None;
+                }
+            };
+
+            if pool_entry.is_empty() {
+                godot_warn!("[RUST POOL] Pool empty for NPC type: {} (all NPCs in use, consider increasing pool size)", npc_type);
+                return None;
+            }
+
+            pool_entry.pop().unwrap()
+        };
+
+        let ulid = npc.ulid;
+
+        // Add NPC to scene tree if container is set
+        if let Ok(mut container_guard) = self.scene_container.lock() {
+            if let Some(ref mut container) = *container_guard {
+                container.add_child(&npc.node);
+            } else {
+                godot_error!("[RUST POOL] Cannot spawn NPC - scene container not set!");
+                return None;
+            }
+        } else {
+            godot_error!("[RUST POOL] Failed to lock scene_container mutex");
+            return None;
+        }
+
+        // Activate the NPC
+        npc.activate(position);
+
+        // Register for combat using the stats extracted during pool initialization
+        let npc_stats = npc.stats;
+        self.register_npc_with_stats(&ulid, &npc_stats);
+
+        // Store position for combat system using ByteMap (no hex conversion!)
+        self.npc_positions.insert_ulid(&ulid, format!("{},{}", position.x, position.y));
+
+        // Move to active pool (use Vec<u8> as key for DashMap compatibility)
+        self.active_npc_pool.insert(ulid.to_vec(), npc);
+
+        // Log spawn with first 8 bytes in hex
+        let ulid_hex_short = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7]);
+        godot_print!("[RUST POOL] Spawned {} at {:?} with ULID {}", npc_type, position, ulid_hex_short);
+
+        Some(ulid)
+    }
+
+    /// Despawn an NPC and return it to the inactive pool
+    pub fn rust_despawn_npc(&self, ulid: &[u8]) -> bool {
+        // Remove from active pool
+        let mut npc = match self.active_npc_pool.remove(ulid) {
+            Some((_, npc)) => npc,
+            None => {
+                let ulid_hex = ulid.iter().take(8).map(|b| format!("{:02x}", b)).collect::<String>();
+                godot_warn!("[RUST POOL] Cannot despawn - NPC not found: {}", ulid_hex);
+                return false;
+            }
+        };
+
+        // Remove from scene tree
+        if let Ok(mut container_guard) = self.scene_container.lock() {
+            if let Some(ref mut container) = *container_guard {
+                container.remove_child(&npc.node);
+            }
+        }
+
+        // Deactivate
+        npc.deactivate();
+
+        // Return to inactive pool
+        let npc_type = npc.npc_type.clone();
+        if let Some(mut pool_entry) = self.inactive_npc_pool.get_mut(&npc_type) {
+            pool_entry.push(npc);
+            let ulid_hex = ulid.iter().take(8).map(|b| format!("{:02x}", b)).collect::<String>();
+            godot_print!("[RUST POOL] Despawned {} (ULID: {})", npc_type, ulid_hex);
+            true
+        } else {
+            godot_error!("[RUST POOL] Cannot return NPC to pool - pool not found for type: {}", npc_type);
+            false
+        }
+    }
+
+    /// Register NPC for combat using pre-extracted Rust stats
+    fn register_npc_with_stats(&self, ulid: &[u8; 16], stats: &RustNPCStats) {
+        self.register_npc_for_combat_internal(
+            ulid,
+            stats.static_state,
+            0, // behavioral_state (IDLE)
+            stats.max_hp,
+            stats.attack,
+            stats.defense
+        );
+    }
+
     /// Check if NPC exists in active pool
     pub fn has_npc(&self, ulid: &str) -> bool {
         let key = SafeString::from(format!("active:{}", ulid));
@@ -579,10 +962,11 @@ impl NPCDataWarehouse {
         self.storage.insert(SafeString(key), SafeValue(value));
     }
 
-    /// Get NPC position - public for Arc access
+    /// Get NPC position - public for Arc access (accepts hex ULID for backward compat)
     pub fn get_npc_position_internal(&self, ulid: &str) -> Option<(f32, f32)> {
-        let key = format!("pos:{}", ulid);
-        if let Some(SafeValue(pos_str)) = self.storage.get(&SafeString(key)) {
+        // Convert hex string to bytes, then lookup in ByteMap
+        let ulid_bytes = hex_to_bytes(ulid).ok()?;
+        if let Some(pos_str) = self.npc_positions.get_ulid(&ulid_bytes) {
             let parts: Vec<&str> = pos_str.split(',').collect();
             if parts.len() == 2 {
                 if let (Ok(x), Ok(y)) = (parts[0].parse::<f32>(), parts[1].parse::<f32>()) {
@@ -606,30 +990,31 @@ impl NPCDataWarehouse {
     /// Stores combat-relevant data in HolyMap for combat tick access
     pub fn register_npc_for_combat_internal(
         &self,
-        ulid: &str,
+        ulid: &[u8; 16],
         static_state: i32,
         behavioral_state: i32,
         max_hp: f32,
         attack: f32,
         defense: f32,
     ) {
-        // DEFENSIVE: Validate ULID format (32 hex characters)
-        if ulid.len() != 32 || !ulid.chars().all(|c| c.is_ascii_hexdigit()) {
-            self.log_error_once("invalid_ulid", ulid, &format!("[COMBAT ERROR] Cannot register NPC - invalid ULID format: {}", ulid));
-            return;
-        }
+        // Convert ULID bytes to hex string for storage (combat system still uses strings internally)
+        let ulid_hex = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7],
+            ulid[8], ulid[9], ulid[10], ulid[11], ulid[12], ulid[13], ulid[14], ulid[15]);
+
+        let ulid_str = &ulid_hex;
 
         // DEFENSIVE: Validate stats are finite and non-negative
         if !max_hp.is_finite() || max_hp < 0.0 {
-            self.log_error_once("invalid_hp", ulid, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid max_hp: {}", ulid, max_hp));
+            self.log_error_once("invalid_hp", ulid_str, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid max_hp: {}", ulid_str, max_hp));
             return;
         }
         if !attack.is_finite() || attack < 0.0 {
-            self.log_error_once("invalid_attack", ulid, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid attack: {}", ulid, attack));
+            self.log_error_once("invalid_attack", ulid_str, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid attack: {}", ulid_str, attack));
             return;
         }
         if !defense.is_finite() || defense < 0.0 {
-            self.log_error_once("invalid_defense", ulid, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid defense: {}", ulid, defense));
+            self.log_error_once("invalid_defense", ulid_str, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid defense: {}", ulid_str, defense));
             return;
         }
 
@@ -644,7 +1029,7 @@ impl NPCDataWarehouse {
             .count();
 
         if combat_type_count != 1 {
-            self.log_error_once("invalid_combat_type", ulid, &format!("[COMBAT ERROR] Cannot register NPC {} - must have exactly one combat type (MELEE/RANGED/MAGIC), found: {}", ulid, combat_type_count));
+            self.log_error_once("invalid_combat_type", ulid_str, &format!("[COMBAT ERROR] Cannot register NPC {} - must have exactly one combat type (MELEE/RANGED/MAGIC), found: {}", ulid_str, combat_type_count));
             return;
         }
 
@@ -659,47 +1044,20 @@ impl NPCDataWarehouse {
             .count();
 
         if faction_count != 1 {
-            self.log_error_once("invalid_faction", ulid, &format!("[COMBAT ERROR] Cannot register NPC {} - must have exactly one faction (ALLY/MONSTER/PASSIVE), found: {}", ulid, faction_count));
+            self.log_error_once("invalid_faction", ulid_str, &format!("[COMBAT ERROR] Cannot register NPC {} - must have exactly one faction (ALLY/MONSTER/PASSIVE), found: {}", ulid_str, faction_count));
             return;
         }
 
-        // All validations passed - register NPC for combat
-        self.storage.insert(
-            SafeString(format!("combat:{}", ulid)),
-            SafeValue("active".to_string())
-        );
+        // All validations passed - register NPC for combat using ByteMap
+        self.npc_hp.insert_ulid(ulid, max_hp.to_string());
+        self.npc_static_state.insert_ulid(ulid, static_state.to_string());
+        self.npc_behavioral_state.insert_ulid(ulid, behavioral_state.to_string());
+        self.npc_attack.insert_ulid(ulid, attack.to_string());
+        self.npc_defense.insert_ulid(ulid, defense.to_string());
+        self.npc_cooldown.insert_ulid(ulid, "0".to_string());
 
-        self.storage.insert(
-            SafeString(format!("hp:{}", ulid)),
-            SafeValue(max_hp.to_string())
-        );
-
-        self.storage.insert(
-            SafeString(format!("static_state:{}", ulid)),
-            SafeValue(static_state.to_string())
-        );
-
-        self.storage.insert(
-            SafeString(format!("behavioral_state:{}", ulid)),
-            SafeValue(behavioral_state.to_string())
-        );
-
-        self.storage.insert(
-            SafeString(format!("attack:{}", ulid)),
-            SafeValue(attack.to_string())
-        );
-
-        self.storage.insert(
-            SafeString(format!("defense:{}", ulid)),
-            SafeValue(defense.to_string())
-        );
-
-        self.storage.insert(
-            SafeString(format!("cooldown:{}", ulid)),
-            SafeValue("0".to_string())
-        );
-
-        self.active_combat_npcs.insert(ulid.to_string(), ());
+        // Still use hex string for active_combat_npcs DashMap (for iteration)
+        self.active_combat_npcs.insert(ulid_hex, ());
     }
 
     /// Unregister NPC from combat (on death/despawn)
@@ -760,20 +1118,18 @@ impl NPCDataWarehouse {
     /// Called by autonomous thread every 16ms (60fps)
     pub fn tick_combat_internal(&self, _delta: f32) -> Vec<CombatEvent> {
         let mut events = Vec::new();
+        let now_ms = Self::get_current_time_ms();
+
+        // 0. INITIAL SPAWN: Check if this is the first tick and spawn minimal entities
+        // This must run BEFORE the active_npcs check so NPCs can be spawned
+        let initial_spawn_events = self.check_initial_spawn(now_ms);
+        events.extend(initial_spawn_events);
 
         // 1. Get all active NPCs with positions
         let active_npcs = self.get_active_npcs_with_positions();
         if active_npcs.is_empty() {
-            // DEBUG: Print once per second
-            static mut LAST_PRINT: u64 = 0;
-            let now = Self::get_current_time_ms();
-            unsafe {
-                if now - LAST_PRINT > 1000 {
-                    godot_print!("[RUST COMBAT] No active NPCs found. active_combat_npcs count: {}", self.active_combat_npcs.len());
-                    LAST_PRINT = now;
-                }
-            }
-            return events; // No NPCs in combat
+            // Return early but include any spawn events from initial spawn
+            return events;
         }
 
         // 2. Calculate movement for all NPCs (pursue nearest hostile)
@@ -1030,14 +1386,6 @@ impl NPCDataWarehouse {
                                 SafeString(format!("waypoint:{}", ulid_a)),
                                 SafeValue(format!("{},{}", clamped_x, clamped_y))
                             );
-
-                            // Set RETREATING state flag
-                            let current_state = self.get_stat_value(ulid_a, "behavioral_state").unwrap_or(0.0) as i32;
-                            let new_state = current_state | NPCState::RETREATING.bits() as i32;
-                            self.storage.insert(
-                                SafeString(format!("behavioral_state:{}", ulid_a)),
-                                SafeValue(new_state.to_string())
-                            );
                         }
                     } else if distance > attack_range {
                         // TOO FAR - Move toward target to get in range
@@ -1054,25 +1402,9 @@ impl NPCDataWarehouse {
                             SafeString(format!("waypoint:{}", ulid_a)),
                             SafeValue(format!("{},{}", clamped_x, clamped_y))
                         );
-
-                        // Clear RETREATING state
-                        let current_state = self.get_stat_value(ulid_a, "behavioral_state").unwrap_or(0.0) as i32;
-                        let new_state = current_state & !(NPCState::RETREATING.bits() as i32);
-                        self.storage.insert(
-                            SafeString(format!("behavioral_state:{}", ulid_a)),
-                            SafeValue(new_state.to_string())
-                        );
                     } else {
                         // OPTIMAL RANGE (100-200px) - Stop and shoot
                         self.storage.remove(&SafeString(format!("waypoint:{}", ulid_a)));
-
-                        // Clear RETREATING state
-                        let current_state = self.get_stat_value(ulid_a, "behavioral_state").unwrap_or(0.0) as i32;
-                        let new_state = current_state & !(NPCState::RETREATING.bits() as i32);
-                        self.storage.insert(
-                            SafeString(format!("behavioral_state:{}", ulid_a)),
-                            SafeValue(new_state.to_string())
-                        );
                     }
                 } else {
                     // MELEE/MAGIC units: Simple pursue behavior (original logic)
@@ -1238,11 +1570,21 @@ impl NPCDataWarehouse {
 
     /// Helper to get stat value from HolyMap
     fn get_stat_value(&self, ulid: &str, stat_name: &str) -> Option<f32> {
-        let key = SafeString(format!("{}:{}", stat_name, ulid));
-        if let Some(SafeValue(value_str)) = self.storage.get(&key) {
-            return value_str.parse::<f32>().ok();
-        }
-        None
+        // Convert hex string to bytes
+        let ulid_bytes = hex_to_bytes(ulid).ok()?;
+
+        // Lookup in appropriate ByteMap
+        let value_str = match stat_name {
+            "hp" => self.npc_hp.get_ulid(&ulid_bytes)?,
+            "static_state" => self.npc_static_state.get_ulid(&ulid_bytes)?,
+            "behavioral_state" => self.npc_behavioral_state.get_ulid(&ulid_bytes)?,
+            "attack" => self.npc_attack.get_ulid(&ulid_bytes)?,
+            "defense" => self.npc_defense.get_ulid(&ulid_bytes)?,
+            "cooldown" => self.npc_cooldown.get_ulid(&ulid_bytes)?,
+            _ => return None,
+        };
+
+        value_str.parse::<f32>().ok()
     }
 
     /// Calculate distance between two points
@@ -1336,11 +1678,118 @@ impl NPCDataWarehouse {
         );
     }
 
+    /// Check if this is the first combat tick and spawn minimal entities for debugging
+    /// Spawns: 1 warrior, 1 archer, 2 random monsters
+    fn check_initial_spawn(&self, now_ms: u64) -> Vec<CombatEvent> {
+        use std::sync::atomic::Ordering;
+
+        // Check if initial spawn already done
+        if self.initial_spawn_done.load(Ordering::Relaxed) {
+            return Vec::new(); // Already spawned
+        }
+
+        // Check if scene container is set (required for spawning)
+        {
+            if let Ok(container_guard) = self.scene_container.lock() {
+                if container_guard.is_none() {
+                    // Container not set yet - likely still in title/intro scene
+                    // Don't mark as done, just skip this tick
+                    return Vec::new();
+                }
+            } else {
+                return Vec::new();
+            }
+        }
+
+        // Mark initial spawn as done
+        self.initial_spawn_done.store(true, Ordering::Relaxed);
+
+        // Set the timers so regular spawning doesn't trigger immediately
+        self.last_spawn_time_ms.store(now_ms, Ordering::Relaxed);
+        self.last_ally_spawn_time_ms.store(now_ms, Ordering::Relaxed);
+
+        godot_print!("[RUST SPAWN] Initial spawn starting...");
+
+        // Calculate spawn positions
+        let world_min_x = f32::from_bits(self.world_min_x.load(Ordering::Relaxed));
+        let world_max_x = f32::from_bits(self.world_max_x.load(Ordering::Relaxed));
+        let world_min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
+        let world_max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
+
+        // Spawn 1 warrior on left side
+        let warrior_pos = Vector2::new(world_min_x + 50.0, (world_min_y + world_max_y) / 2.0);
+        if let Some(ulid) = self.rust_spawn_npc("warrior", warrior_pos) {
+            // Register warrior for combat
+            self.register_npc_for_combat_internal(
+                &ulid,
+                (NPCStaticState::MELEE | NPCStaticState::ALLY).bits() as i32,
+                NPCState::IDLE.bits() as i32,
+                100.0, // max_hp
+                15.0,  // attack
+                10.0,  // defense
+            );
+        }
+
+        // Spawn 1 archer on left side
+        let archer_pos = Vector2::new(world_min_x + 100.0, (world_min_y + world_max_y) / 2.0 + 20.0);
+        if let Some(ulid) = self.rust_spawn_npc("archer", archer_pos) {
+            // Register archer for combat
+            self.register_npc_for_combat_internal(
+                &ulid,
+                (NPCStaticState::RANGED | NPCStaticState::ALLY).bits() as i32,
+                NPCState::IDLE.bits() as i32,
+                80.0,  // max_hp
+                20.0,  // attack
+                5.0,   // defense
+            );
+        }
+
+        // Spawn 2 random monsters on right side
+        use rand::Rng;
+        let mut rng = rand::rng();
+        let monster_types = vec!["goblin", "mushroom", "skeleton", "eyebeast"];
+
+        for i in 0..2 {
+            let monster_type = monster_types[rng.random_range(0..monster_types.len())];
+            let monster_pos = Vector2::new(
+                world_max_x - 50.0,
+                world_min_y + ((i as f32 + 1.0) * (world_max_y - world_min_y) / 3.0)
+            );
+
+            if let Some(ulid) = self.rust_spawn_npc(monster_type, monster_pos) {
+                // Register monster for combat
+                self.register_npc_for_combat_internal(
+                    &ulid,
+                    (NPCStaticState::MELEE | NPCStaticState::MONSTER).bits() as i32,
+                    NPCState::IDLE.bits() as i32,
+                    60.0,  // max_hp
+                    12.0,  // attack
+                    8.0,   // defense
+                );
+            }
+        }
+
+        godot_print!("[RUST SPAWN] Initial spawn complete: 1 warrior, 1 archer, 2 random monsters");
+
+        Vec::new() // No events needed - NPCs are spawned directly
+    }
+
     /// Check if we should spawn a new wave of monsters
     /// Returns spawn events for GDScript to handle
     fn check_spawn_wave(&self, now_ms: u64) -> Vec<CombatEvent> {
         use std::sync::atomic::Ordering;
-        let mut events = Vec::new();
+        let events = Vec::new();
+
+        // Check if scene container is set (required for spawning)
+        {
+            if let Ok(container_guard) = self.scene_container.lock() {
+                if container_guard.is_none() {
+                    return events; // Container not set yet
+                }
+            } else {
+                return events;
+            }
+        }
 
         // Count active monsters (NPCs with MONSTER faction)
         let monster_count = self.active_combat_npcs.iter()
@@ -1368,35 +1817,38 @@ impl NPCDataWarehouse {
 
             // Generate wave size (random between min and max)
             use rand::Rng;
-            let mut rng = rand::thread_rng();
-            let wave_size = rng.gen_range(self.min_wave_size..=self.max_wave_size);
+            let mut rng = rand::rng();
+            let wave_size = rng.random_range(self.min_wave_size..=self.max_wave_size);
 
             // Monster types to spawn from (weighted random)
             let monster_types = vec!["goblin", "mushroom", "skeleton", "eyebeast"];
 
-            godot_print!("[RUST SPAWN] Requesting wave of {} monsters (current: {})", wave_size, monster_count);
+            godot_print!("[RUST SPAWN] Spawning wave of {} monsters (current: {})", wave_size, monster_count);
 
-            // Track spawn requests (defensive programming)
-            self.spawn_requests.fetch_add(wave_size as u64, Ordering::Relaxed);
+            // Get spawn positions
+            let world_max_x = f32::from_bits(self.world_max_x.load(Ordering::Relaxed));
+            let world_min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
+            let world_max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
 
-            // Generate spawn events for each monster
+            // Spawn each monster directly
             for _ in 0..wave_size {
-                let monster_type = monster_types[rng.gen_range(0..monster_types.len())];
+                let monster_type = monster_types[rng.random_range(0..monster_types.len())];
+                let spawn_pos = Vector2::new(
+                    world_max_x - 50.0,
+                    rng.random_range(world_min_y..world_max_y)
+                );
 
-                // Generate spawn event (using CombatEvent structure)
-                // event_type: "spawn"
-                // attacker_ulid: monster type (e.g., "goblin")
-                // target_x, target_y: spawn position (GDScript calculates based on screen edges)
-                events.push(CombatEvent {
-                    event_type: "spawn".to_string(),
-                    attacker_ulid: monster_type.to_string(),  // Monster type
-                    target_ulid: String::new(),               // Not used for spawn
-                    amount: 0.0,                              // Not used for spawn
-                    attacker_animation: String::new(),
-                    target_animation: String::new(),
-                    target_x: 0.0,  // GDScript will calculate spawn position
-                    target_y: 0.0,
-                });
+                if let Some(ulid) = self.rust_spawn_npc(monster_type, spawn_pos) {
+                    // Register for combat
+                    self.register_npc_for_combat_internal(
+                        &ulid,
+                        (NPCStaticState::MELEE | NPCStaticState::MONSTER).bits() as i32,
+                        NPCState::IDLE.bits() as i32,
+                        60.0, // max_hp
+                        12.0, // attack
+                        8.0,  // defense
+                    );
+                }
             }
         }
 
@@ -1408,7 +1860,18 @@ impl NPCDataWarehouse {
     /// Spawns gradually to ramp up (one ally every 3 seconds until cap reached)
     fn check_ally_spawn(&self, now_ms: u64) -> Vec<CombatEvent> {
         use std::sync::atomic::Ordering;
-        let mut events = Vec::new();
+        let events = Vec::new();
+
+        // Check if scene container is set (required for spawning)
+        {
+            if let Ok(container_guard) = self.scene_container.lock() {
+                if container_guard.is_none() {
+                    return events; // Container not set yet
+                }
+            } else {
+                return events;
+            }
+        }
 
         // Count active warriors and archers
         let mut warrior_count = 0;
@@ -1447,9 +1910,6 @@ impl NPCDataWarehouse {
             // Update last spawn time
             self.last_ally_spawn_time_ms.store(now_ms, Ordering::Relaxed);
 
-            // Track spawn request
-            self.spawn_requests.fetch_add(1, Ordering::Relaxed);
-
             // Decide which to spawn (prioritize bigger deficit)
             let ally_type = if warrior_deficit >= archer_deficit && warrior_deficit > 0 {
                 "warrior"
@@ -1459,20 +1919,50 @@ impl NPCDataWarehouse {
                 return events; // Both at cap
             };
 
-            // Generate spawn event
-            events.push(CombatEvent {
-                event_type: "spawn".to_string(),
-                attacker_ulid: ally_type.to_string(),  // Ally type
-                target_ulid: String::new(),
-                amount: 0.0,
-                attacker_animation: String::new(),
-                target_animation: String::new(),
-                target_x: 0.0,  // GDScript will calculate spawn position
-                target_y: 0.0,
-            });
+            // Get spawn positions
+            let world_min_x = f32::from_bits(self.world_min_x.load(Ordering::Relaxed));
+            let world_min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
+            let world_max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
 
-            godot_print!("[RUST SPAWN] Spawning {} (Warriors: {}/{}, Archers: {}/{})",
-                ally_type, warrior_count, self.max_warriors, archer_count, self.max_archers);
+            // Spawn ally on left side
+            use rand::Rng;
+            let mut rng = rand::rng();
+            let spawn_pos = Vector2::new(
+                world_min_x + 50.0,
+                rng.random_range(world_min_y..world_max_y)
+            );
+
+            if let Some(ulid) = self.rust_spawn_npc(ally_type, spawn_pos) {
+                // Register for combat
+                let (static_state, max_hp, attack, defense) = if ally_type == "warrior" {
+                    (
+                        (NPCStaticState::MELEE | NPCStaticState::ALLY).bits() as i32,
+                        100.0, // max_hp
+                        15.0,  // attack
+                        10.0,  // defense
+                    )
+                } else {
+                    // archer
+                    (
+                        (NPCStaticState::RANGED | NPCStaticState::ALLY).bits() as i32,
+                        80.0,  // max_hp
+                        20.0,  // attack
+                        5.0,   // defense
+                    )
+                };
+
+                self.register_npc_for_combat_internal(
+                    &ulid,
+                    static_state,
+                    NPCState::IDLE.bits() as i32,
+                    max_hp,
+                    attack,
+                    defense,
+                );
+
+                godot_print!("[RUST SPAWN] Spawned {} (Warriors: {}/{}, Archers: {}/{})",
+                    ally_type, warrior_count, self.max_warriors, archer_count, self.max_archers);
+            }
         }
 
         events
@@ -1592,6 +2082,42 @@ impl GodotNPCDataWarehouse {
         );
         // Emit signal
         self.base_mut().emit_signal("pool_registered", &[npc_type.to_variant(), max_size.to_variant()]);
+    }
+
+    // ===== Rust NPC Pool System Methods =====
+
+    /// Initialize an NPC pool (exposed to GDScript)
+    /// Call this on game start for each NPC type
+    #[func]
+    pub fn initialize_npc_pool(&self, npc_type: GString, pool_size: i32, scene_path: GString) {
+        self.warehouse.initialize_npc_pool(
+            &npc_type.to_string(),
+            pool_size as usize,
+            &scene_path.to_string()
+        );
+    }
+
+    /// Set the scene container where NPCs will be added as children
+    #[func]
+    pub fn set_scene_container(&self, container: Gd<Node2D>) {
+        self.warehouse.set_scene_container(container);
+    }
+
+    /// Spawn an NPC from the Rust pool
+    /// Returns the ULID bytes of the spawned NPC, or empty array if failed
+    #[func]
+    pub fn rust_spawn_npc(&self, npc_type: GString, position: Vector2) -> PackedByteArray {
+        if let Some(ulid_bytes) = self.warehouse.rust_spawn_npc(&npc_type.to_string(), position) {
+            return PackedByteArray::from(&ulid_bytes[..]);
+        }
+        PackedByteArray::new()
+    }
+
+    /// Despawn an NPC and return it to the pool
+    #[func]
+    pub fn rust_despawn_npc(&self, ulid: PackedByteArray) -> bool {
+        let ulid_slice = ulid.as_slice();
+        self.warehouse.rust_despawn_npc(ulid_slice)
     }
 
     /// Store active NPC data
@@ -1724,15 +2250,9 @@ impl GodotNPCDataWarehouse {
             "IDLE" => NPCState::IDLE.to_i32(),
             "WALKING" => NPCState::WALKING.to_i32(),
             "ATTACKING" => NPCState::ATTACKING.to_i32(),
-            "WANDERING" => NPCState::WANDERING.to_i32(),
             "COMBAT" => NPCState::COMBAT.to_i32(),
-            "RETREATING" => NPCState::RETREATING.to_i32(),
-            "PURSUING" => NPCState::PURSUING.to_i32(),
-            "HURT" => NPCState::HURT.to_i32(),
             "DAMAGED" => NPCState::DAMAGED.to_i32(),
             "DEAD" => NPCState::DEAD.to_i32(),
-            "SPAWN" => NPCState::SPAWN.to_i32(),
-            "WAYPOINT" => NPCState::WAYPOINT.to_i32(),
             _ => 0,
         }
     }
@@ -1988,21 +2508,24 @@ impl GodotNPCDataWarehouse {
         attack: f32,
         defense: f32,
     ) {
-        match packed_bytes_to_hex(&ulid_bytes) {
-            Ok(ulid_hex) => {
-                self.warehouse.register_npc_for_combat_internal(
-                    &ulid_hex,
-                    static_state,
-                    behavioral_state,
-                    max_hp,
-                    attack,
-                    defense,
-                );
-            }
-            Err(e) => {
-                godot_error!("[COMBAT ERROR] Invalid ULID bytes in register_npc_for_combat: {}", e);
-            }
+        // Convert PackedByteArray to [u8; 16]
+        let ulid_slice = ulid_bytes.as_slice();
+        if ulid_slice.len() != 16 {
+            godot_error!("[COMBAT ERROR] Invalid ULID bytes in register_npc_for_combat: expected 16 bytes, got {}", ulid_slice.len());
+            return;
         }
+
+        let mut ulid_array = [0u8; 16];
+        ulid_array.copy_from_slice(ulid_slice);
+
+        self.warehouse.register_npc_for_combat_internal(
+            &ulid_array,
+            static_state,
+            behavioral_state,
+            max_hp,
+            attack,
+            defense,
+        );
     }
 
     /// Unregister an NPC from combat processing
@@ -2157,19 +2680,13 @@ impl GodotNPCDataWarehouse {
     pub fn state_to_string(&self, state: i32) -> GString {
         let mut parts = Vec::new();
 
-        // NPCState flags
+        // NPCState flags (SIMPLIFIED)
         if state & NPCState::IDLE.bits() as i32 != 0 { parts.push("IDLE"); }
         if state & NPCState::WALKING.bits() as i32 != 0 { parts.push("WALKING"); }
-        if state & NPCState::WANDERING.bits() as i32 != 0 { parts.push("WANDERING"); }
         if state & NPCState::ATTACKING.bits() as i32 != 0 { parts.push("ATTACKING"); }
         if state & NPCState::COMBAT.bits() as i32 != 0 { parts.push("COMBAT"); }
-        if state & NPCState::RETREATING.bits() as i32 != 0 { parts.push("RETREATING"); }
-        if state & NPCState::PURSUING.bits() as i32 != 0 { parts.push("PURSUING"); }
-        if state & NPCState::HURT.bits() as i32 != 0 { parts.push("HURT"); }
         if state & NPCState::DAMAGED.bits() as i32 != 0 { parts.push("DAMAGED"); }
         if state & NPCState::DEAD.bits() as i32 != 0 { parts.push("DEAD"); }
-        if state & NPCState::SPAWN.bits() as i32 != 0 { parts.push("SPAWN"); }
-        if state & NPCState::WAYPOINT.bits() as i32 != 0 { parts.push("WAYPOINT"); }
 
         if parts.is_empty() {
             GString::from("NONE")
@@ -2222,7 +2739,6 @@ impl GodotNPCDataWarehouse {
     pub fn enter_combat_state(&self, current_state: i32) -> i32 {
         let mut new_state = current_state;
         new_state &= !(NPCState::IDLE.bits() as i32);
-        new_state &= !(NPCState::WANDERING.bits() as i32);
         new_state |= NPCState::COMBAT.bits() as i32;
         new_state
     }
@@ -2243,7 +2759,6 @@ impl GodotNPCDataWarehouse {
         let mut new_state = current_state;
         new_state |= NPCState::ATTACKING.bits() as i32;
         new_state &= !(NPCState::IDLE.bits() as i32);
-        new_state &= !(NPCState::WANDERING.bits() as i32);
         new_state
     }
 
