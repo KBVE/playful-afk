@@ -164,52 +164,69 @@ func hide_dialogue() -> void:
 ## Update stats display labels by querying Rust using ULID
 func _update_stats_display() -> void:
 	if current_npc_ulid.size() != 16:
-		print("[ChatUI] No valid ULID (size: %d)" % current_npc_ulid.size())
 		_clear_stats_display()
 		return
 
-	# Query Rust for current HP
-	var current_hp = NPCDataWarehouse.get_npc_hp(current_npc_ulid)
-	print("[ChatUI] Current HP from Rust: ", current_hp)
+	# Get NPC data as JSON from Rust
+	var npc_json: String = NPCDataWarehouse.get_npc_data_json(current_npc_ulid)
 
-	# Get full stats from Rust (includes max_hp, attack, defense, etc.)
-	var stats_dict = NPCDataWarehouse.get_npc_stats_dict(current_npc_ulid)
-	print("[ChatUI] Stats dict from Rust: ", stats_dict)
+	# Parse JSON
+	var json = JSON.new()
+	var parse_result = json.parse(npc_json)
 
-	if stats_dict.is_empty():
-		print("[ChatUI] Stats dict is empty!")
+	if parse_result != OK:
+		_clear_stats_display()
+		return
+
+	var data = json.data
+	if typeof(data) != TYPE_DICTIONARY:
 		_clear_stats_display()
 		return
 
 	# Update HP
 	if hp_label:
-		var max_hp = stats_dict.get("max_hp", 100)
+		var current_hp = data.get("hp", 0)
+		var max_hp = data.get("max_hp", 100)
 		hp_label.text = "HP: %.0f/%.0f" % [current_hp, max_hp]
 
-	# Update Mana (placeholder - not yet in Rust)
+	# Update Mana
 	if mana_label:
-		mana_label.text = "Mana: --/--"
+		var current_mana = data.get("mana", 0)
+		var max_mana = data.get("max_mana", 0)
+		if max_mana > 0:
+			mana_label.text = "Mana: %.0f/%.0f" % [current_mana, max_mana]
+		else:
+			mana_label.text = "Mana: --/--"
 
-	# Update Energy (placeholder - not yet in Rust)
+	# Update Energy
 	if energy_label:
-		energy_label.text = "Energy: --/--"
+		var current_energy = data.get("energy", 0)
+		var max_energy = data.get("max_energy", 100)
+		energy_label.text = "Energy: %.0f/%.0f" % [current_energy, max_energy]
 
 	# Update Hunger (placeholder - not yet in Rust)
 	if hunger_label:
 		hunger_label.text = "Hunger: --/100"
 
-	# Update Emotion (placeholder - not yet in Rust)
+	# Update Emotion
 	if emotion_label:
-		emotion_label.text = "Emotion: --"
+		var emotional_state = data.get("emotional_state", 0)
+		# Map emotional_state integer to string (can be expanded later)
+		var emotion_text = "Neutral"
+		if emotional_state > 0:
+			emotion_text = "Positive"
+		elif emotional_state < 0:
+			emotion_text = "Negative"
+		emotion_label.text = "Emotion: %s" % emotion_text
 
 	# Update Attack
 	if attack_label:
-		var attack = stats_dict.get("attack", 0)
+		var attack = data.get("attack", 0)
 		attack_label.text = "Attack: %.0f" % attack
 
 	# Update Defense
 	if defense_label:
-		var defense = stats_dict.get("defense", 0)
+		var defense = data.get("defense", 0)
 		defense_label.text = "Defense: %.0f" % defense
 
 

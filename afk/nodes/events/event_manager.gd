@@ -571,9 +571,7 @@ func close_top_ui() -> void:
 ## Request NPC dialogue (emits signal that main scene will handle)
 ## Pass the NPC node and its ULID - main scene will query Rust for data
 func request_npc_dialogue(npc: Node2D, npc_ulid: PackedByteArray) -> void:
-	print("[EventManager] request_npc_dialogue called, emitting signal with npc=", npc, " ulid_size=", npc_ulid.size())
 	npc_dialogue_requested.emit(npc, npc_ulid)
-	print("[EventManager] npc_dialogue_requested signal emitted")
 
 
 ## Close NPC dialogue

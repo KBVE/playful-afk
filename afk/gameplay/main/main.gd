@@ -68,7 +68,6 @@ func _ready() -> void:
 
 	# Connect to InputManager for NPC clicks (handles both GDScript and Rust NPCs)
 	InputManager.object_clicked.connect(_on_object_clicked)
-	print("[MAIN] Connected to InputManager.object_clicked signal")
 
 	# Register Bartender scene and ChatUI with EventManager for centralized visibility management
 	if bartender:
@@ -154,10 +153,6 @@ func _setup_character_pool() -> void:
 				BackgroundManager.min_y,
 				BackgroundManager.max_y
 			)
-			print("[MAIN] Set Rust world bounds: X(%f to %f), Y(%f to %f)" % [
-				BackgroundManager.min_x, BackgroundManager.max_x,
-				BackgroundManager.min_y, BackgroundManager.max_y
-			])
 	else:
 		push_error("Layer4Objects not found in background!")
 		return
@@ -165,7 +160,6 @@ func _setup_character_pool() -> void:
 	# RUST COMBAT: All NPC spawning (allies + monsters) is now handled by Rust
 	# NPCs are spawned directly from Rust pools without GDScript involvement
 	# Pools were pre-initialized in NPCDataWarehouse singleton's _ready()
-	print("[MAIN] Character pool setup complete - Rust NPC system ready")
 
 
 func _start_cat_movement() -> void:
@@ -489,8 +483,6 @@ func _on_ally_died(ally: Node2D, ally_type: String) -> void:
 ## Handle object clicked from InputManager
 ## Filters for NPCs and forwards to NPC click handler
 func _on_object_clicked(object: Node2D) -> void:
-	print("[MAIN] _on_object_clicked called with object: ", object.name if object else "null")
-
 	if not object:
 		return
 
@@ -498,45 +490,39 @@ func _on_object_clicked(object: Node2D) -> void:
 	var has_ulid = "ulid" in object
 	var is_npc = has_ulid
 
-	print("[MAIN] Object is NPC: ", is_npc, " | has ulid: ", has_ulid)
-
 	if is_npc:
 		_on_npc_clicked(object)
 
 
 ## Handle NPC clicked - request dialogue via EventManager
 func _on_npc_clicked(npc: Node2D) -> void:
-	var npc_script = npc.get_script()
-	var script_path = npc_script.resource_path if npc_script else "no script"
-	print("[MAIN] _on_npc_clicked - npc: ", npc, " script: ", script_path)
 	if not npc:
 		push_warning("Clicked NPC is null!")
 		return
 
 	# Get ULID from NPC
 	if not "ulid" in npc:
+		var npc_script = npc.get_script()
+		var script_path = npc_script.resource_path if npc_script else "no script"
 		push_warning("Clicked NPC has no ULID property! Script: %s" % script_path)
 		return
 
 	var ulid_bytes: PackedByteArray = npc.ulid
-	print("[MAIN] NPC ULID size: ", ulid_bytes.size())
 
 	# Validate ULID
 	if ulid_bytes.size() == 0:
+		var npc_script = npc.get_script()
+		var script_path = npc_script.resource_path if npc_script else "no script"
 		push_warning("Clicked NPC has empty ULID! Script: %s - This NPC wasn't properly initialized." % script_path)
 		return
 
-	print("[MAIN] NPC clicked, ULID size: ", ulid_bytes.size(), ", passing to EventManager...")
 	EventManager.request_npc_dialogue(npc, ulid_bytes)
-	print("[MAIN] EventManager.request_npc_dialogue called")
 
 
 ## Handle NPC dialogue request from EventManager
 ## Query Rust for NPC data using ULID, generate dialogue, and show ChatUI
 func _on_npc_dialogue_requested(npc: Node2D, npc_ulid: PackedByteArray) -> void:
-	print("[MAIN] _on_npc_dialogue_requested called! npc=", npc, " ulid_size=", npc_ulid.size())
 	if not npc or not chat_ui:
-		print("ERROR: npc or chat_ui is null! npc=", npc, " chat_ui=", chat_ui)
 		return
 
 	var npc_name = ""
@@ -554,10 +540,8 @@ func _on_npc_dialogue_requested(npc: Node2D, npc_ulid: PackedByteArray) -> void:
 
 	if is_rust_npc:
 		# Query Rust for NPC name and type using ULID
-		print("[MAIN] Querying Rust for NPC data using ULID...")
 		npc_name = NPCDataWarehouse.get_npc_name(npc_ulid)
 		npc_type = NPCDataWarehouse.get_npc_type(npc_ulid)
-		print("[MAIN] Got from Rust - name: '%s', type: '%s'" % [npc_name, npc_type])
 
 		# Fallback: get class name as type
 		if npc_type == "":
@@ -566,14 +550,11 @@ func _on_npc_dialogue_requested(npc: Node2D, npc_ulid: PackedByteArray) -> void:
 		# Fallback: generate generic name
 		if npc_name == "":
 			npc_name = npc_type.capitalize() + " NPC"
-
-		print("[MAIN] Resolved NPC: %s (type: %s)" % [npc_name, npc_type])
 	else:
 		# Fallback to old GDScript stats system
 		if "stats" in npc and npc.stats:
 			npc_name = npc.stats.npc_name
 			npc_type = npc.stats.npc_type
-			print("[MAIN] Legacy NPC: %s (type: %s)" % [npc_name, npc_type])
 		else:
 			push_warning("No valid ULID and NPC has no stats!")
 			return

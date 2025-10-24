@@ -499,3 +499,12 @@ func get_npc_type(ulid_bytes: PackedByteArray) -> String:
 	if _warehouse:
 		return _warehouse.get_npc_type(ulid_bytes)
 	return ""
+
+
+## Get NPC data as JSON string (name, type, stats)
+## ulid_bytes: PackedByteArray (16 bytes) - raw ULID bytes
+## Returns: JSON string with format: {"name":"...","type":"...","hp":X,"max_hp":X,"attack":X,"defense":X}
+func get_npc_data_json(ulid_bytes: PackedByteArray) -> String:
+	if _warehouse:
+		return _warehouse.get_npc_data_json(ulid_bytes)
+	return "{}"

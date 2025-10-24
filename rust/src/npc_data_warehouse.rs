@@ -41,13 +41,21 @@ fn hex_to_bytes(hex: &str) -> Result<[u8; 16], String> {
 // RUST NPC SPAWNER - Controls PackedScene instantiation and animation
 // ============================================================================
 
-/// NPC stats stored internally in Rust (avoids GDScript interop during combat)
-#[derive(Clone, Copy)]
-struct RustNPCStats {
-    max_hp: f32,
-    attack: f32,
-    defense: f32,
-    static_state: i32, // Combat type + faction bitflags
+/// NPC combat stats - single source of truth for all NPC stats
+/// Stored in ByteMap for efficient lookup by ULID
+/// Used during initialization, combat, and UI display
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct NPCCombatStats {
+    pub hp: f32,
+    pub max_hp: f32,
+    pub attack: f32,
+    pub defense: f32,
+    pub static_state: i32, // Combat type + faction bitflags (immutable)
+    pub emotional_state: i32,
+    pub mana: f32,
+    pub max_mana: f32,
+    pub energy: f32,
+    pub max_energy: f32,
 }
 
 /// Rust-controlled NPC instance with direct scene node access
@@ -66,7 +74,7 @@ struct RustNPC {
     /// Is this NPC currently active (spawned) or in pool (inactive)?
     is_active: bool,
     /// Stats for this NPC (extracted during instantiation)
-    stats: RustNPCStats,
+    stats: NPCCombatStats,
 }
 
 impl RustNPC {
@@ -122,75 +130,129 @@ impl RustNPC {
 
     /// Extract stats from NPC scene - now uses hardcoded stats by type
     /// GDScript create_stats() has been removed - Rust is the single source of truth
-    fn extract_stats(node: &mut Gd<Node2D>, npc_type: &str) -> RustNPCStats {
+    fn extract_stats(node: &mut Gd<Node2D>, npc_type: &str) -> NPCCombatStats {
         // Get stats based on NPC type (hardcoded for now - could be config file later)
         let stats = Self::get_stats_for_type(npc_type);
         stats
     }
 
     /// Get stats based on NPC type (hardcoded for performance)
-    fn get_stats_for_type(npc_type: &str) -> RustNPCStats {
+    fn get_stats_for_type(npc_type: &str) -> NPCCombatStats {
         match npc_type {
             // Allies
-            "warrior" => RustNPCStats {
+            "warrior" => NPCCombatStats {
+                hp: 200.0,
                 max_hp: 200.0,
                 attack: 25.0,
                 defense: 20.0,
                 static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::ALLY.bits()) as i32,
+                emotional_state: 0, // Neutral
+                mana: 50.0,
+                max_mana: 50.0,
+                energy: 100.0,
+                max_energy: 100.0,
             },
-            "archer" => RustNPCStats {
+            "archer" => NPCCombatStats {
+                hp: 150.0,
                 max_hp: 150.0,
                 attack: 12.0,
                 defense: 15.0,
                 static_state: (NPCStaticState::RANGED.bits() | NPCStaticState::ALLY.bits()) as i32,
+                emotional_state: 0,
+                mana: 30.0,
+                max_mana: 30.0,
+                energy: 120.0,
+                max_energy: 120.0,
             },
 
             // Monsters
-            "goblin" => RustNPCStats {
+            "goblin" => NPCCombatStats {
+                hp: 100.0,
                 max_hp: 100.0,
                 attack: 15.0,
                 defense: 8.0,
                 static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+                emotional_state: 0,
+                mana: 0.0,
+                max_mana: 0.0,
+                energy: 80.0,
+                max_energy: 80.0,
             },
-            "skeleton" => RustNPCStats {
+            "skeleton" => NPCCombatStats {
+                hp: 120.0,
                 max_hp: 120.0,
                 attack: 18.0,
                 defense: 10.0,
                 static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+                emotional_state: 0,
+                mana: 0.0,
+                max_mana: 0.0,
+                energy: 70.0,
+                max_energy: 70.0,
             },
-            "mushroom" => RustNPCStats {
+            "mushroom" => NPCCombatStats {
+                hp: 80.0,
                 max_hp: 80.0,
                 attack: 10.0,
                 defense: 5.0,
                 static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+                emotional_state: 0,
+                mana: 20.0,
+                max_mana: 20.0,
+                energy: 60.0,
+                max_energy: 60.0,
             },
-            "eyebeast" => RustNPCStats {
+            "eyebeast" => NPCCombatStats {
+                hp: 150.0,
                 max_hp: 150.0,
                 attack: 20.0,
                 defense: 12.0,
                 static_state: (NPCStaticState::RANGED.bits() | NPCStaticState::MONSTER.bits()) as i32,
+                emotional_state: 0,
+                mana: 100.0,
+                max_mana: 100.0,
+                energy: 90.0,
+                max_energy: 90.0,
             },
 
             // Passive
-            "chicken" => RustNPCStats {
+            "chicken" => NPCCombatStats {
+                hp: 1000.0,
                 max_hp: 1000.0,
                 attack: 0.0,
                 defense: 2.0,
                 static_state: NPCStaticState::PASSIVE.bits() as i32,
+                emotional_state: 0,
+                mana: 0.0,
+                max_mana: 0.0,
+                energy: 50.0,
+                max_energy: 50.0,
             },
-            "cat" => RustNPCStats {
+            "cat" => NPCCombatStats {
+                hp: 100.0,
                 max_hp: 100.0,
                 attack: 5.0,
                 defense: 5.0,
                 static_state: NPCStaticState::PASSIVE.bits() as i32,
+                emotional_state: 0,
+                mana: 0.0,
+                max_mana: 0.0,
+                energy: 80.0,
+                max_energy: 80.0,
             },
 
             // Default to basic stats if unknown type
-            _ => RustNPCStats {
+            _ => NPCCombatStats {
+                hp: 100.0,
                 max_hp: 100.0,
                 attack: 10.0,
                 defense: 5.0,
                 static_state: NPCStaticState::PASSIVE.bits() as i32,
+                emotional_state: 0,
+                mana: 0.0,
+                max_mana: 0.0,
+                energy: 100.0,
+                max_energy: 100.0,
             },
         }
     }
@@ -705,13 +767,12 @@ pub struct NPCDataWarehouse {
     npc_names: ByteMap,      // ULID -> generated name
     npc_types: ByteMap,      // ULID -> npc_type (warrior, archer, etc.)
 
-    /// NPC combat stats (ULID bytes -> value string)
-    npc_hp: ByteMap,
-    npc_max_hp: ByteMap,
-    npc_static_state: ByteMap,
+    /// NPC combat stats (ULID bytes -> NPCCombatStats struct)
+    /// Contains: hp, max_hp, attack, defense, static_state
+    npc_combat_stats: ByteMap,
+
+    /// NPC dynamic state (ULID bytes -> value string)
     npc_behavioral_state: ByteMap,
-    npc_attack: ByteMap,
-    npc_defense: ByteMap,
     npc_cooldown: ByteMap,
 }
 
@@ -753,12 +814,8 @@ impl NPCDataWarehouse {
             npc_positions: ByteMap::new(sync_interval_ms),
             npc_names: ByteMap::new(sync_interval_ms),
             npc_types: ByteMap::new(sync_interval_ms),
-            npc_hp: ByteMap::new(sync_interval_ms),
-            npc_max_hp: ByteMap::new(sync_interval_ms),
-            npc_static_state: ByteMap::new(sync_interval_ms),
+            npc_combat_stats: ByteMap::new(sync_interval_ms),
             npc_behavioral_state: ByteMap::new(sync_interval_ms),
-            npc_attack: ByteMap::new(sync_interval_ms),
-            npc_defense: ByteMap::new(sync_interval_ms),
             npc_cooldown: ByteMap::new(sync_interval_ms),
         }
     }
@@ -970,9 +1027,15 @@ impl NPCDataWarehouse {
         };
 
         // Reset NPC stats in ByteMaps (HP back to max, remove DEAD state)
-        // HP: reset to max_hp
-        let max_hp = npc.stats.max_hp;
-        self.npc_hp.insert_ulid(&ulid_array, max_hp.to_string());
+        // Get current combat stats and reset HP to max
+        if let Some(stats_json) = self.npc_combat_stats.get_ulid(&ulid_array) {
+            if let Ok(mut combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                combat_stats.hp = combat_stats.max_hp;  // Reset HP to max
+                if let Ok(updated_json) = serde_json::to_string(&combat_stats) {
+                    self.npc_combat_stats.insert_ulid(&ulid_array, updated_json);
+                }
+            }
+        }
 
         // Behavioral state: reset to IDLE (0)
         self.npc_behavioral_state.insert_ulid(&ulid_array, "0".to_string());
@@ -1002,8 +1065,8 @@ impl NPCDataWarehouse {
         }
     }
 
-    /// Register NPC for combat using pre-extracted Rust stats
-    fn register_npc_with_stats(&self, ulid: &[u8; 16], stats: &RustNPCStats) {
+    /// Register NPC for combat using pre-extracted combat stats
+    fn register_npc_with_stats(&self, ulid: &[u8; 16], stats: &NPCCombatStats) {
         self.register_npc_for_combat_internal(
             ulid,
             stats.static_state,
@@ -1156,12 +1219,20 @@ impl NPCDataWarehouse {
         }
 
         // All validations passed - register NPC for combat using ByteMap
-        self.npc_hp.insert_ulid(ulid, max_hp.to_string());
-        self.npc_max_hp.insert_ulid(ulid, max_hp.to_string());
-        self.npc_static_state.insert_ulid(ulid, static_state.to_string());
+        let combat_stats = NPCCombatStats {
+            hp: max_hp,
+            max_hp,
+            attack,
+            defense,
+            static_state,
+            emotional_state: 0, // Default neutral emotion
+            mana: 0.0,          // Will be set by NPC type later if needed
+            max_mana: 0.0,
+            energy: 100.0,      // Default full energy
+            max_energy: 100.0,
+        };
+        self.npc_combat_stats.insert_ulid(ulid, serde_json::to_string(&combat_stats).unwrap());
         self.npc_behavioral_state.insert_ulid(ulid, behavioral_state.to_string());
-        self.npc_attack.insert_ulid(ulid, attack.to_string());
-        self.npc_defense.insert_ulid(ulid, defense.to_string());
         self.npc_cooldown.insert_ulid(ulid, "0".to_string());
 
         // Still use hex string for active_combat_npcs DashMap (for iteration)
@@ -1215,9 +1286,14 @@ impl NPCDataWarehouse {
 
     /// Get NPC current HP
     pub fn get_npc_hp_internal(&self, ulid: &str) -> Option<f32> {
-        let key = SafeString(format!("hp:{}", ulid));
-        if let Some(SafeValue(hp_str)) = self.storage.get(&key) {
-            return hp_str.parse::<f32>().ok();
+        // Convert hex string to bytes
+        if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
+            // Get combat stats from ByteMap
+            if let Some(stats_json) = self.npc_combat_stats.get_ulid(&ulid_bytes) {
+                if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                    return Some(combat_stats.hp);
+                }
+            }
         }
         None
     }
@@ -1681,18 +1757,30 @@ impl NPCDataWarehouse {
         // Convert hex string to bytes
         let ulid_bytes = hex_to_bytes(ulid).ok()?;
 
-        // Lookup in appropriate ByteMap
-        let value_str = match stat_name {
-            "hp" => self.npc_hp.get_ulid(&ulid_bytes)?,
-            "static_state" => self.npc_static_state.get_ulid(&ulid_bytes)?,
-            "behavioral_state" => self.npc_behavioral_state.get_ulid(&ulid_bytes)?,
-            "attack" => self.npc_attack.get_ulid(&ulid_bytes)?,
-            "defense" => self.npc_defense.get_ulid(&ulid_bytes)?,
-            "cooldown" => self.npc_cooldown.get_ulid(&ulid_bytes)?,
-            _ => return None,
-        };
-
-        value_str.parse::<f32>().ok()
+        // For combat stats, read from the struct
+        match stat_name {
+            "hp" | "max_hp" | "attack" | "defense" | "static_state" => {
+                let stats_json = self.npc_combat_stats.get_ulid(&ulid_bytes)?;
+                let combat_stats = serde_json::from_str::<NPCCombatStats>(&stats_json).ok()?;
+                match stat_name {
+                    "hp" => Some(combat_stats.hp),
+                    "max_hp" => Some(combat_stats.max_hp),
+                    "attack" => Some(combat_stats.attack),
+                    "defense" => Some(combat_stats.defense),
+                    "static_state" => Some(combat_stats.static_state as f32),
+                    _ => None,
+                }
+            },
+            // For other stats, use ByteMap lookup
+            _ => {
+                let value_str = match stat_name {
+                    "behavioral_state" => self.npc_behavioral_state.get_ulid(&ulid_bytes)?,
+                    "cooldown" => self.npc_cooldown.get_ulid(&ulid_bytes)?,
+                    _ => return None,
+                };
+                value_str.parse::<f32>().ok()
+            }
+        }
     }
 
     /// Calculate distance between two points
@@ -1721,15 +1809,26 @@ impl NPCDataWarehouse {
 
     /// Apply damage to target, return new HP
     fn apply_damage(&self, target_ulid: &str, damage: f32) -> f32 {
-        let current_hp = self.get_stat_value(target_ulid, "hp").unwrap_or(100.0);
-        let new_hp = (current_hp - damage).max(0.0);
+        // Convert hex string to bytes
+        if let Ok(ulid_bytes) = hex_to_bytes(target_ulid) {
+            // Get current combat stats
+            if let Some(stats_json) = self.npc_combat_stats.get_ulid(&ulid_bytes) {
+                if let Ok(mut combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                    // Apply damage
+                    combat_stats.hp = (combat_stats.hp - damage).max(0.0);
 
-        self.storage.insert(
-            SafeString(format!("hp:{}", target_ulid)),
-            SafeValue(new_hp.to_string())
-        );
+                    // Store updated stats
+                    if let Ok(updated_json) = serde_json::to_string(&combat_stats) {
+                        self.npc_combat_stats.insert_ulid(&ulid_bytes, updated_json);
+                    }
 
-        new_hp
+                    return combat_stats.hp;
+                }
+            }
+        }
+
+        // Fallback if ULID not found
+        0.0
     }
 
     /// Mark NPC as dead and remove from active combat
@@ -2272,35 +2371,71 @@ impl GodotNPCDataWarehouse {
             dict.set("type", npc_type);
         }
 
-        // Get current HP
-        if let Some(hp) = self.warehouse.npc_hp.get_ulid(&ulid_bytes) {
-            if let Ok(hp_val) = hp.parse::<f32>() {
-                dict.set("hp", hp_val);
-            }
-        }
-
-        // Get max HP
-        if let Some(max_hp) = self.warehouse.npc_max_hp.get_ulid(&ulid_bytes) {
-            if let Ok(max_hp_val) = max_hp.parse::<f32>() {
-                dict.set("max_hp", max_hp_val);
-            }
-        }
-
-        // Get attack
-        if let Some(attack) = self.warehouse.npc_attack.get_ulid(&ulid_bytes) {
-            if let Ok(attack_val) = attack.parse::<f32>() {
-                dict.set("attack", attack_val);
-            }
-        }
-
-        // Get defense
-        if let Some(defense) = self.warehouse.npc_defense.get_ulid(&ulid_bytes) {
-            if let Ok(defense_val) = defense.parse::<f32>() {
-                dict.set("defense", defense_val);
+        // Get combat stats (hp, max_hp, attack, defense) from single struct
+        if let Some(stats_json) = self.warehouse.npc_combat_stats.get_ulid(&ulid_bytes) {
+            if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                dict.set("hp", combat_stats.hp);
+                dict.set("max_hp", combat_stats.max_hp);
+                dict.set("attack", combat_stats.attack);
+                dict.set("defense", combat_stats.defense);
             }
         }
 
         dict
+    }
+
+    /// Get NPC data as JSON string (name, type, stats)
+    #[func]
+    pub fn get_npc_data_json(&self, ulid: PackedByteArray) -> GString {
+        if ulid.len() != 16 {
+            return GString::from("{}");
+        }
+        let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
+
+        let mut name = String::from("");
+        let mut npc_type = String::from("");
+        let mut hp = 0.0_f32;
+        let mut max_hp = 0.0_f32;
+        let mut attack = 0.0_f32;
+        let mut defense = 0.0_f32;
+        let mut emotional_state = 0_i32;
+        let mut mana = 0.0_f32;
+        let mut max_mana = 0.0_f32;
+        let mut energy = 0.0_f32;
+        let mut max_energy = 0.0_f32;
+
+        // Get name
+        if let Some(n) = self.warehouse.npc_names.get_ulid(&ulid_bytes) {
+            name = n;
+        }
+
+        // Get type
+        if let Some(t) = self.warehouse.npc_types.get_ulid(&ulid_bytes) {
+            npc_type = t;
+        }
+
+        // Get combat stats
+        if let Some(stats_json) = self.warehouse.npc_combat_stats.get_ulid(&ulid_bytes) {
+            if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                hp = combat_stats.hp;
+                max_hp = combat_stats.max_hp;
+                attack = combat_stats.attack;
+                defense = combat_stats.defense;
+                emotional_state = combat_stats.emotional_state;
+                mana = combat_stats.mana;
+                max_mana = combat_stats.max_mana;
+                energy = combat_stats.energy;
+                max_energy = combat_stats.max_energy;
+            }
+        }
+
+        // Build JSON string manually (simple and fast)
+        let json = format!(
+            r#"{{"name":"{}","type":"{}","hp":{},"max_hp":{},"attack":{},"defense":{},"emotional_state":{},"mana":{},"max_mana":{},"energy":{},"max_energy":{}}}"#,
+            name, npc_type, hp, max_hp, attack, defense, emotional_state, mana, max_mana, energy, max_energy
+        );
+
+        GString::from(json)
     }
 
     /// Store active NPC data

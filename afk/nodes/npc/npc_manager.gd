@@ -1973,24 +1973,11 @@ func _initialize_persistent_pool() -> void:
 func _initialize_generic_pool() -> void:
 	generic_pool.clear()
 
-	# DEPRECATED: Monsters are now managed by Rust pools
-	# Only warriors/archers use GDScript pool during migration
+	# ALL NPCs (warriors, archers, monsters) are now managed by Rust pools
+	# This pool is deprecated and kept only for backward compatibility
 
-	# Pre-allocate warriors (reduced to 1 for debugging)
-	var num_warriors = 1
-	for i in range(num_warriors):
-		_preallocate_generic_npc("warrior", i)
-
-	# Pre-allocate archers (reduced to 0 for debugging)
-	var num_archers = 0
-	for i in range(num_archers):
-		_preallocate_generic_npc("archer", num_warriors + i)
-
-	# NOTE: Monsters (chickens, mushrooms, goblins, eyebeasts, skeletons)
-	# are now managed by Rust pools - DO NOT preallocate them here!
-
-	# Fill remaining slots with empty entries
-	var total_preallocated = num_warriors + num_archers
+	# Fill slots with empty entries
+	var total_preallocated = 0
 	for i in range(total_preallocated, MAX_GENERIC_POOL_SIZE):
 		generic_pool.append({
 			"character": null,
@@ -1999,7 +1986,7 @@ func _initialize_generic_pool() -> void:
 			"npc_type": ""
 		})
 
-	print("[NPCManager] Generic pool initialized with %d warriors, %d archers (monsters use Rust pools)" % [num_warriors, num_archers])
+	print("[NPCManager] Generic pool initialized - all NPCs now use Rust pools")
 
 	# NOTE: Healthbar pool will be initialized when set_layer4_container is called
 
