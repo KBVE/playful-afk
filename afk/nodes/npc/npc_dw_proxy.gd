@@ -379,6 +379,26 @@ func tick_combat(delta: float) -> Array:
 		return _warehouse.tick_combat(delta)
 	return []
 
+## Tick ONLY the combat phase (damage calculations and state changes)
+## Returns Array of JSON strings (CombatEvent)
+func tick_combat_phase() -> Array:
+	if _warehouse:
+		return _warehouse.tick_combat_phase()
+	return []
+
+## Tick ONLY the movement phase (position updates and spawning)
+## Returns Array of JSON strings (CombatEvent)
+func tick_movement_phase(delta: float) -> Array:
+	if _warehouse:
+		return _warehouse.tick_movement_phase(delta)
+	return []
+
+## Tick ONLY the animation phase (visual updates)
+## Does not return events - just updates animation states
+func tick_animation_phase() -> void:
+	if _warehouse:
+		_warehouse.tick_animation_phase()
+
 ## Poll combat events from event queue
 ## Returns Array of JSON strings (CombatEvent)
 func poll_combat_events() -> Array:

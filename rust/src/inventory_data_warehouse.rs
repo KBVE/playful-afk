@@ -1,12 +1,10 @@
-use crate::holymap::HolyMap;
-use crate::bytemap::ByteMap;
 use bitflags::bitflags;
-use serde::{Deserialize, Serialize};
-use ulid::Ulid;
-use once_cell::sync::Lazy;
 use dashmap::DashMap;
-use std::sync::Arc;
 use godot::prelude::*;
+use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use ulid::Ulid;
 
 // ============================================================================
 // Inventory flags and core data structures
@@ -47,8 +45,16 @@ impl InventoryItem {
 /// Canonical catalog entries shared between Godot and Rust.
 const INVENTORY_ITEM_DEFINITIONS: &[(&str, &str, InventoryState)] = &[
     ("food", "01K8AF0059YG1T5NTJPFYJK03F", InventoryState::SPOILS),
-    ("potion_basic", "01K8AF0182RWXTW3246E87KX0E", InventoryState::PASSIVE),
-    ("quest_relic", "01K8AF01X5W5VY5ZCGRQZNQE9V", InventoryState::UNIQUE),
+    (
+        "potion_basic",
+        "01K8AF0182RWXTW3246E87KX0E",
+        InventoryState::PASSIVE,
+    ),
+    (
+        "quest_relic",
+        "01K8AF01X5W5VY5ZCGRQZNQE9V",
+        InventoryState::UNIQUE,
+    ),
 ];
 
 /// Build-time utility to convert ULID string literals into byte arrays.
@@ -72,19 +78,14 @@ pub static INVENTORY_ULID_TO_ITEM: Lazy<DashMap<[u8; 16], InventoryItem>> = Lazy
     let map = DashMap::with_capacity(INVENTORY_ITEM_DEFINITIONS.len());
     for (name, ulid_str, state) in INVENTORY_ITEM_DEFINITIONS {
         let ulid_bytes = ulid_bytes_from_str(ulid_str);
-        map.insert(
-            ulid_bytes,
-            InventoryItem::new(*name, 0, *state),
-        );
+        map.insert(ulid_bytes, InventoryItem::new(*name, 0, *state));
     }
     map
 });
 
 /// Convenience to fetch ULID bytes for a given item kind.
 pub fn lookup_ulid_for_kind(kind: &str) -> Option<[u8; 16]> {
-    INVENTORY_KIND_TO_ULID
-        .get(kind)
-        .map(|entry| *entry.value())
+    INVENTORY_KIND_TO_ULID.get(kind).map(|entry| *entry.value())
 }
 
 /// Convenience to fetch the template item for a ULID key.
@@ -172,25 +173,22 @@ fn ulid_to_packed_bytes(ulid: &[u8; 16]) -> PackedByteArray {
 /// Centralized data warehouse orchestrating inventory storage.
 pub struct InventoryDataWarehouse {
     /// Maps numeric slots -> canonical ULID entries.
-    slot_index: HolyMap<InventorySlotId, [u8; 16]>,
+    slot_index: DashMap<InventorySlotId, [u8; 16]>,
     /// Primary inventory store keyed by ULID.
-    item_store: HolyMap<[u8; 16], InventoryItem>,
-    /// Byte-based mirror for fast Godot lookups / serialization cache.
-    byte_index: ByteMap,
-    /// Fast in-memory cache for direct iteration and modification.
-    inventory_cache: DashMap<[u8; 16], InventoryItem>,
+    item_store: DashMap<[u8; 16], InventoryItem>,
+    /// Cached JSON payloads for FFI responses.
+    serialized_items: DashMap<[u8; 16], String>,
     /// Reverse lookup from ULID -> slot for quick slot updates.
     ulid_to_slot: DashMap<[u8; 16], InventorySlotId>,
 }
 
 impl InventoryDataWarehouse {
     /// Create a new warehouse instance with the desired sync cadence.
-    pub fn new(sync_interval_ms: u64) -> Self {
+    pub fn new(_sync_interval_ms: u64) -> Self {
         Self {
-            slot_index: HolyMap::new(sync_interval_ms),
-            item_store: HolyMap::new(sync_interval_ms),
-            byte_index: ByteMap::new(sync_interval_ms),
-            inventory_cache: DashMap::new(),
+            slot_index: DashMap::new(),
+            item_store: DashMap::new(),
+            serialized_items: DashMap::new(),
             ulid_to_slot: DashMap::new(),
         }
     }
@@ -210,41 +208,40 @@ impl InventoryDataWarehouse {
 
         self.slot_index.insert(slot, ulid);
         self.item_store.insert(ulid, sanitized_item.clone());
-        self.inventory_cache.insert(ulid, sanitized_item.clone());
 
         if let Some(previous_slot) = self.ulid_to_slot.insert(ulid, slot) {
             if previous_slot != slot {
-                self.slot_index.remove(&previous_slot);
+                let should_remove = self
+                    .slot_index
+                    .get(&previous_slot)
+                    .map(|entry| *entry.value() == ulid)
+                    .unwrap_or(false);
+                if should_remove {
+                    self.slot_index.remove(&previous_slot);
+                }
             }
         }
 
         if let Some(serialized) = serialize_inventory_item(&sanitized_item) {
-            self.byte_index.insert_ulid(&ulid, serialized);
+            self.serialized_items.insert(ulid, serialized);
         }
     }
 
     /// Fetch inventory data by ULID (returns current copy).
     pub fn get_item(&self, ulid: &[u8; 16]) -> Option<InventoryItem> {
-        self.inventory_cache
-            .get(ulid)
-            .map(|item| item.clone())
-            .or_else(|| {
-                self.item_store.get(ulid).map(|item| {
-                    // Back-fill cache to keep stores consistent for future reads.
-                    self.inventory_cache.insert(*ulid, item.clone());
-                    item
-                })
-            })
+        self.item_store.get(ulid).map(|item| item.value().clone())
     }
 
     /// Fetch serialized JSON representation by ULID (for direct FFI transfer).
     pub fn get_item_json(&self, ulid: &[u8; 16]) -> Option<String> {
-        self.byte_index.get_ulid(ulid)
+        self.serialized_items
+            .get(ulid)
+            .map(|item| item.value().clone())
     }
 
     /// Resolve the ULID assigned to a particular inventory slot.
     pub fn get_slot_ulid(&self, slot: InventorySlotId) -> Option<[u8; 16]> {
-        self.slot_index.get(&slot)
+        self.slot_index.get(&slot).map(|entry| *entry.value())
     }
 
     /// Reduce quantities for all items flagged with SPOILS.
@@ -269,7 +266,7 @@ impl InventoryDataWarehouse {
 
         let mut updated = 0usize;
 
-        for entry in self.inventory_cache.iter_mut() {
+        for entry in self.item_store.iter_mut() {
             let update = {
                 let mut entry = entry;
 
@@ -307,9 +304,8 @@ impl InventoryDataWarehouse {
 
             if let Some((ulid, updated_item)) = update {
                 let slot = self.ulid_to_slot.get(&ulid).map(|guard| *guard.value());
-                self.item_store.insert(ulid, updated_item.clone());
                 if let Some(serialized) = serialize_inventory_item(&updated_item) {
-                    self.byte_index.insert_ulid(&ulid, serialized);
+                    self.serialized_items.insert(ulid, serialized);
                 }
                 if let Some(slot) = slot {
                     self.slot_index.insert(slot, ulid);
@@ -419,10 +415,7 @@ impl GodotInventoryDataWarehouse {
             .get_item_json(&ulid)
             .map(GString::from)
             .unwrap_or_else(|| {
-                godot_error!(
-                    "InventoryDataWarehouse: item not found for ULID {:?}",
-                    ulid
-                );
+                godot_error!("InventoryDataWarehouse: item not found for ULID {:?}", ulid);
                 GString::new()
             })
     }
@@ -443,10 +436,7 @@ impl GodotInventoryDataWarehouse {
                     GString::new()
                 }),
             None => {
-                godot_error!(
-                    "InventoryDataWarehouse: slot {} has no assigned ULID",
-                    slot
-                );
+                godot_error!("InventoryDataWarehouse: slot {} has no assigned ULID", slot);
                 GString::new()
             }
         }
@@ -458,10 +448,7 @@ impl GodotInventoryDataWarehouse {
             .get_slot_ulid(slot)
             .map(|ulid| ulid_to_packed_bytes(&ulid))
             .unwrap_or_else(|| {
-                godot_error!(
-                    "InventoryDataWarehouse: slot {} has no assigned ULID",
-                    slot
-                );
+                godot_error!("InventoryDataWarehouse: slot {} has no assigned ULID", slot);
                 PackedByteArray::new()
             })
     }
@@ -472,10 +459,7 @@ impl GodotInventoryDataWarehouse {
         lookup_ulid_for_kind(&kind)
             .map(|ulid| ulid_to_packed_bytes(&ulid))
             .unwrap_or_else(|| {
-                godot_error!(
-                    "InventoryDataWarehouse: unknown item kind '{}'",
-                    kind
-                );
+                godot_error!("InventoryDataWarehouse: unknown item kind '{}'", kind);
                 PackedByteArray::new()
             })
     }

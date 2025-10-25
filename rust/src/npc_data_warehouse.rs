@@ -1,13 +1,13 @@
-use godot::prelude::*;
-use godot::classes::{PackedScene, Node2D, AnimatedSprite2D};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering, AtomicU64};
-use std::time::{SystemTime, UNIX_EPOCH};
 use bitflags::bitflags;
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
+use godot::classes::{AnimatedSprite2D, Node2D, PackedScene};
+use godot::prelude::*;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // ============================================================================
 // ULID CONVERSION HELPERS
@@ -28,7 +28,7 @@ fn hex_to_bytes(hex: &str) -> Result<[u8; 16], String> {
 
     let mut bytes = [0u8; 16];
     for i in 0..16 {
-        let byte_str = &hex[i*2..i*2+2];
+        let byte_str = &hex[i * 2..i * 2 + 2];
         bytes[i] = u8::from_str_radix(byte_str, 16)
             .map_err(|e| format!("Invalid hex at position {}: {}", i, e))?;
     }
@@ -96,7 +96,10 @@ impl RustNPC {
         let mut node = match scene.try_instantiate_as::<Node2D>() {
             Some(n) => n,
             None => {
-                godot_error!("[RUST NPC] Failed to instantiate scene as Node2D: {}", scene_path);
+                godot_error!(
+                    "[RUST NPC] Failed to instantiate scene as Node2D: {}",
+                    scene_path
+                );
                 return None;
             }
         };
@@ -114,9 +117,16 @@ impl RustNPC {
         let name = Self::generate_name(npc_type);
 
         // Convert first 8 bytes to hex for logging
-        let ulid_hex = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7]);
-        godot_print!("[RUST NPC] Created {} '{}' with ULID: {}", npc_type, name, ulid_hex);
+        let ulid_hex = format!(
+            "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7]
+        );
+        godot_print!(
+            "[RUST NPC] Created {} '{}' with ULID: {}",
+            npc_type,
+            name,
+            ulid_hex
+        );
 
         Some(Self {
             node,
@@ -172,7 +182,8 @@ impl RustNPC {
                 max_hp: 100.0,
                 attack: 15.0,
                 defense: 8.0,
-                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits())
+                    as i32,
                 emotional_state: 0,
                 mana: 0.0,
                 max_mana: 0.0,
@@ -184,7 +195,8 @@ impl RustNPC {
                 max_hp: 120.0,
                 attack: 18.0,
                 defense: 10.0,
-                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits())
+                    as i32,
                 emotional_state: 0,
                 mana: 0.0,
                 max_mana: 0.0,
@@ -196,7 +208,8 @@ impl RustNPC {
                 max_hp: 80.0,
                 attack: 10.0,
                 defense: 5.0,
-                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits()) as i32,
+                static_state: (NPCStaticState::MELEE.bits() | NPCStaticState::MONSTER.bits())
+                    as i32,
                 emotional_state: 0,
                 mana: 20.0,
                 max_mana: 20.0,
@@ -208,7 +221,8 @@ impl RustNPC {
                 max_hp: 150.0,
                 attack: 20.0,
                 defense: 12.0,
-                static_state: (NPCStaticState::RANGED.bits() | NPCStaticState::MONSTER.bits()) as i32,
+                static_state: (NPCStaticState::RANGED.bits() | NPCStaticState::MONSTER.bits())
+                    as i32,
                 emotional_state: 0,
                 mana: 100.0,
                 max_mana: 100.0,
@@ -267,9 +281,15 @@ impl RustNPC {
 
             // Monsters (various combat types + MONSTER)
             "goblin" => NPCStaticState::MELEE.bits() as i32 | NPCStaticState::MONSTER.bits() as i32,
-            "skeleton" => NPCStaticState::MELEE.bits() as i32 | NPCStaticState::MONSTER.bits() as i32,
-            "mushroom" => NPCStaticState::RANGED.bits() as i32 | NPCStaticState::MONSTER.bits() as i32,
-            "eyebeast" => NPCStaticState::MAGIC.bits() as i32 | NPCStaticState::MONSTER.bits() as i32,
+            "skeleton" => {
+                NPCStaticState::MELEE.bits() as i32 | NPCStaticState::MONSTER.bits() as i32
+            }
+            "mushroom" => {
+                NPCStaticState::RANGED.bits() as i32 | NPCStaticState::MONSTER.bits() as i32
+            }
+            "eyebeast" => {
+                NPCStaticState::MAGIC.bits() as i32 | NPCStaticState::MONSTER.bits() as i32
+            }
 
             // Passive
             "chicken" => NPCStaticState::PASSIVE.bits() as i32,
@@ -294,11 +314,18 @@ impl RustNPC {
             sprite_mut.play();
             godot_print!("[RUST NPC] Set animation to 'idle' and playing");
         } else {
-            godot_warn!("[RUST NPC] No AnimatedSprite2D found for {}!", self.npc_type);
+            godot_warn!(
+                "[RUST NPC] No AnimatedSprite2D found for {}!",
+                self.npc_type
+            );
         }
 
-        godot_print!("[RUST NPC] Activated {} at local position {:?}, visible={}",
-            self.npc_type, position, self.node.is_visible());
+        godot_print!(
+            "[RUST NPC] Activated {} at local position {:?}, visible={}",
+            self.npc_type,
+            position,
+            self.node.is_visible()
+        );
     }
 
     /// Deactivate this NPC (return to pool)
@@ -423,10 +450,10 @@ impl NPCState {
 
 // World bounds constants - NPCs stay within these coordinates during combat
 // These bounds match the typical viewport size (1280x720) with margins for parallax
-const WORLD_MIN_X: f32 = 50.0;    // Left edge with margin
-const WORLD_MAX_X: f32 = 1230.0;  // Right edge with margin
-const WORLD_MIN_Y: f32 = 100.0;   // Top of playable area
-const WORLD_MAX_Y: f32 = 650.0;   // Below bottom of screen
+const WORLD_MIN_X: f32 = 50.0; // Left edge with margin
+const WORLD_MAX_X: f32 = 1230.0; // Right edge with margin
+const WORLD_MIN_Y: f32 = 100.0; // Top of playable area
+const WORLD_MAX_Y: f32 = 650.0; // Below bottom of screen
 
 /// ULID wrapper for binary storage (16 bytes)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -441,7 +468,10 @@ impl UlidBytes {
     /// Create from raw bytes (16 bytes)
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != 16 {
-            return Err(format!("Invalid ULID length: expected 16 bytes, got {}", bytes.len()));
+            return Err(format!(
+                "Invalid ULID length: expected 16 bytes, got {}",
+                bytes.len()
+            ));
         }
         let mut arr = [0u8; 16];
         arr.copy_from_slice(bytes);
@@ -455,22 +485,23 @@ impl UlidBytes {
 
     /// Convert to lowercase hex string (32 chars) for HolyMap keys
     pub fn to_hex_string(&self) -> String {
-        self.0.iter()
-            .map(|b| format!("{:02x}", b))
-            .collect()
+        self.0.iter().map(|b| format!("{:02x}", b)).collect()
     }
 
     /// Parse from hex string (from GDScript - legacy support)
     pub fn from_hex_string(hex: &str) -> Result<Self, String> {
         if hex.len() != 32 {
-            return Err(format!("Invalid hex ULID length: expected 32 chars, got {}", hex.len()));
+            return Err(format!(
+                "Invalid hex ULID length: expected 32 chars, got {}",
+                hex.len()
+            ));
         }
 
         let mut bytes = [0u8; 16];
         for i in 0..16 {
-            let byte_str = &hex[i*2..i*2+2];
+            let byte_str = &hex[i * 2..i * 2 + 2];
             bytes[i] = u8::from_str_radix(byte_str, 16)
-                .map_err(|e| format!("Invalid hex at position {}: {}", i*2, e))?;
+                .map_err(|e| format!("Invalid hex at position {}: {}", i * 2, e))?;
         }
         Ok(UlidBytes(bytes))
     }
@@ -490,12 +521,13 @@ unsafe impl Sync for UlidBytes {}
 fn packed_bytes_to_hex(bytes: &PackedByteArray) -> Result<String, String> {
     let slice = bytes.as_slice();
     if slice.len() != 16 {
-        return Err(format!("Invalid ULID length: expected 16 bytes, got {}", slice.len()));
+        return Err(format!(
+            "Invalid ULID length: expected 16 bytes, got {}",
+            slice.len()
+        ));
     }
 
-    Ok(slice.iter()
-        .map(|b| format!("{:02x}", b))
-        .collect())
+    Ok(slice.iter().map(|b| format!("{:02x}", b)).collect())
 }
 
 /// NPCStats - Structured stat data matching GDScript NPCStats class
@@ -669,29 +701,29 @@ pub struct NPCDataWarehouse {
     /// Spawn wave management - track last spawn time and counts
     /// Rust manages ALL spawning (allies + monsters) with gradual ramp-up
     last_spawn_time_ms: Arc<AtomicU64>,
-    last_ally_spawn_time_ms: Arc<AtomicU64>,  // Separate timer for allies
+    last_ally_spawn_time_ms: Arc<AtomicU64>, // Separate timer for allies
 
     /// Monster spawn configuration
-    spawn_interval_ms: u64,  // Time between monster waves (default 10 seconds)
+    spawn_interval_ms: u64, // Time between monster waves (default 10 seconds)
     min_wave_size: i32,       // Minimum monsters per wave (default 4)
     max_wave_size: i32,       // Maximum monsters per wave (default 10)
     min_active_monsters: i32, // Spawn new wave when below this count (default 3)
 
     /// Ally spawn configuration (warriors, archers)
-    ally_spawn_interval_ms: u64,  // Time between ally spawns (default 3 seconds)
-    max_warriors: i32,             // Max warrior count (default 6)
-    max_archers: i32,              // Max archer count (default 6)
+    ally_spawn_interval_ms: u64, // Time between ally spawns (default 3 seconds)
+    max_warriors: i32, // Max warrior count (default 6)
+    max_archers: i32,  // Max archer count (default 6)
 
     /// Spawn tracking (defensive programming)
-    spawn_requests: Arc<AtomicU64>,  // Total spawn requests sent
-    spawn_confirmations: Arc<AtomicU64>,  // Total spawns confirmed by GDScript
+    spawn_requests: Arc<AtomicU64>, // Total spawn requests sent
+    spawn_confirmations: Arc<AtomicU64>, // Total spawns confirmed by GDScript
 
     /// Initial spawn flag (spawn minimal entities on first tick)
     initial_spawn_done: Arc<AtomicBool>,
 
     /// World bounds for clamping waypoints (set by GDScript from BackgroundManager)
     /// These can be updated dynamically when background changes
-    world_min_x: Arc<std::sync::atomic::AtomicU32>,  // Stored as f32 bits
+    world_min_x: Arc<std::sync::atomic::AtomicU32>, // Stored as f32 bits
     world_max_x: Arc<std::sync::atomic::AtomicU32>,
     world_min_y: Arc<std::sync::atomic::AtomicU32>,
     world_max_y: Arc<std::sync::atomic::AtomicU32>,
@@ -699,7 +731,6 @@ pub struct NPCDataWarehouse {
     // ============================================================================
     // RUST NPC POOL SYSTEM - Replaces GDScript pool management
     // ============================================================================
-
     /// Active NPCs (currently spawned and visible)
     /// Key: ULID bytes (Vec for HashMap compatibility) -> RustNPC instance
     active_npc_pool: DashMap<[u8; 16], RustNPC>,
@@ -720,13 +751,12 @@ pub struct NPCDataWarehouse {
     // ============================================================================
     // BYTE-KEYED STORAGE - ByteMap now uses DashMap internally for strong consistency
     // ============================================================================
-
     /// NPC positions (ULID bytes -> "x,y")
     npc_positions: DashMap<[u8; 16], String>,
 
     /// NPC metadata (ULID bytes -> value string)
-    npc_names: DashMap<[u8; 16], String>,      // ULID -> generated name
-    npc_types: DashMap<[u8; 16], String>,      // ULID -> npc_type (warrior, archer, etc.)
+    npc_names: DashMap<[u8; 16], String>, // ULID -> generated name
+    npc_types: DashMap<[u8; 16], String>, // ULID -> npc_type (warrior, archer, etc.)
 
     /// NPC combat stats (ULID bytes -> NPCCombatStats struct serialized as JSON)
     /// Contains: hp, max_hp, attack, defense, static_state
@@ -736,10 +766,10 @@ pub struct NPCDataWarehouse {
     npc_behavioral_state: DashMap<[u8; 16], String>,
     npc_cooldown: DashMap<[u8; 16], String>,
     npc_state_timestamps: DashMap<[u8; 16], String>, // Timestamp when ATTACKING/DAMAGED states were set
-    npc_aggro_targets: DashMap<[u8; 16], String>,     // Target ULID (hex) that this NPC should attack
+    npc_aggro_targets: DashMap<[u8; 16], String>, // Target ULID (hex) that this NPC should attack
 
     /// NPC movement data (ULID bytes -> "x,y" coordinates)
-    npc_waypoints: DashMap<[u8; 16], String>,      // Target position for movement
+    npc_waypoints: DashMap<[u8; 16], String>, // Target position for movement
     npc_move_directions: DashMap<[u8; 16], String>, // Calculated movement direction
 }
 
@@ -751,15 +781,24 @@ impl NPCDataWarehouse {
             STATE_WRITE_COUNT += 1;
             if STATE_WRITE_COUNT <= 30 {
                 let ulid_hex = bytes_to_hex(ulid);
-                godot_print!("[STATE WRITE] {} - ULID {} - setting to {}", caller, &ulid_hex[..8], new_state);
+                godot_print!(
+                    "[STATE WRITE] {} - ULID {} - setting to {}",
+                    caller,
+                    &ulid_hex[..8],
+                    new_state
+                );
             }
         }
-        self.npc_behavioral_state.insert(*ulid,  new_state.to_string());
+        self.npc_behavioral_state
+            .insert(*ulid, new_state.to_string());
     }
 
     /// Create a new NPCDataWarehouse with the specified sync interval
     pub fn new(sync_interval_ms: u64) -> Self {
-        godot_print!("NPCDataWarehouse: Initializing with {}ms sync interval", sync_interval_ms);
+        godot_print!(
+            "NPCDataWarehouse: Initializing with {}ms sync interval",
+            sync_interval_ms
+        );
         Self {
             storage: DashMap::new(),
             sync_interval_ms,
@@ -769,13 +808,13 @@ impl NPCDataWarehouse {
             error_log: DashMap::new(),
             last_spawn_time_ms: Arc::new(AtomicU64::new(0)),
             last_ally_spawn_time_ms: Arc::new(AtomicU64::new(0)),
-            spawn_interval_ms: 10000,  // 10 seconds between monster waves
+            spawn_interval_ms: 10000, // 10 seconds between monster waves
             min_wave_size: 4,
             max_wave_size: 10,
-            min_active_monsters: 3,    // Spawn new wave when below 3 monsters
-            ally_spawn_interval_ms: 3000,  // 3 seconds between ally spawns (gradual ramp-up)
-            max_warriors: 6,           // Cap at 6 warriors
-            max_archers: 6,            // Cap at 6 archers
+            min_active_monsters: 3, // Spawn new wave when below 3 monsters
+            ally_spawn_interval_ms: 3000, // 3 seconds between ally spawns (gradual ramp-up)
+            max_warriors: 6,        // Cap at 6 warriors
+            max_archers: 6,         // Cap at 6 archers
             spawn_requests: Arc::new(AtomicU64::new(0)),
             spawn_confirmations: Arc::new(AtomicU64::new(0)),
             initial_spawn_done: Arc::new(AtomicBool::new(false)),
@@ -788,7 +827,7 @@ impl NPCDataWarehouse {
             active_npc_pool: DashMap::new(),
             inactive_npc_pool: DashMap::new(),
             scene_cache: DashMap::new(),
-            scene_container: RwLock::new(None),  // Will be set by GDScript via set_scene_container()
+            scene_container: RwLock::new(None), // Will be set by GDScript via set_scene_container()
 
             // Initialize DashMap storage directly (no wrappers)
             npc_positions: DashMap::new(),
@@ -817,14 +856,19 @@ impl NPCDataWarehouse {
         let value = pool_def.to_json();
 
         self.storage.insert(key, value);
-        godot_print!("NPCDataWarehouse: Registered pool '{}' (max: {}, scene: {})",
-                     npc_type, max_size, scene_path);
+        godot_print!(
+            "NPCDataWarehouse: Registered pool '{}' (max: {}, scene: {})",
+            npc_type,
+            max_size,
+            scene_path
+        );
     }
 
     /// Get pool definition for an NPC type
     pub fn get_pool(&self, npc_type: &str) -> Option<PoolDefinition> {
         let key = format!("pool:{}", npc_type);
-        self.storage.get(&key)
+        self.storage
+            .get(&key)
             .and_then(|v| PoolDefinition::from_json(v.value()))
     }
 
@@ -880,7 +924,11 @@ impl NPCDataWarehouse {
     /// Pre-populate the inactive pool with NPCs of a given type
     /// This loads and instantiates PackedScenes, creating a pool ready for spawning
     pub fn initialize_npc_pool(&self, npc_type: &str, pool_size: usize, scene_path: &str) {
-        godot_print!("[RUST POOL] Initializing pool for {} (size: {})", npc_type, pool_size);
+        godot_print!(
+            "[RUST POOL] Initializing pool for {} (size: {})",
+            npc_type,
+            pool_size
+        );
 
         // Cache the PackedScene for this NPC type
         let scene_key = format!("scene:{}", npc_type);
@@ -895,13 +943,23 @@ impl NPCDataWarehouse {
             if let Some(npc) = RustNPC::from_scene(scene_path, npc_type, ulid) {
                 pool_vec.push(npc);
             } else {
-                godot_error!("[RUST POOL] Failed to create NPC {}/{} for type {}", i+1, pool_size, npc_type);
+                godot_error!(
+                    "[RUST POOL] Failed to create NPC {}/{} for type {}",
+                    i + 1,
+                    pool_size,
+                    npc_type
+                );
             }
         }
 
         let created_count = pool_vec.len();
-        self.inactive_npc_pool.insert(npc_type.to_string(), pool_vec);
-        godot_print!("[RUST POOL] Created {} inactive NPCs for type {}", created_count, npc_type);
+        self.inactive_npc_pool
+            .insert(npc_type.to_string(), pool_vec);
+        godot_print!(
+            "[RUST POOL] Created {} inactive NPCs for type {}",
+            created_count,
+            npc_type
+        );
     }
 
     /// Set the scene container (Layer4Objects) where NPCs will be added
@@ -913,7 +971,10 @@ impl NPCDataWarehouse {
     /// Spawn an NPC from the inactive pool
     /// Returns the ULID bytes of the spawned NPC, or None if pool is empty
     pub fn rust_spawn_npc(&self, npc_type: &str, position: Vector2) -> Option<[u8; 16]> {
-        godot_print!("[RUST SPAWN DEBUG] rust_spawn_npc called for type: {}", npc_type);
+        godot_print!(
+            "[RUST SPAWN DEBUG] rust_spawn_npc called for type: {}",
+            npc_type
+        );
 
         // Get an inactive NPC from the pool
         let mut npc = {
@@ -921,7 +982,10 @@ impl NPCDataWarehouse {
                 Some(entry) => entry,
                 None => {
                     // Pool doesn't exist yet - might be during initialization
-                    godot_warn!("[RUST POOL] No pool found for NPC type: {} (may not be initialized yet)", npc_type);
+                    godot_warn!(
+                        "[RUST POOL] No pool found for NPC type: {} (may not be initialized yet)",
+                        npc_type
+                    );
                     return None;
                 }
             };
@@ -949,8 +1013,12 @@ impl NPCDataWarehouse {
                 let container_path = container.get_path();
                 container.add_child(&npc.node);
                 let node_path = npc.node.get_path();
-                godot_print!("[RUST POOL] Added {} to scene tree: container={}, node_path={}",
-                    npc_type, container_path, node_path);
+                godot_print!(
+                    "[RUST POOL] Added {} to scene tree: container={}, node_path={}",
+                    npc_type,
+                    container_path,
+                    node_path
+                );
             } else {
                 godot_error!("[RUST POOL] Cannot spawn NPC - scene container not set!");
                 return None;
@@ -963,17 +1031,22 @@ impl NPCDataWarehouse {
         // Store NPC metadata (name, type) in ByteMaps
         let npc_name = npc.name.clone();
         let npc_type_str = npc.npc_type.clone();
-        self.npc_names.insert(*&ulid,  npc_name.clone());
-        self.npc_types.insert(*&ulid,  npc_type_str.clone());
+        self.npc_names.insert(*&ulid, npc_name.clone());
+        self.npc_types.insert(*&ulid, npc_type_str.clone());
 
         // Register for combat using the stats extracted during pool initialization
         let npc_stats = npc.stats;
         let ulid_hex = bytes_to_hex(&ulid);
-        godot_print!("[RUST SPAWN DEBUG] About to register NPC {} with ULID: {}", npc_type, ulid_hex);
+        godot_print!(
+            "[RUST SPAWN DEBUG] About to register NPC {} with ULID: {}",
+            npc_type,
+            ulid_hex
+        );
         self.register_npc_with_stats(&ulid, &npc_stats);
 
         // Store position for combat system using ByteMap (no hex conversion!)
-        self.npc_positions.insert(*&ulid,  format!("{},{}", position.x, position.y));
+        self.npc_positions
+            .insert(*&ulid, format!("{},{}", position.x, position.y));
 
         // Set initial wander cooldown so NPC stays idle for a bit after spawning (5-10 seconds)
         use rand::Rng;
@@ -983,19 +1056,28 @@ impl NPCDataWarehouse {
         let now_ms = Self::get_current_time_ms();
         self.storage.insert(
             format!("wander_cooldown:{}", ulid_hex),
-            (now_ms + initial_idle_time).to_string()
+            (now_ms + initial_idle_time).to_string(),
         );
 
         // Move to active pool (use [u8; 16] directly as key)
         self.active_npc_pool.insert(ulid, npc);
 
         // Log spawn with first 8 bytes in hex and static_state
-        let ulid_hex_short = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-            ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7]);
+        let ulid_hex_short = format!(
+            "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+            ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7]
+        );
         let is_ally = (npc_stats.static_state & NPCStaticState::ALLY.bits() as i32) != 0;
         let is_monster = (npc_stats.static_state & NPCStaticState::MONSTER.bits() as i32) != 0;
-        godot_print!("[RUST POOL] Spawned {} at {:?} with ULID {} (ally={}, monster={}, static_state={})",
-            npc_type, position, ulid_hex_short, is_ally, is_monster, npc_stats.static_state);
+        godot_print!(
+            "[RUST POOL] Spawned {} at {:?} with ULID {} (ally={}, monster={}, static_state={})",
+            npc_type,
+            position,
+            ulid_hex_short,
+            is_ally,
+            is_monster,
+            npc_stats.static_state
+        );
 
         Some(ulid)
     }
@@ -1006,7 +1088,11 @@ impl NPCDataWarehouse {
         let mut npc = match self.active_npc_pool.remove(ulid) {
             Some((_, npc)) => npc,
             None => {
-                let ulid_hex = ulid.iter().take(8).map(|b| format!("{:02x}", b)).collect::<String>();
+                let ulid_hex = ulid
+                    .iter()
+                    .take(8)
+                    .map(|b| format!("{:02x}", b))
+                    .collect::<String>();
                 godot_warn!("[RUST POOL] Cannot despawn - NPC not found: {}", ulid_hex);
                 return false;
             }
@@ -1029,20 +1115,25 @@ impl NPCDataWarehouse {
 
         // Reset NPC stats in ByteMaps (HP back to max, remove DEAD state)
         // Get current combat stats and reset HP to max
-        if let Some(stats_json) = self.npc_combat_stats.get(&ulid_array).map(|v| v.value().clone()) {
+        if let Some(stats_json) = self
+            .npc_combat_stats
+            .get(&ulid_array)
+            .map(|v| v.value().clone())
+        {
             if let Ok(mut combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
-                combat_stats.hp = combat_stats.max_hp;  // Reset HP to max
+                combat_stats.hp = combat_stats.max_hp; // Reset HP to max
                 if let Ok(updated_json) = serde_json::to_string(&combat_stats) {
-                    self.npc_combat_stats.insert(*&ulid_array,  updated_json);
+                    self.npc_combat_stats.insert(*&ulid_array, updated_json);
                 }
             }
         }
 
         // Behavioral state: reset to IDLE (0)
-        self.npc_behavioral_state.insert(*&ulid_array,  "0".to_string());
+        self.npc_behavioral_state
+            .insert(*&ulid_array, "0".to_string());
 
         // Cooldown: reset to 0
-        self.npc_cooldown.insert(*&ulid_array,  "0".to_string());
+        self.npc_cooldown.insert(*&ulid_array, "0".to_string());
 
         // Note: Keep name and type - they don't change when pooled NPCs respawn
         // Note: Static state (faction, combat type) never changes
@@ -1054,14 +1145,26 @@ impl NPCDataWarehouse {
         let npc_type = npc.npc_type.clone();
         if let Some(mut pool_entry) = self.inactive_npc_pool.get_mut(&npc_type) {
             pool_entry.push(npc);
-            let ulid_hex = ulid.iter().take(8).map(|b| format!("{:02x}", b)).collect::<String>();
-            godot_print!("[RUST POOL] Despawned {} '{}' (ULID: {}) - Reset and returned to pool",
-                        npc_type,
-                        self.npc_names.get(&ulid_array).map(|v| v.value().clone()).unwrap_or_else(|| "Unknown".to_string()),
-                        ulid_hex);
+            let ulid_hex = ulid
+                .iter()
+                .take(8)
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>();
+            godot_print!(
+                "[RUST POOL] Despawned {} '{}' (ULID: {}) - Reset and returned to pool",
+                npc_type,
+                self.npc_names
+                    .get(&ulid_array)
+                    .map(|v| v.value().clone())
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                ulid_hex
+            );
             true
         } else {
-            godot_error!("[RUST POOL] Cannot return NPC to pool - pool not found for type: {}", npc_type);
+            godot_error!(
+                "[RUST POOL] Cannot return NPC to pool - pool not found for type: {}",
+                npc_type
+            );
             false
         }
     }
@@ -1074,7 +1177,7 @@ impl NPCDataWarehouse {
             NPCState::IDLE.bits() as i32, // behavioral_state starts as IDLE
             stats.max_hp,
             stats.attack,
-            stats.defense
+            stats.defense,
         );
     }
 
@@ -1120,11 +1223,25 @@ impl NPCDataWarehouse {
     pub fn update_npc_position_internal(&self, ulid: &str, x: f32, y: f32) {
         // DEFENSIVE: Validate position values are finite
         if !x.is_finite() {
-            self.log_error_once("invalid_position_x", ulid, &format!("[COMBAT ERROR] Cannot update position for {} - invalid x: {}", ulid, x));
+            self.log_error_once(
+                "invalid_position_x",
+                ulid,
+                &format!(
+                    "[COMBAT ERROR] Cannot update position for {} - invalid x: {}",
+                    ulid, x
+                ),
+            );
             return;
         }
         if !y.is_finite() {
-            self.log_error_once("invalid_position_y", ulid, &format!("[COMBAT ERROR] Cannot update position for {} - invalid y: {}", ulid, y));
+            self.log_error_once(
+                "invalid_position_y",
+                ulid,
+                &format!(
+                    "[COMBAT ERROR] Cannot update position for {} - invalid y: {}",
+                    ulid, y
+                ),
+            );
             return;
         }
 
@@ -1137,13 +1254,24 @@ impl NPCDataWarehouse {
     pub fn get_npc_position_internal(&self, ulid: &str) -> Option<(f32, f32)> {
         // Convert hex string to bytes, then lookup in ByteMap
         let ulid_bytes = hex_to_bytes(ulid).ok()?;
-        if let Some(pos_str) = self.npc_positions.get(&ulid_bytes).map(|v| v.value().clone()) {
+        if let Some(pos_str) = self
+            .npc_positions
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
+        {
             let parts: Vec<&str> = pos_str.split(',').collect();
             if parts.len() == 2 {
                 if let (Ok(x), Ok(y)) = (parts[0].parse::<f32>(), parts[1].parse::<f32>()) {
                     // DEFENSIVE: Validate parsed values are finite
                     if !x.is_finite() || !y.is_finite() {
-                        self.log_error_once("nan_position", ulid, &format!("[COMBAT ERROR] NPC {} has invalid position: ({}, {})", ulid, x, y));
+                        self.log_error_once(
+                            "nan_position",
+                            ulid,
+                            &format!(
+                                "[COMBAT ERROR] NPC {} has invalid position: ({}, {})",
+                                ulid, x, y
+                            ),
+                        );
                         return None;
                     }
                     return Some((x, y));
@@ -1177,15 +1305,36 @@ impl NPCDataWarehouse {
 
         // DEFENSIVE: Validate stats are finite and non-negative
         if !max_hp.is_finite() || max_hp < 0.0 {
-            self.log_error_once("invalid_hp", ulid_str, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid max_hp: {}", ulid_str, max_hp));
+            self.log_error_once(
+                "invalid_hp",
+                ulid_str,
+                &format!(
+                    "[COMBAT ERROR] Cannot register NPC {} - invalid max_hp: {}",
+                    ulid_str, max_hp
+                ),
+            );
             return;
         }
         if !attack.is_finite() || attack < 0.0 {
-            self.log_error_once("invalid_attack", ulid_str, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid attack: {}", ulid_str, attack));
+            self.log_error_once(
+                "invalid_attack",
+                ulid_str,
+                &format!(
+                    "[COMBAT ERROR] Cannot register NPC {} - invalid attack: {}",
+                    ulid_str, attack
+                ),
+            );
             return;
         }
         if !defense.is_finite() || defense < 0.0 {
-            self.log_error_once("invalid_defense", ulid_str, &format!("[COMBAT ERROR] Cannot register NPC {} - invalid defense: {}", ulid_str, defense));
+            self.log_error_once(
+                "invalid_defense",
+                ulid_str,
+                &format!(
+                    "[COMBAT ERROR] Cannot register NPC {} - invalid defense: {}",
+                    ulid_str, defense
+                ),
+            );
             return;
         }
 
@@ -1195,7 +1344,8 @@ impl NPCDataWarehouse {
             NPCStaticState::RANGED.bits() as i32,
             NPCStaticState::MAGIC.bits() as i32,
         ];
-        let combat_type_count = combat_type_bits.iter()
+        let combat_type_count = combat_type_bits
+            .iter()
             .filter(|&&bit| (static_state & bit) != 0)
             .count();
 
@@ -1210,7 +1360,8 @@ impl NPCDataWarehouse {
             NPCStaticState::MONSTER.bits() as i32,
             NPCStaticState::PASSIVE.bits() as i32,
         ];
-        let faction_count = faction_bits.iter()
+        let faction_count = faction_bits
+            .iter()
             .filter(|&&bit| (static_state & bit) != 0)
             .count();
 
@@ -1229,14 +1380,20 @@ impl NPCDataWarehouse {
             emotional_state: 0, // Default neutral emotion
             mana: 0.0,          // Will be set by NPC type later if needed
             max_mana: 0.0,
-            energy: 100.0,      // Default full energy
+            energy: 100.0, // Default full energy
             max_energy: 100.0,
         };
-        self.npc_combat_stats.insert(*ulid,  serde_json::to_string(&combat_stats).unwrap());
+        self.npc_combat_stats
+            .insert(*ulid, serde_json::to_string(&combat_stats).unwrap());
         let ulid_hex = bytes_to_hex(ulid);
-        godot_print!("[RUST STATE] register_npc_for_combat_internal ULID {} - setting state to {}", ulid_hex, behavioral_state);
-        self.npc_behavioral_state.insert(*ulid,  behavioral_state.to_string());
-        self.npc_cooldown.insert(*ulid,  "0".to_string());
+        godot_print!(
+            "[RUST STATE] register_npc_for_combat_internal ULID {} - setting state to {}",
+            ulid_hex,
+            behavioral_state
+        );
+        self.npc_behavioral_state
+            .insert(*ulid, behavioral_state.to_string());
+        self.npc_cooldown.insert(*ulid, "0".to_string());
 
         // Still use hex string for active_combat_npcs DashMap (for iteration)
         self.active_combat_npcs.insert(ulid_hex, ());
@@ -1258,11 +1415,21 @@ impl NPCDataWarehouse {
         // Clean up error_log entries for this NPC
         // We need to remove all error types for this ulid
         let error_types = [
-            "invalid_ulid", "invalid_hp", "invalid_attack", "invalid_defense",
-            "invalid_combat_type", "invalid_faction", "invalid_position_x",
-            "invalid_position_y", "nan_position", "missing_position",
-            "dead_attacker", "dead_target", "missing_hp", "self_attack",
-            "self_attack_pair"
+            "invalid_ulid",
+            "invalid_hp",
+            "invalid_attack",
+            "invalid_defense",
+            "invalid_combat_type",
+            "invalid_faction",
+            "invalid_position_x",
+            "invalid_position_y",
+            "nan_position",
+            "missing_position",
+            "dead_attacker",
+            "dead_target",
+            "missing_hp",
+            "self_attack",
+            "self_attack_pair",
         ];
 
         for error_type in error_types {
@@ -1292,7 +1459,11 @@ impl NPCDataWarehouse {
         // Convert hex string to bytes
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
             // Get combat stats from ByteMap
-            if let Some(stats_json) = self.npc_combat_stats.get(&ulid_bytes).map(|v| v.value().clone()) {
+            if let Some(stats_json) = self
+                .npc_combat_stats
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
                     return Some(combat_stats.hp);
                 }
@@ -1359,72 +1530,100 @@ impl NPCDataWarehouse {
         }
 
         // Process each combat pair
-        for (attacker_ulid, target_ulid, _distance) in combat_pairs {
-
+        for (attacker_ulid_bytes, target_ulid_bytes, _distance) in combat_pairs {
             // DEFENSIVE: Validate attacker and target are different
-            if attacker_ulid == target_ulid {
-                self.log_error_once("self_attack", &attacker_ulid,
-                    &format!("[COMBAT ERROR] NPC {} is attacking itself! Skipping.", &attacker_ulid[0..8.min(attacker_ulid.len())]));
+            if attacker_ulid_bytes == target_ulid_bytes {
+                let attacker_hex = bytes_to_hex(&attacker_ulid_bytes);
+                self.log_error_once(
+                    "self_attack",
+                    &attacker_hex,
+                    &format!(
+                        "[COMBAT ERROR] NPC {} is attacking itself! Skipping.",
+                        &attacker_hex[0..8.min(attacker_hex.len())]
+                    ),
+                );
                 continue;
             }
 
             // DEFENSIVE: Validate both NPCs exist and are alive
             // Check DEAD flag first (most reliable - updated immediately when NPC dies)
-            if let Ok(attacker_bytes) = hex_to_bytes(&attacker_ulid) {
-                if let Some(state_str) = self.npc_behavioral_state.get(&attacker_bytes).map(|v| v.value().clone()) {
-                    if let Ok(state) = state_str.parse::<i32>() {
-                        if (state & NPCState::DEAD.bits() as i32) != 0 {
-                            // Silently skip - NPC died this tick or earlier
-                            continue;
-                        }
+            if let Some(state_str) = self
+                .npc_behavioral_state
+                .get(&attacker_ulid_bytes)
+                .map(|v| v.value().clone())
+            {
+                if let Ok(state) = state_str.parse::<i32>() {
+                    if (state & NPCState::DEAD.bits() as i32) != 0 {
+                        // Silently skip - NPC died this tick or earlier
+                        continue;
                     }
                 }
             }
 
+            // Convert to hex for legacy functions that still need it (will refactor later)
+            let attacker_ulid_hex = bytes_to_hex(&attacker_ulid_bytes);
+            let target_ulid_hex = bytes_to_hex(&target_ulid_bytes);
+
             // Also check HP as fallback
-            if let Some(attacker_hp) = self.get_stat_value(&attacker_ulid, "hp") {
+            if let Some(attacker_hp) = self.get_stat_value(&attacker_ulid_hex, "hp") {
                 if attacker_hp <= 0.0 {
                     // HP is 0 but DEAD flag not set yet - skip silently
                     continue;
                 }
             } else {
-                self.log_error_once("missing_hp", &attacker_ulid,
-                    &format!("[COMBAT ERROR] Attacker {} has no HP stat. Skipping.", &attacker_ulid[0..8.min(attacker_ulid.len())]));
+                self.log_error_once(
+                    "missing_hp",
+                    &attacker_ulid_hex,
+                    &format!(
+                        "[COMBAT ERROR] Attacker {} has no HP stat. Skipping.",
+                        &attacker_ulid_hex[0..8.min(attacker_ulid_hex.len())]
+                    ),
+                );
                 continue;
             }
 
-            if let Some(target_hp) = self.get_stat_value(&target_ulid, "hp") {
+            if let Some(target_hp) = self.get_stat_value(&target_ulid_hex, "hp") {
                 if target_hp <= 0.0 {
                     // Target already dead, skip silently (common case during combat)
                     continue;
                 }
             } else {
-                self.log_error_once("missing_hp", &target_ulid,
-                    &format!("[COMBAT ERROR] Target {} has no HP stat. Skipping.", &target_ulid[0..8.min(target_ulid.len())]));
+                self.log_error_once(
+                    "missing_hp",
+                    &target_ulid_hex,
+                    &format!(
+                        "[COMBAT ERROR] Target {} has no HP stat. Skipping.",
+                        &target_ulid_hex[0..8.min(target_ulid_hex.len())]
+                    ),
+                );
                 continue;
             }
 
-            // Check cooldown
-            if !self.check_attack_cooldown(&attacker_ulid, now_ms) {
+            // Check cooldown - use bytes directly
+            if !self.check_attack_cooldown(&attacker_ulid_bytes, now_ms) {
                 continue; // Still on cooldown
             }
 
             // Get attacker static state to check if RANGED
-            let attacker_static_state = self.get_stat_value(&attacker_ulid, "static_state").unwrap_or(0.0) as i32;
+            let attacker_static_state = self
+                .get_stat_value(&attacker_ulid_hex, "static_state")
+                .unwrap_or(0.0) as i32;
             let is_ranged = (attacker_static_state & NPCStaticState::RANGED.bits() as i32) != 0;
             let is_magic = (attacker_static_state & NPCStaticState::MAGIC.bits() as i32) != 0;
 
             // Get attacker and target positions
-            let (attacker_x, attacker_y) = self.get_npc_position_internal(&attacker_ulid)
+            let (attacker_x, attacker_y) = self
+                .get_npc_position_internal(&attacker_ulid_hex)
                 .unwrap_or((0.0, 0.0));
-            let (target_x, target_y) = self.get_npc_position_internal(&target_ulid)
+            let (target_x, target_y) = self
+                .get_npc_position_internal(&target_ulid_hex)
                 .unwrap_or((0.0, 0.0));
 
-            // Update attacker cooldown
-            self.update_cooldown(&attacker_ulid, now_ms);
+            // Update attacker cooldown - use bytes directly
+            self.update_cooldown(&attacker_ulid_bytes, now_ms);
 
             // Set ATTACKING state on attacker (Rust manages all states)
-            self.add_attacking_state(&attacker_ulid);
+            self.add_attacking_state(&attacker_ulid_hex);
 
             // Generate attack event (for animation)
             events.push(CombatEvent {
@@ -1449,13 +1648,15 @@ impl NPCDataWarehouse {
                     amount: 0.0, // Damage will be calculated on hit
                     attacker_animation: "arrow".to_string(), // Projectile type
                     target_animation: format!("{},{}", attacker_y, 300.0), // Encode attacker_y and arrow speed
-                    target_x, // Target position
+                    target_x,                                              // Target position
                     target_y,
                 });
                 // Damage will be applied when GDScript calls projectile_hit()
             } else {
                 // MELEE and MAGIC attacks: Apply damage instantly
-                let attacker_attack = self.get_stat_value(&attacker_ulid, "attack").unwrap_or(10.0);
+                let attacker_attack = self
+                    .get_stat_value(&attacker_ulid, "attack")
+                    .unwrap_or(10.0);
                 let target_defense = self.get_stat_value(&target_ulid, "defense").unwrap_or(5.0);
 
                 // Calculate damage (heavily reduced formula for much slower, strategic combat)
@@ -1467,8 +1668,12 @@ impl NPCDataWarehouse {
                 static mut DAMAGE_LOG_COUNT: i32 = 0;
                 unsafe {
                     if DAMAGE_LOG_COUNT < 10 {
-                        godot_print!("[COMBAT] Attacker ATK: {:.1} vs Target DEF: {:.1} = {:.1} damage",
-                            attacker_attack, target_defense, damage);
+                        godot_print!(
+                            "[COMBAT] Attacker ATK: {:.1} vs Target DEF: {:.1} = {:.1} damage",
+                            attacker_attack,
+                            target_defense,
+                            damage
+                        );
                         DAMAGE_LOG_COUNT += 1;
                     }
                 }
@@ -1582,18 +1787,30 @@ impl NPCDataWarehouse {
         // DEBUG: Count dead NPCs in animation phase
         let mut dead_count = 0;
         for (ulid_bytes, _, _, _, _, _, _, _) in &active_npcs {
-            if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
+            if let Some(state_str) = self
+                .npc_behavioral_state
+                .get(ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 if let Ok(state) = state_str.parse::<i32>() {
                     if (state & NPCState::DEAD.bits() as i32) != 0 {
                         dead_count += 1;
                         let ulid_hex = bytes_to_hex(ulid_bytes);
-                        godot_print!("[ANIM PHASE] Found DEAD NPC: {} (state={})", ulid_hex, state);
+                        godot_print!(
+                            "[ANIM PHASE] Found DEAD NPC: {} (state={})",
+                            ulid_hex,
+                            state
+                        );
                     }
                 }
             }
         }
         if dead_count > 0 {
-            godot_print!("[ANIM PHASE] Processing {} NPCs, {} are DEAD", active_npcs.len(), dead_count);
+            godot_print!(
+                "[ANIM PHASE] Processing {} NPCs, {} are DEAD",
+                active_npcs.len(),
+                dead_count
+            );
         }
 
         // Update animations based on behavioral state (Rust controls animations)
@@ -1612,7 +1829,8 @@ impl NPCDataWarehouse {
         static mut TICK_LOG_COUNT: u32 = 0;
         unsafe {
             TICK_LOG_COUNT += 1;
-            if TICK_LOG_COUNT % 60 == 1 { // Log once per second
+            if TICK_LOG_COUNT % 60 == 1 {
+                // Log once per second
                 godot_print!("[TICK] === Starting three-phase tick ===");
             }
         }
@@ -1636,8 +1854,12 @@ impl NPCDataWarehouse {
         static mut TICK_END_LOG: u32 = 0;
         unsafe {
             TICK_END_LOG += 1;
-            if TICK_END_LOG % 60 == 1 { // Log once per second
-                godot_print!("[TICK] === Completed three-phase tick with {} total events ===", all_events.len());
+            if TICK_END_LOG % 60 == 1 {
+                // Log once per second
+                godot_print!(
+                    "[TICK] === Completed three-phase tick with {} total events ===",
+                    all_events.len()
+                );
             }
         }
 
@@ -1667,8 +1889,14 @@ impl NPCDataWarehouse {
             }
 
             // Get current behavioral state from ByteMap
-            let behavioral_state = if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
-                state_str.parse::<i32>().unwrap_or(NPCState::IDLE.bits() as i32)
+            let behavioral_state = if let Some(state_str) = self
+                .npc_behavioral_state
+                .get(ulid_bytes)
+                .map(|v| v.value().clone())
+            {
+                state_str
+                    .parse::<i32>()
+                    .unwrap_or(NPCState::IDLE.bits() as i32)
             } else {
                 NPCState::IDLE.bits() as i32
             };
@@ -1724,23 +1952,37 @@ impl NPCDataWarehouse {
                     let target_y = rng.random_range(min_y..max_y);
 
                     // Store waypoint in ByteMap
-                    self.npc_waypoints.insert(*ulid_bytes,  format!("{},{}", target_x, target_y));
+                    self.npc_waypoints
+                        .insert(*ulid_bytes, format!("{},{}", target_x, target_y));
 
                     // Update wander cooldown - set to 3 seconds in the future
-                    self.storage.insert(
-                        cooldown_key,
-                        (now_ms + 3000).to_string()
-                    );
+                    self.storage
+                        .insert(cooldown_key, (now_ms + 3000).to_string());
 
                     // Set state to WALKING (remove IDLE, add WALKING, keep other flags like COMBAT if present)
-                    let new_state = (behavioral_state & !(NPCState::IDLE.bits() as i32 | NPCState::ATTACKING.bits() as i32)) | NPCState::WALKING.bits() as i32;
-                    godot_print!("[RUST WANDER] ULID {} - Setting waypoint: old_state={}, new_state={}", ulid_hex, behavioral_state, new_state);
+                    let new_state = (behavioral_state
+                        & !(NPCState::IDLE.bits() as i32 | NPCState::ATTACKING.bits() as i32))
+                        | NPCState::WALKING.bits() as i32;
+                    godot_print!(
+                        "[RUST WANDER] ULID {} - Setting waypoint: old_state={}, new_state={}",
+                        ulid_hex,
+                        behavioral_state,
+                        new_state
+                    );
                     self.set_behavioral_state(ulid_bytes, new_state, "handle_idle_wandering");
 
                     // Verify the write worked
-                    if let Some(verify_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
+                    if let Some(verify_str) = self
+                        .npc_behavioral_state
+                        .get(ulid_bytes)
+                        .map(|v| v.value().clone())
+                    {
                         let verify_state = verify_str.parse::<i32>().unwrap_or(0);
-                        godot_print!("[RUST WANDER VERIFY] ULID {} - verified state after write: {}", ulid_hex, verify_state);
+                        godot_print!(
+                            "[RUST WANDER VERIFY] ULID {} - verified state after write: {}",
+                            ulid_hex,
+                            verify_state
+                        );
                     }
                 }
             }
@@ -1749,7 +1991,10 @@ impl NPCDataWarehouse {
 
     /// Calculate movement directions for all NPCs (pursue nearest hostile)
     /// Stores movement direction in HolyMap as "move_dir:ulid" -> "x,y"
-    fn calculate_movement_directions(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) {
+    fn calculate_movement_directions(
+        &self,
+        npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)],
+    ) {
         // static mut DIR_LOG_COUNT: u32 = 0;
         // unsafe {
         //     DIR_LOG_COUNT += 1;
@@ -1776,7 +2021,11 @@ impl NPCDataWarehouse {
             let mut nearest_distance = f32::MAX;
 
             // AGGRO SYSTEM: Check if this NPC has an aggro target (from being attacked)
-            if let Some(aggro_target_hex) = self.npc_aggro_targets.get(ulid_bytes_a).map(|v| v.value().clone()) {
+            if let Some(aggro_target_hex) = self
+                .npc_aggro_targets
+                .get(ulid_bytes_a)
+                .map(|v| v.value().clone())
+            {
                 // Find the aggro target in the NPC list
                 for (ulid_bytes_b, x_b, y_b, static_state_b, behavioral_state_b, _, _, _) in npcs {
                     let ulid_hex_b = bytes_to_hex(ulid_bytes_b);
@@ -1842,12 +2091,17 @@ impl NPCDataWarehouse {
 
                 if distance > COMBAT_DETECTION_RANGE {
                     // Enemy too far - clear combat state and let idle wandering take over
-                    if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes_a).map(|v| v.value().clone()) {
+                    if let Some(state_str) = self
+                        .npc_behavioral_state
+                        .get(ulid_bytes_a)
+                        .map(|v| v.value().clone())
+                    {
                         if let Ok(current_state) = state_str.parse::<i32>() {
                             if (current_state & NPCState::COMBAT.bits() as i32) != 0 {
                                 // Remove COMBAT flag
                                 let new_state = current_state & !(NPCState::COMBAT.bits() as i32);
-                                self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
+                                self.npc_behavioral_state
+                                    .insert(*ulid_bytes_a, new_state.to_string());
                             }
                         }
                     }
@@ -1888,7 +2142,8 @@ impl NPCDataWarehouse {
                             let clamped_y = retreat_y.clamp(min_y, max_y);
 
                             // Store retreat waypoint (clamped)
-                            self.npc_waypoints.insert(*ulid_bytes_a,  format!("{},{}", clamped_x, clamped_y));
+                            self.npc_waypoints
+                                .insert(*ulid_bytes_a, format!("{},{}", clamped_x, clamped_y));
 
                             // Update behavioral state to COMBAT only (remove IDLE)
                             // WALKING will be set in apply_waypoint_movement when actually moving
@@ -1896,7 +2151,8 @@ impl NPCDataWarehouse {
                             let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
                                 | NPCState::COMBAT.bits() as i32;
 
-                            self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
+                            self.npc_behavioral_state
+                                .insert(*ulid_bytes_a, new_state.to_string());
                         }
                     } else if distance > attack_range {
                         // TOO FAR - Move toward target to get in range
@@ -1909,23 +2165,28 @@ impl NPCDataWarehouse {
                         let clamped_x = target_x.clamp(min_x, max_x);
                         let clamped_y = target_y.clamp(min_y, max_y);
 
-                        self.npc_waypoints.insert(*ulid_bytes_a,  format!("{},{}", clamped_x, clamped_y));
+                        self.npc_waypoints
+                            .insert(*ulid_bytes_a, format!("{},{}", clamped_x, clamped_y));
 
                         // Update behavioral state to COMBAT only (remove IDLE)
                         // WALKING will be set in apply_waypoint_movement when actually moving
                         let current_state = *behavioral_state_a;
                         let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
                             | NPCState::COMBAT.bits() as i32;
-                        self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
+                        self.npc_behavioral_state
+                            .insert(*ulid_bytes_a, new_state.to_string());
                     } else {
                         // OPTIMAL RANGE (100-200px) - Stop and shoot
                         self.npc_waypoints.remove(ulid_bytes_a).map(|(_, v)| v);
 
                         // Update behavioral state to COMBAT only (remove WALKING, remove IDLE)
                         let current_state = *behavioral_state_a;
-                        let new_state = (current_state & !(NPCState::IDLE.bits() as i32) & !(NPCState::WALKING.bits() as i32))
+                        let new_state = (current_state
+                            & !(NPCState::IDLE.bits() as i32)
+                            & !(NPCState::WALKING.bits() as i32))
                             | NPCState::COMBAT.bits() as i32;
-                        self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
+                        self.npc_behavioral_state
+                            .insert(*ulid_bytes_a, new_state.to_string());
                     }
                 } else {
                     // MELEE/MAGIC units: Simple pursue behavior (original logic)
@@ -1939,14 +2200,16 @@ impl NPCDataWarehouse {
                         let clamped_x = target_x.clamp(min_x, max_x);
                         let clamped_y = target_y.clamp(min_y, max_y);
 
-                        self.npc_waypoints.insert(*ulid_bytes_a,  format!("{},{}", clamped_x, clamped_y));
+                        self.npc_waypoints
+                            .insert(*ulid_bytes_a, format!("{},{}", clamped_x, clamped_y));
 
                         // Update behavioral state to COMBAT only (remove IDLE)
                         // WALKING will be set in apply_waypoint_movement when actually moving
                         let current_state = *behavioral_state_a;
                         let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
                             | NPCState::COMBAT.bits() as i32;
-                        self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
+                        self.npc_behavioral_state
+                            .insert(*ulid_bytes_a, new_state.to_string());
                     } else {
                         // In range - stop moving
                         self.npc_waypoints.remove(ulid_bytes_a).map(|(_, v)| v);
@@ -1969,7 +2232,8 @@ impl NPCDataWarehouse {
                             }
                         }
 
-                        self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
+                        self.npc_behavioral_state
+                            .insert(*ulid_bytes_a, new_state.to_string());
                     }
                 }
             } else {
@@ -1982,7 +2246,8 @@ impl NPCDataWarehouse {
                 if (current_state & NPCState::COMBAT.bits() as i32) != 0 {
                     // Remove COMBAT flag, but keep WALKING/IDLE as-is (for idle wandering)
                     let new_state = current_state & !(NPCState::COMBAT.bits() as i32);
-                    self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
+                    self.npc_behavioral_state
+                        .insert(*ulid_bytes_a, new_state.to_string());
                 }
                 // If not in combat, leave state alone (might be idle wandering with WALKING state)
             }
@@ -1992,7 +2257,11 @@ impl NPCDataWarehouse {
     /// Apply waypoint movement - move NPCs towards their waypoints
     /// Called every combat tick with delta time
     /// Rust directly updates both the position data AND the Node2D visual position
-    fn apply_waypoint_movement(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)], delta_time: f32) {
+    fn apply_waypoint_movement(
+        &self,
+        npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)],
+        delta_time: f32,
+    ) {
         const MOVEMENT_SPEED: f32 = 80.0; // pixels per second (increased for smoother visible movement)
         const LERP_WEIGHT: f32 = 0.15; // Smoothing factor (0.0 = no movement, 1.0 = instant)
 
@@ -2009,7 +2278,11 @@ impl NPCDataWarehouse {
             let ulid_hex = bytes_to_hex(ulid_bytes);
 
             // Get current position from npc_positions ByteMap (stored as "x,y")
-            let pos_str = self.npc_positions.get(ulid_bytes).map(|v| v.value().clone()).unwrap_or_default();
+            let pos_str = self
+                .npc_positions
+                .get(ulid_bytes)
+                .map(|v| v.value().clone())
+                .unwrap_or_default();
             let coords: Vec<&str> = pos_str.split(',').collect();
             if coords.len() != 2 {
                 // static mut POS_FAIL_COUNT: u32 = 0;
@@ -2025,7 +2298,11 @@ impl NPCDataWarehouse {
             let current_y: f32 = coords[1].parse().unwrap_or(0.0);
 
             // Get waypoint from ByteMap (ULID bytes -> "x,y")
-            if let Some(waypoint_value) = self.npc_waypoints.get(ulid_bytes).map(|v| v.value().clone()) {
+            if let Some(waypoint_value) = self
+                .npc_waypoints
+                .get(ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 // Removed spam logging
                 let waypoint_coords: Vec<&str> = waypoint_value.split(',').collect();
                 if waypoint_coords.len() != 2 {
@@ -2050,22 +2327,31 @@ impl NPCDataWarehouse {
                     // Store normalized movement direction for sprite flipping
                     let dir_x = dx / distance;
                     let dir_y = dy / distance;
-                    self.npc_move_directions.insert(*ulid_bytes,  format!("{},{}", dir_x, dir_y));
+                    self.npc_move_directions
+                        .insert(*ulid_bytes, format!("{},{}", dir_x, dir_y));
 
                     // Update position in npc_positions ByteMap (data store)
-                    self.npc_positions.insert(*ulid_bytes,  format!("{},{}", target_x, target_y));
+                    self.npc_positions
+                        .insert(*ulid_bytes, format!("{},{}", target_x, target_y));
 
                     // Set WALKING state since NPC is actually moving
                     // CRITICAL: Remove IDLE when adding WALKING (mutually exclusive)
-                    if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
+                    if let Some(state_str) = self
+                        .npc_behavioral_state
+                        .get(ulid_bytes)
+                        .map(|v| v.value().clone())
+                    {
                         if let Ok(current_state) = state_str.parse::<i32>() {
                             let has_combat = (current_state & NPCState::COMBAT.bits() as i32) != 0;
-                            let has_walking = (current_state & NPCState::WALKING.bits() as i32) != 0;
+                            let has_walking =
+                                (current_state & NPCState::WALKING.bits() as i32) != 0;
 
                             // Add WALKING flag and remove IDLE (mutually exclusive)
                             if !has_walking {
-                                let new_state = (current_state & !(NPCState::IDLE.bits() as i32)) | NPCState::WALKING.bits() as i32;
-                                self.npc_behavioral_state.insert(*ulid_bytes,  new_state.to_string());
+                                let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
+                                    | NPCState::WALKING.bits() as i32;
+                                self.npc_behavioral_state
+                                    .insert(*ulid_bytes, new_state.to_string());
 
                                 // Removed spam logging
                             }
@@ -2081,8 +2367,10 @@ impl NPCDataWarehouse {
                             let current_visual_pos = node.get_position();
 
                             // Lerp from current visual position to target position for smooth movement
-                            let lerped_x = current_visual_pos.x + (target_x - current_visual_pos.x) * LERP_WEIGHT;
-                            let lerped_y = current_visual_pos.y + (target_y - current_visual_pos.y) * LERP_WEIGHT;
+                            let lerped_x = current_visual_pos.x
+                                + (target_x - current_visual_pos.x) * LERP_WEIGHT;
+                            let lerped_y = current_visual_pos.y
+                                + (target_y - current_visual_pos.y) * LERP_WEIGHT;
 
                             node.set_position(Vector2::new(lerped_x, lerped_y));
                             break;
@@ -2095,11 +2383,19 @@ impl NPCDataWarehouse {
                     self.npc_move_directions.remove(ulid_bytes).map(|(_, v)| v);
 
                     // Set state to IDLE (remove WALKING and ATTACKING flags, add IDLE, keep other flags like COMBAT)
-                    if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
+                    if let Some(state_str) = self
+                        .npc_behavioral_state
+                        .get(ulid_bytes)
+                        .map(|v| v.value().clone())
+                    {
                         if let Ok(current_state) = state_str.parse::<i32>() {
                             // Remove WALKING and ATTACKING, add IDLE (keep COMBAT flag if present)
-                            let new_state = (current_state & !(NPCState::WALKING.bits() as i32 | NPCState::ATTACKING.bits() as i32)) | NPCState::IDLE.bits() as i32;
-                            self.npc_behavioral_state.insert(*ulid_bytes,  new_state.to_string());
+                            let new_state = (current_state
+                                & !(NPCState::WALKING.bits() as i32
+                                    | NPCState::ATTACKING.bits() as i32))
+                                | NPCState::IDLE.bits() as i32;
+                            self.npc_behavioral_state
+                                .insert(*ulid_bytes, new_state.to_string());
                         }
                     }
                 }
@@ -2114,8 +2410,14 @@ impl NPCDataWarehouse {
         for (ulid_bytes, _, _, _static_state, _old_behavioral_state, _, _, _) in npcs {
             // Fetch the CURRENT behavioral state (not the stale one from npcs array)
             // This is important because apply_waypoint_movement() may have updated it
-            let behavioral_state = if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
-                let state = state_str.parse::<i32>().unwrap_or(NPCState::IDLE.bits() as i32);
+            let behavioral_state = if let Some(state_str) = self
+                .npc_behavioral_state
+                .get(ulid_bytes)
+                .map(|v| v.value().clone())
+            {
+                let state = state_str
+                    .parse::<i32>()
+                    .unwrap_or(NPCState::IDLE.bits() as i32);
 
                 // Removed spam logging
                 state
@@ -2139,7 +2441,11 @@ impl NPCDataWarehouse {
             // Log death animation (always log, not just first few times)
             if animation_name == "dead" {
                 let ulid_hex = bytes_to_hex(ulid_bytes);
-                godot_print!("[DEATH ANIM] Playing death animation for ULID {} (state={})", ulid_hex, behavioral_state);
+                godot_print!(
+                    "[DEATH ANIM] Playing death animation for ULID {} (state={})",
+                    ulid_hex,
+                    behavioral_state
+                );
             }
 
             // Removed spam logging
@@ -2195,7 +2501,11 @@ impl NPCDataWarehouse {
                         let should_flip = if is_dead {
                             // Keep current flip state for dead NPCs
                             sprite_mut.is_flipped_h()
-                        } else if let Some(move_dir) = self.npc_move_directions.get(ulid_bytes).map(|v| v.value().clone()) {
+                        } else if let Some(move_dir) = self
+                            .npc_move_directions
+                            .get(ulid_bytes)
+                            .map(|v| v.value().clone())
+                        {
                             // Has movement direction - parse it
                             let parts: Vec<&str> = move_dir.split(',').collect();
                             if parts.len() == 2 {
@@ -2207,16 +2517,23 @@ impl NPCDataWarehouse {
                             } else {
                                 false
                             }
-                        } else if let Some(waypoint) = self.npc_waypoints.get(ulid_bytes).map(|v| v.value().clone()) {
+                        } else if let Some(waypoint) = self
+                            .npc_waypoints
+                            .get(ulid_bytes)
+                            .map(|v| v.value().clone())
+                        {
                             // Has waypoint - compare with current position
-                            let current_pos = self.npc_positions.get(ulid_bytes).map(|v| v.value().clone());
+                            let current_pos = self
+                                .npc_positions
+                                .get(ulid_bytes)
+                                .map(|v| v.value().clone());
                             if let Some(current_pos_str) = current_pos {
                                 let current_parts: Vec<&str> = current_pos_str.split(',').collect();
                                 let waypoint_parts: Vec<&str> = waypoint.split(',').collect();
                                 if current_parts.len() == 2 && waypoint_parts.len() == 2 {
                                     if let (Ok(curr_x), Ok(target_x)) = (
                                         current_parts[0].parse::<f32>(),
-                                        waypoint_parts[0].parse::<f32>()
+                                        waypoint_parts[0].parse::<f32>(),
                                     ) {
                                         target_x < curr_x // Flip if target is to the left
                                     } else {
@@ -2230,8 +2547,14 @@ impl NPCDataWarehouse {
                             }
                         } else {
                             // Default: face right (don't flip) for allies, face left (flip) for monsters
-                            let static_state = if let Some(stats_json) = self.npc_combat_stats.get(ulid_bytes).map(|v| v.value().clone()) {
-                                if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                            let static_state = if let Some(stats_json) = self
+                                .npc_combat_stats
+                                .get(ulid_bytes)
+                                .map(|v| v.value().clone())
+                            {
+                                if let Ok(combat_stats) =
+                                    serde_json::from_str::<NPCCombatStats>(&stats_json)
+                                {
                                     combat_stats.static_state
                                 } else {
                                     0
@@ -2240,7 +2563,8 @@ impl NPCDataWarehouse {
                                 0
                             };
 
-                            let is_monster = (static_state & NPCStaticState::MONSTER.bits() as i32) != 0;
+                            let is_monster =
+                                (static_state & NPCStaticState::MONSTER.bits() as i32) != 0;
                             is_monster // Monsters face left by default (flip), allies face right
                         };
 
@@ -2271,7 +2595,10 @@ impl NPCDataWarehouse {
             let ulid_bytes = npc.ulid;
 
             // Get position using ByteMap
-            let pos = self.npc_positions.get(&ulid_bytes).map(|v| v.value().clone())
+            let pos = self
+                .npc_positions
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
                 .and_then(|pos_str| {
                     let parts: Vec<&str> = pos_str.split(',').collect();
                     if parts.len() == 2 {
@@ -2288,14 +2615,26 @@ impl NPCDataWarehouse {
             let (x, y) = pos.unwrap();
 
             // Get behavioral state from ByteMap
-            let behavioral_state = self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone())
+            let behavioral_state = self
+                .npc_behavioral_state
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
                 .and_then(|s| s.parse::<i32>().ok())
                 .unwrap_or(0);
 
             // Get combat stats from ByteMap
-            let (hp, attack, defense, static_state) = if let Some(stats_json) = self.npc_combat_stats.get(&ulid_bytes).map(|v| v.value().clone()) {
+            let (hp, attack, defense, static_state) = if let Some(stats_json) = self
+                .npc_combat_stats
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
-                    (combat_stats.hp, combat_stats.attack, combat_stats.defense, combat_stats.static_state)
+                    (
+                        combat_stats.hp,
+                        combat_stats.attack,
+                        combat_stats.defense,
+                        combat_stats.static_state,
+                    )
                 } else {
                     continue;
                 }
@@ -2304,7 +2643,16 @@ impl NPCDataWarehouse {
             };
 
             let max_hp = hp; // For animation phase, we don't need accurate max_hp
-            npcs.push((ulid_bytes, x, y, static_state, behavioral_state, hp, max_hp, attack));
+            npcs.push((
+                ulid_bytes,
+                x,
+                y,
+                static_state,
+                behavioral_state,
+                hp,
+                max_hp,
+                attack,
+            ));
         }
 
         npcs
@@ -2322,14 +2670,23 @@ impl NPCDataWarehouse {
             let ulid_bytes = match hex_to_bytes(ulid_hex) {
                 Ok(bytes) => bytes,
                 Err(_) => {
-                    self.log_error_once("invalid_ulid", ulid_hex,
-                        &format!("[COMBAT ERROR] Invalid ULID hex: {}", &ulid_hex[0..8.min(ulid_hex.len())]));
+                    self.log_error_once(
+                        "invalid_ulid",
+                        ulid_hex,
+                        &format!(
+                            "[COMBAT ERROR] Invalid ULID hex: {}",
+                            &ulid_hex[0..8.min(ulid_hex.len())]
+                        ),
+                    );
                     continue;
                 }
             };
 
             // Get position using ByteMap (takes bytes directly)
-            let pos = self.npc_positions.get(&ulid_bytes).map(|v| v.value().clone())
+            let pos = self
+                .npc_positions
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
                 .and_then(|pos_str| {
                     let parts: Vec<&str> = pos_str.split(',').collect();
                     if parts.len() == 2 {
@@ -2341,15 +2698,23 @@ impl NPCDataWarehouse {
                 });
 
             if pos.is_none() {
-                self.log_error_once("missing_position", ulid_hex,
-                    &format!("[COMBAT ERROR] NPC {} has no position - skipping from combat",
-                        &ulid_hex[0..8.min(ulid_hex.len())]));
+                self.log_error_once(
+                    "missing_position",
+                    ulid_hex,
+                    &format!(
+                        "[COMBAT ERROR] NPC {} has no position - skipping from combat",
+                        &ulid_hex[0..8.min(ulid_hex.len())]
+                    ),
+                );
                 continue;
             }
             let (x, y) = pos.unwrap();
 
             // Get behavioral state from ByteMap
-            let behavioral_state = self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone())
+            let behavioral_state = self
+                .npc_behavioral_state
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
                 .and_then(|s| s.parse::<i32>().ok())
                 .unwrap_or(0);
 
@@ -2359,9 +2724,18 @@ impl NPCDataWarehouse {
             }
 
             // Get combat stats from ByteMap
-            let (hp, attack, defense, static_state) = if let Some(stats_json) = self.npc_combat_stats.get(&ulid_bytes).map(|v| v.value().clone()) {
+            let (hp, attack, defense, static_state) = if let Some(stats_json) = self
+                .npc_combat_stats
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
-                    (combat_stats.hp, combat_stats.attack, combat_stats.defense, combat_stats.static_state)
+                    (
+                        combat_stats.hp,
+                        combat_stats.attack,
+                        combat_stats.defense,
+                        combat_stats.static_state,
+                    )
                 } else {
                     (100.0, 10.0, 5.0, 0)
                 }
@@ -2369,7 +2743,16 @@ impl NPCDataWarehouse {
                 (100.0, 10.0, 5.0, 0)
             };
 
-            npcs.push((ulid_bytes, x, y, static_state, behavioral_state, hp, attack, defense));
+            npcs.push((
+                ulid_bytes,
+                x,
+                y,
+                static_state,
+                behavioral_state,
+                hp,
+                attack,
+                defense,
+            ));
         }
 
         npcs
@@ -2377,7 +2760,10 @@ impl NPCDataWarehouse {
 
     /// Find combat pairs based on proximity and faction hostility
     /// Returns: Vec<(attacker_ulid_hex, target_ulid_hex, distance)>
-    fn find_combat_pairs(&self, npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)]) -> Vec<(String, String, f32)> {
+    fn find_combat_pairs(
+        &self,
+        npcs: &[([u8; 16], f32, f32, i32, i32, f32, f32, f32)],
+    ) -> Vec<([u8; 16], [u8; 16], f32)> {
         let mut pairs = Vec::new();
 
         // Debug: Log first close encounter
@@ -2423,12 +2809,12 @@ impl NPCDataWarehouse {
                 }
 
                 // If in range, add to pairs (both directions possible)
-                // Convert to hex strings only for the final result
+                // Keep as bytes - no hex conversion needed
                 if distance <= range_a {
-                    pairs.push((bytes_to_hex(ulid_a), bytes_to_hex(ulid_b), distance));
+                    pairs.push((*ulid_a, *ulid_b, distance));
                 }
                 if distance <= range_b {
-                    pairs.push((bytes_to_hex(ulid_b), bytes_to_hex(ulid_a), distance));
+                    pairs.push((*ulid_b, *ulid_a, distance));
                 }
             }
         }
@@ -2476,7 +2862,10 @@ impl NPCDataWarehouse {
         // For combat stats, read from the struct
         match stat_name {
             "hp" | "max_hp" | "attack" | "defense" | "static_state" => {
-                let stats_json = self.npc_combat_stats.get(&ulid_bytes).map(|v| v.value().clone())?;
+                let stats_json = self
+                    .npc_combat_stats
+                    .get(&ulid_bytes)
+                    .map(|v| v.value().clone())?;
                 let combat_stats = serde_json::from_str::<NPCCombatStats>(&stats_json).ok()?;
                 match stat_name {
                     "hp" => Some(combat_stats.hp),
@@ -2486,12 +2875,18 @@ impl NPCDataWarehouse {
                     "static_state" => Some(combat_stats.static_state as f32),
                     _ => None,
                 }
-            },
+            }
             // For other stats, use ByteMap lookup
             _ => {
                 let value_str = match stat_name {
-                    "behavioral_state" => self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone())?,
-                    "cooldown" => self.npc_cooldown.get(&ulid_bytes).map(|v| v.value().clone())?,
+                    "behavioral_state" => self
+                        .npc_behavioral_state
+                        .get(&ulid_bytes)
+                        .map(|v| v.value().clone())?,
+                    "cooldown" => self
+                        .npc_cooldown
+                        .get(&ulid_bytes)
+                        .map(|v| v.value().clone())?,
                     _ => return None,
                 };
                 value_str.parse::<f32>().ok()
@@ -2507,19 +2902,21 @@ impl NPCDataWarehouse {
     }
 
     /// Check if attacker can attack (cooldown expired)
-    fn check_attack_cooldown(&self, ulid: &str, now_ms: u64) -> bool {
-        if let Some(last_attack_ms) = self.get_stat_value(ulid, "cooldown") {
-            let cooldown_duration_ms = 3500; // 1 attack per 3.5 seconds (much slower, more tactical combat)
-            return now_ms >= (last_attack_ms as u64) + cooldown_duration_ms;
+    /// Takes ULID as bytes for zero-copy performance
+    fn check_attack_cooldown(&self, ulid_bytes: &[u8; 16], now_ms: u64) -> bool {
+        if let Some(last_attack_str) = self.npc_cooldown.get(ulid_bytes).map(|v| v.clone()) {
+            if let Ok(last_attack_ms) = last_attack_str.parse::<u64>() {
+                let cooldown_duration_ms = 3500; // 1 attack per 3.5 seconds (much slower, more tactical combat)
+                return now_ms >= last_attack_ms + cooldown_duration_ms;
+            }
         }
         true // No cooldown record = can attack
     }
 
     /// Update attack cooldown
-    fn update_cooldown(&self, ulid: &str, now_ms: u64) {
-        if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            self.npc_cooldown.insert(*&ulid_bytes,  now_ms.to_string());
-        }
+    /// Takes ULID as bytes for zero-copy performance
+    fn update_cooldown(&self, ulid_bytes: &[u8; 16], now_ms: u64) {
+        self.npc_cooldown.insert(*ulid_bytes, now_ms.to_string());
     }
 
     /// Apply damage to target, return new HP
@@ -2527,14 +2924,18 @@ impl NPCDataWarehouse {
         // Convert hex string to bytes
         if let Ok(ulid_bytes) = hex_to_bytes(target_ulid) {
             // Get current combat stats
-            if let Some(stats_json) = self.npc_combat_stats.get(&ulid_bytes).map(|v| v.value().clone()) {
+            if let Some(stats_json) = self
+                .npc_combat_stats
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 if let Ok(mut combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
                     // Apply damage
                     combat_stats.hp = (combat_stats.hp - damage).max(0.0);
 
                     // Store updated stats
                     if let Ok(updated_json) = serde_json::to_string(&combat_stats) {
-                        self.npc_combat_stats.insert(*&ulid_bytes,  updated_json);
+                        self.npc_combat_stats.insert(*&ulid_bytes, updated_json);
                     }
 
                     return combat_stats.hp;
@@ -2579,7 +2980,8 @@ impl NPCDataWarehouse {
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
             // Set behavioral state to DEAD only (clear all other flags)
             let dead_state = NPCState::DEAD.bits() as i32;
-            self.npc_behavioral_state.insert(*&ulid_bytes,  dead_state.to_string());
+            self.npc_behavioral_state
+                .insert(*&ulid_bytes, dead_state.to_string());
 
             godot_print!("[DEATH] Marked NPC {} as DEAD (state={})", ulid, dead_state);
 
@@ -2590,92 +2992,158 @@ impl NPCDataWarehouse {
             // Schedule despawn after death animation (2 seconds)
             let now_ms = Self::get_current_time_ms();
             let despawn_time = now_ms + 2000; // 2 seconds for death animation
-            self.storage.insert(
-                format!("despawn_at:{}", ulid),
-                despawn_time.to_string()
-            );
+            self.storage
+                .insert(format!("despawn_at:{}", ulid), despawn_time.to_string());
         }
     }
 
     /// Add ATTACKING state flag (set during attack)
     fn add_attacking_state(&self, ulid: &str) {
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            let current = if let Some(state_str) = self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone()) {
+            let current = if let Some(state_str) = self
+                .npc_behavioral_state
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 state_str.parse::<i32>().unwrap_or(0)
             } else {
                 0
             };
             let new_state = current | NPCState::ATTACKING.bits() as i32;
-            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
+            self.npc_behavioral_state
+                .insert(*&ulid_bytes, new_state.to_string());
 
             // Record timestamp for auto-clearing (format: "attacking:timestamp,damaged:timestamp")
+            // Preserve existing damaged timestamp if present
             let now_ms = Self::get_current_time_ms();
-            self.npc_state_timestamps.insert(*&ulid_bytes,  format!("attacking:{}", now_ms));
+            let existing_timestamps = self
+                .npc_state_timestamps
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+                .unwrap_or_default();
 
-            godot_print!("[ATTACK STATE] NPC {} - Setting ATTACKING flag (old_state={}, new_state={})",
-                &ulid[0..8.min(ulid.len())], current, new_state);
+            // Parse existing timestamps to preserve damaged timestamp
+            let mut damaged_part = String::new();
+            for part in existing_timestamps.split(',') {
+                if part.starts_with("damaged:") {
+                    damaged_part = format!(",{}", part);
+                    break;
+                }
+            }
+
+            let new_timestamps = format!("attacking:{}{}", now_ms, damaged_part);
+            self.npc_state_timestamps
+                .insert(*&ulid_bytes, new_timestamps);
+
+            godot_print!(
+                "[ATTACK STATE] NPC {} - Setting ATTACKING flag (old_state={}, new_state={})",
+                &ulid[0..8.min(ulid.len())],
+                current,
+                new_state
+            );
         }
     }
 
     /// Add DAMAGED state flag (set when taking damage)
     fn add_damaged_state(&self, ulid: &str) {
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            let current = if let Some(state_str) = self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone()) {
+            let current = if let Some(state_str) = self
+                .npc_behavioral_state
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 state_str.parse::<i32>().unwrap_or(0)
             } else {
                 0
             };
             let new_state = current | NPCState::DAMAGED.bits() as i32;
-            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
+            self.npc_behavioral_state
+                .insert(*&ulid_bytes, new_state.to_string());
 
-            // Record timestamp for auto-clearing
+            // Record timestamp for auto-clearing (format: "attacking:timestamp,damaged:timestamp")
+            // Preserve existing attacking timestamp if present
             let now_ms = Self::get_current_time_ms();
-            self.npc_state_timestamps.insert(*&ulid_bytes,  format!("damaged:{}", now_ms));
+            let existing_timestamps = self
+                .npc_state_timestamps
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+                .unwrap_or_default();
 
-            godot_print!("[DAMAGED STATE] NPC {} - Setting DAMAGED flag (old_state={}, new_state={})",
-                &ulid[0..8.min(ulid.len())], current, new_state);
+            // Parse existing timestamps to preserve attacking timestamp
+            let mut attacking_part = String::new();
+            for part in existing_timestamps.split(',') {
+                if part.starts_with("attacking:") {
+                    attacking_part = format!("{},", part);
+                    break;
+                }
+            }
+
+            let new_timestamps = format!("{}damaged:{}", attacking_part, now_ms);
+            self.npc_state_timestamps
+                .insert(*&ulid_bytes, new_timestamps);
+
+            godot_print!(
+                "[DAMAGED STATE] NPC {} - Setting DAMAGED flag (old_state={}, new_state={})",
+                &ulid[0..8.min(ulid.len())],
+                current,
+                new_state
+            );
         }
     }
 
     /// Remove ATTACKING state flag (called by GDScript after attack animation finishes)
     pub fn remove_attacking_state(&self, ulid: &str) {
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            let current = if let Some(state_str) = self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone()) {
+            let current = if let Some(state_str) = self
+                .npc_behavioral_state
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 state_str.parse::<i32>().unwrap_or(0)
             } else {
                 0
             };
             let new_state = current & !(NPCState::ATTACKING.bits() as i32);
-            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
+            self.npc_behavioral_state
+                .insert(*&ulid_bytes, new_state.to_string());
         }
     }
 
     /// Remove DAMAGED state flag (called by GDScript after hurt animation finishes)
     pub fn remove_damaged_state(&self, ulid: &str) {
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            let current = if let Some(state_str) = self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone()) {
+            let current = if let Some(state_str) = self
+                .npc_behavioral_state
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 state_str.parse::<i32>().unwrap_or(0)
             } else {
                 0
             };
             let new_state = current & !(NPCState::DAMAGED.bits() as i32);
-            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
+            self.npc_behavioral_state
+                .insert(*&ulid_bytes, new_state.to_string());
         }
     }
 
     /// Set aggro target for an NPC (makes them prioritize attacking this target)
     fn set_aggro_target(&self, npc_ulid: &str, target_ulid: &str) {
         if let Ok(ulid_bytes) = hex_to_bytes(npc_ulid) {
-            self.npc_aggro_targets.insert(*&ulid_bytes,  target_ulid.to_string());
-            godot_print!("[AGGRO] NPC {} now targets {} (retaliation)",
-                &npc_ulid[0..8.min(npc_ulid.len())], &target_ulid[0..8.min(target_ulid.len())]);
+            self.npc_aggro_targets
+                .insert(*&ulid_bytes, target_ulid.to_string());
+            godot_print!(
+                "[AGGRO] NPC {} now targets {} (retaliation)",
+                &npc_ulid[0..8.min(npc_ulid.len())],
+                &target_ulid[0..8.min(target_ulid.len())]
+            );
         }
     }
 
     /// Clear ATTACKING and DAMAGED states after animation duration
     fn clear_expired_animation_states(&self) {
         let now_ms = Self::get_current_time_ms();
-        const ATTACK_ANIM_DURATION_MS: u64 = 800;  // Attack animation duration (800ms)
+        const ATTACK_ANIM_DURATION_MS: u64 = 800; // Attack animation duration (800ms)
         const DAMAGED_ANIM_DURATION_MS: u64 = 500; // Hurt animation duration (500ms)
 
         // Iterate through all active NPCs
@@ -2684,48 +3152,87 @@ impl NPCDataWarehouse {
             let ulid_bytes = &npc.ulid;
 
             // Check if this NPC has timestamp records
-            if let Some(timestamp_str) = self.npc_state_timestamps.get(ulid_bytes).map(|v| v.value().clone()) {
+            if let Some(timestamp_str) = self
+                .npc_state_timestamps
+                .get(ulid_bytes)
+                .map(|v| v.value().clone())
+            {
                 let mut should_clear_attacking = false;
                 let mut should_clear_damaged = false;
 
-                // Parse timestamps (format: "attacking:123456" or "damaged:123456")
-                if timestamp_str.starts_with("attacking:") {
-                    if let Ok(set_at_ms) = timestamp_str[10..].parse::<u64>() {
-                        if now_ms >= set_at_ms + ATTACK_ANIM_DURATION_MS {
-                            should_clear_attacking = true;
+                // Parse timestamps (format: "attacking:123456,damaged:789012" or just one of them)
+                for part in timestamp_str.split(',') {
+                    if part.starts_with("attacking:") {
+                        if let Ok(set_at_ms) = part[10..].parse::<u64>() {
+                            if now_ms >= set_at_ms + ATTACK_ANIM_DURATION_MS {
+                                should_clear_attacking = true;
+                            }
                         }
-                    }
-                } else if timestamp_str.starts_with("damaged:") {
-                    if let Ok(set_at_ms) = timestamp_str[8..].parse::<u64>() {
-                        if now_ms >= set_at_ms + DAMAGED_ANIM_DURATION_MS {
-                            should_clear_damaged = true;
+                    } else if part.starts_with("damaged:") {
+                        if let Ok(set_at_ms) = part[8..].parse::<u64>() {
+                            if now_ms >= set_at_ms + DAMAGED_ANIM_DURATION_MS {
+                                should_clear_damaged = true;
+                            }
                         }
                     }
                 }
 
                 // Clear expired states
                 if should_clear_attacking || should_clear_damaged {
-                    if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
+                    if let Some(state_str) = self
+                        .npc_behavioral_state
+                        .get(ulid_bytes)
+                        .map(|v| v.value().clone())
+                    {
                         if let Ok(current_state) = state_str.parse::<i32>() {
                             let mut new_state = current_state;
+                            let mut remaining_timestamps = Vec::new();
 
                             if should_clear_attacking {
                                 new_state &= !(NPCState::ATTACKING.bits() as i32);
                                 let ulid_hex = bytes_to_hex(ulid_bytes);
-                                godot_print!("[ANIM CLEAR] NPC {} - Clearing ATTACKING flag after {}ms",
-                                    &ulid_hex[0..8.min(ulid_hex.len())], ATTACK_ANIM_DURATION_MS);
+                                godot_print!(
+                                    "[ANIM CLEAR] NPC {} - Clearing ATTACKING flag after {}ms",
+                                    &ulid_hex[0..8.min(ulid_hex.len())],
+                                    ATTACK_ANIM_DURATION_MS
+                                );
+                            } else {
+                                // Keep attacking timestamp if not expired
+                                for part in timestamp_str.split(',') {
+                                    if part.starts_with("attacking:") {
+                                        remaining_timestamps.push(part.to_string());
+                                    }
+                                }
                             }
 
                             if should_clear_damaged {
                                 new_state &= !(NPCState::DAMAGED.bits() as i32);
                                 let ulid_hex = bytes_to_hex(ulid_bytes);
-                                godot_print!("[ANIM CLEAR] NPC {} - Clearing DAMAGED flag after {}ms",
-                                    &ulid_hex[0..8.min(ulid_hex.len())], DAMAGED_ANIM_DURATION_MS);
+                                godot_print!(
+                                    "[ANIM CLEAR] NPC {} - Clearing DAMAGED flag after {}ms",
+                                    &ulid_hex[0..8.min(ulid_hex.len())],
+                                    DAMAGED_ANIM_DURATION_MS
+                                );
+                            } else {
+                                // Keep damaged timestamp if not expired
+                                for part in timestamp_str.split(',') {
+                                    if part.starts_with("damaged:") {
+                                        remaining_timestamps.push(part.to_string());
+                                    }
+                                }
                             }
 
-                            // Update state and remove timestamp
-                            self.npc_behavioral_state.insert(*ulid_bytes,  new_state.to_string());
-                            self.npc_state_timestamps.remove(ulid_bytes).map(|(_, v)| v);
+                            // Update state
+                            self.npc_behavioral_state
+                                .insert(*ulid_bytes, new_state.to_string());
+
+                            // Update or remove timestamp based on remaining timestamps
+                            if remaining_timestamps.is_empty() {
+                                self.npc_state_timestamps.remove(ulid_bytes).map(|(_, v)| v);
+                            } else {
+                                self.npc_state_timestamps
+                                    .insert(*ulid_bytes, remaining_timestamps.join(","));
+                            }
                         }
                     }
                 }
@@ -2763,7 +3270,8 @@ impl NPCDataWarehouse {
 
         // Set the timers so regular spawning doesn't trigger immediately
         self.last_spawn_time_ms.store(now_ms, Ordering::Relaxed);
-        self.last_ally_spawn_time_ms.store(now_ms, Ordering::Relaxed);
+        self.last_ally_spawn_time_ms
+            .store(now_ms, Ordering::Relaxed);
 
         godot_print!("[RUST SPAWN] Initial spawn starting...");
 
@@ -2782,7 +3290,10 @@ impl NPCDataWarehouse {
 
         // Give warrior initial waypoint toward center-right (to meet monsters)
         if let Some(ulid_bytes) = warrior_ulid {
-            self.npc_waypoints.insert(*&ulid_bytes,  format!("{},{}", center_x - 100.0, center_y - 30.0));
+            self.npc_waypoints.insert(
+                *&ulid_bytes,
+                format!("{},{}", center_x - 100.0, center_y - 30.0),
+            );
             godot_print!("[RUST SPAWN] Warrior spawned with waypoint toward center");
         }
 
@@ -2792,7 +3303,10 @@ impl NPCDataWarehouse {
 
         // Give archer waypoint toward center-right (stays behind warrior)
         if let Some(ulid_bytes) = archer_ulid {
-            self.npc_waypoints.insert(*&ulid_bytes,  format!("{},{}", center_x - 150.0, center_y + 30.0));
+            self.npc_waypoints.insert(
+                *&ulid_bytes,
+                format!("{},{}", center_x - 150.0, center_y + 30.0),
+            );
             godot_print!("[RUST SPAWN] Archer spawned with waypoint toward center");
         }
 
@@ -2811,8 +3325,12 @@ impl NPCDataWarehouse {
 
             // Give monster waypoint toward center-left (to meet allies)
             if let Some(ulid_bytes) = monster_ulid {
-                self.npc_waypoints.insert(*&ulid_bytes,  format!("{},{}", center_x + 100.0, monster_y));
-                godot_print!("[RUST SPAWN] Monster {} spawned with waypoint toward center", monster_type);
+                self.npc_waypoints
+                    .insert(*&ulid_bytes, format!("{},{}", center_x + 100.0, monster_y));
+                godot_print!(
+                    "[RUST SPAWN] Monster {} spawned with waypoint toward center",
+                    monster_type
+                );
             }
         }
 
@@ -2836,7 +3354,9 @@ impl NPCDataWarehouse {
         }
 
         // Count active monsters (NPCs with MONSTER faction)
-        let monster_count = self.active_combat_npcs.iter()
+        let monster_count = self
+            .active_combat_npcs
+            .iter()
             .filter(|entry| {
                 let ulid = entry.key();
                 if let Some(static_state) = self.get_stat_value(ulid, "static_state") {
@@ -2852,8 +3372,8 @@ impl NPCDataWarehouse {
         let last_spawn = self.last_spawn_time_ms.load(Ordering::Relaxed);
         let time_since_spawn = now_ms - last_spawn;
 
-        let should_spawn = (monster_count < self.min_active_monsters as usize) ||
-                          (time_since_spawn >= self.spawn_interval_ms);
+        let should_spawn = (monster_count < self.min_active_monsters as usize)
+            || (time_since_spawn >= self.spawn_interval_ms);
 
         if should_spawn {
             // Update last spawn time
@@ -2867,7 +3387,11 @@ impl NPCDataWarehouse {
             // Monster types to spawn from (weighted random)
             let monster_types = vec!["goblin", "mushroom", "skeleton", "eyebeast"];
 
-            godot_print!("[RUST SPAWN] Spawning wave of {} monsters (current: {})", wave_size, monster_count);
+            godot_print!(
+                "[RUST SPAWN] Spawning wave of {} monsters (current: {})",
+                wave_size,
+                monster_count
+            );
 
             // Get spawn positions
             let world_max_x = f32::from_bits(self.world_max_x.load(Ordering::Relaxed));
@@ -2879,7 +3403,7 @@ impl NPCDataWarehouse {
                 let monster_type = monster_types[rng.random_range(0..monster_types.len())];
                 let spawn_pos = Vector2::new(
                     1050.0, // Right side of screen
-                    rng.random_range(world_min_y..world_max_y)
+                    rng.random_range(world_min_y..world_max_y),
                 );
 
                 if let Some(_ulid) = self.rust_spawn_npc(monster_type, spawn_pos) {
@@ -2941,7 +3465,8 @@ impl NPCDataWarehouse {
 
         if warrior_deficit > 0 || archer_deficit > 0 {
             // Update last spawn time
-            self.last_ally_spawn_time_ms.store(now_ms, Ordering::Relaxed);
+            self.last_ally_spawn_time_ms
+                .store(now_ms, Ordering::Relaxed);
 
             // Decide which to spawn (prioritize bigger deficit)
             let ally_type = if warrior_deficit >= archer_deficit && warrior_deficit > 0 {
@@ -2962,13 +3487,19 @@ impl NPCDataWarehouse {
             let mut rng = rand::rng();
             let spawn_pos = Vector2::new(
                 150.0, // Left side of screen
-                rng.random_range(world_min_y..world_max_y)
+                rng.random_range(world_min_y..world_max_y),
             );
 
             if let Some(_ulid) = self.rust_spawn_npc(ally_type, spawn_pos) {
                 // Note: rust_spawn_npc already registers for combat via register_npc_with_stats
-                godot_print!("[RUST SPAWN] Spawned {} (Warriors: {}/{}, Archers: {}/{})",
-                    ally_type, warrior_count, self.max_warriors, archer_count, self.max_archers);
+                godot_print!(
+                    "[RUST SPAWN] Spawned {} (Warriors: {}/{}, Archers: {}/{})",
+                    ally_type,
+                    warrior_count,
+                    self.max_warriors,
+                    archer_count,
+                    self.max_archers
+                );
             }
         }
 
@@ -3082,13 +3613,13 @@ impl GodotNPCDataWarehouse {
     /// Register a new NPC pool
     #[func]
     pub fn register_pool(&mut self, npc_type: GString, max_size: i32, scene_path: GString) {
-        self.warehouse.register_pool(
-            &npc_type.to_string(),
-            max_size,
-            &scene_path.to_string()
-        );
+        self.warehouse
+            .register_pool(&npc_type.to_string(), max_size, &scene_path.to_string());
         // Emit signal
-        self.base_mut().emit_signal("pool_registered", &[npc_type.to_variant(), max_size.to_variant()]);
+        self.base_mut().emit_signal(
+            "pool_registered",
+            &[npc_type.to_variant(), max_size.to_variant()],
+        );
     }
 
     // ===== Rust NPC Pool System Methods =====
@@ -3100,7 +3631,7 @@ impl GodotNPCDataWarehouse {
         self.warehouse.initialize_npc_pool(
             &npc_type.to_string(),
             pool_size as usize,
-            &scene_path.to_string()
+            &scene_path.to_string(),
         );
     }
 
@@ -3114,7 +3645,10 @@ impl GodotNPCDataWarehouse {
     /// Returns the ULID bytes of the spawned NPC, or empty array if failed
     #[func]
     pub fn rust_spawn_npc(&self, npc_type: GString, position: Vector2) -> PackedByteArray {
-        if let Some(ulid_bytes) = self.warehouse.rust_spawn_npc(&npc_type.to_string(), position) {
+        if let Some(ulid_bytes) = self
+            .warehouse
+            .rust_spawn_npc(&npc_type.to_string(), position)
+        {
             return PackedByteArray::from(&ulid_bytes[..]);
         }
         PackedByteArray::new()
@@ -3134,7 +3668,10 @@ impl GodotNPCDataWarehouse {
             return GString::from("");
         }
         let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
-        self.warehouse.npc_names.get(&ulid_bytes).map(|v| v.value().clone())
+        self.warehouse
+            .npc_names
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
             .map(|name| GString::from(name))
             .unwrap_or_else(|| GString::from(""))
     }
@@ -3146,7 +3683,10 @@ impl GodotNPCDataWarehouse {
             return GString::from("");
         }
         let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
-        self.warehouse.npc_types.get(&ulid_bytes).map(|v| v.value().clone())
+        self.warehouse
+            .npc_types
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
             .map(|npc_type| GString::from(npc_type))
             .unwrap_or_else(|| GString::from(""))
     }
@@ -3162,17 +3702,32 @@ impl GodotNPCDataWarehouse {
         let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
 
         // Get name
-        if let Some(name) = self.warehouse.npc_names.get(&ulid_bytes).map(|v| v.value().clone()) {
+        if let Some(name) = self
+            .warehouse
+            .npc_names
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
+        {
             dict.set("name", name);
         }
 
         // Get type
-        if let Some(npc_type) = self.warehouse.npc_types.get(&ulid_bytes).map(|v| v.value().clone()) {
+        if let Some(npc_type) = self
+            .warehouse
+            .npc_types
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
+        {
             dict.set("type", npc_type);
         }
 
         // Get combat stats (hp, max_hp, attack, defense) from single struct
-        if let Some(stats_json) = self.warehouse.npc_combat_stats.get(&ulid_bytes).map(|v| v.value().clone()) {
+        if let Some(stats_json) = self
+            .warehouse
+            .npc_combat_stats
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
+        {
             if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
                 dict.set("hp", combat_stats.hp);
                 dict.set("max_hp", combat_stats.max_hp);
@@ -3205,17 +3760,32 @@ impl GodotNPCDataWarehouse {
         let mut max_energy = 0.0_f32;
 
         // Get name
-        if let Some(n) = self.warehouse.npc_names.get(&ulid_bytes).map(|v| v.value().clone()) {
+        if let Some(n) = self
+            .warehouse
+            .npc_names
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
+        {
             name = n;
         }
 
         // Get type
-        if let Some(t) = self.warehouse.npc_types.get(&ulid_bytes).map(|v| v.value().clone()) {
+        if let Some(t) = self
+            .warehouse
+            .npc_types
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
+        {
             npc_type = t;
         }
 
         // Get combat stats
-        if let Some(stats_json) = self.warehouse.npc_combat_stats.get(&ulid_bytes).map(|v| v.value().clone()) {
+        if let Some(stats_json) = self
+            .warehouse
+            .npc_combat_stats
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
+        {
             if let Ok(combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
                 hp = combat_stats.hp;
                 max_hp = combat_stats.max_hp;
@@ -3232,7 +3802,17 @@ impl GodotNPCDataWarehouse {
         // Build JSON string manually (simple and fast)
         let json = format!(
             r#"{{"name":"{}","type":"{}","hp":{},"max_hp":{},"attack":{},"defense":{},"emotional_state":{},"mana":{},"max_mana":{},"energy":{},"max_energy":{}}}"#,
-            name, npc_type, hp, max_hp, attack, defense, emotional_state, mana, max_mana, energy, max_energy
+            name,
+            npc_type,
+            hp,
+            max_hp,
+            attack,
+            defense,
+            emotional_state,
+            mana,
+            max_mana,
+            energy,
+            max_energy
         );
 
         GString::from(json)
@@ -3242,19 +3822,22 @@ impl GodotNPCDataWarehouse {
     /// npc_data should be JSON with at minimum {"type":"npc_type_here"}
     #[func]
     pub fn store_npc(&mut self, ulid: GString, npc_data: GString) {
-        self.warehouse.store_npc(&ulid.to_string(), &npc_data.to_string());
+        self.warehouse
+            .store_npc(&ulid.to_string(), &npc_data.to_string());
 
         // Extract npc_type from JSON (simple parse - assumes format {"type":"value"})
         let npc_type = GString::from("unknown"); // TODO: Parse JSON properly
 
         // Emit signal
-        self.base_mut().emit_signal("npc_stored", &[ulid.to_variant(), npc_type.to_variant()]);
+        self.base_mut()
+            .emit_signal("npc_stored", &[ulid.to_variant(), npc_type.to_variant()]);
     }
 
     /// Get active NPC data
     #[func]
     pub fn get_npc(&self, ulid: GString) -> GString {
-        self.warehouse.get_npc(&ulid.to_string())
+        self.warehouse
+            .get_npc(&ulid.to_string())
             .map(|s| GString::from(s))
             .unwrap_or_else(|| GString::from(""))
     }
@@ -3265,7 +3848,10 @@ impl GodotNPCDataWarehouse {
         let removed = self.warehouse.remove_npc(&ulid.to_string());
         if removed {
             // Emit signal
-            self.base_mut().emit_signal("npc_removed", &[ulid.to_variant(), GString::from("unknown").to_variant()]);
+            self.base_mut().emit_signal(
+                "npc_removed",
+                &[ulid.to_variant(), GString::from("unknown").to_variant()],
+            );
         }
         removed
     }
@@ -3275,13 +3861,15 @@ impl GodotNPCDataWarehouse {
     #[func]
     pub fn store_npc_state(&mut self, ulid: GString, state: i32) {
         // Store as simple integer string for fast access
-        self.warehouse.store_combat_state(&format!("{}_state", ulid.to_string()), &state.to_string());
+        self.warehouse
+            .store_combat_state(&format!("{}_state", ulid.to_string()), &state.to_string());
     }
 
     /// Get NPC state flags (raw integer)
     #[func]
     pub fn get_npc_state(&self, ulid: GString) -> i32 {
-        self.warehouse.get_combat_state(&format!("{}_state", ulid.to_string()))
+        self.warehouse
+            .get_combat_state(&format!("{}_state", ulid.to_string()))
             .and_then(|s| s.parse::<i32>().ok())
             .unwrap_or(NPCState::IDLE.to_i32())
     }
@@ -3289,15 +3877,20 @@ impl GodotNPCDataWarehouse {
     /// Store AI state
     #[func]
     pub fn store_ai_state(&mut self, ulid: GString, ai_data: GString) {
-        self.warehouse.store_ai_state(&ulid.to_string(), &ai_data.to_string());
+        self.warehouse
+            .store_ai_state(&ulid.to_string(), &ai_data.to_string());
         // Emit signal
-        self.base_mut().emit_signal("ai_state_changed", &[ulid.to_variant(), ai_data.to_variant()]);
+        self.base_mut().emit_signal(
+            "ai_state_changed",
+            &[ulid.to_variant(), ai_data.to_variant()],
+        );
     }
 
     /// Get AI state
     #[func]
     pub fn get_ai_state(&self, ulid: GString) -> GString {
-        self.warehouse.get_ai_state(&ulid.to_string())
+        self.warehouse
+            .get_ai_state(&ulid.to_string())
             .map(|s| GString::from(s))
             .unwrap_or_else(|| GString::from(""))
     }
@@ -3305,15 +3898,20 @@ impl GodotNPCDataWarehouse {
     /// Store combat state
     #[func]
     pub fn store_combat_state(&mut self, ulid: GString, combat_data: GString) {
-        self.warehouse.store_combat_state(&ulid.to_string(), &combat_data.to_string());
+        self.warehouse
+            .store_combat_state(&ulid.to_string(), &combat_data.to_string());
         // Emit signal
-        self.base_mut().emit_signal("combat_state_changed", &[ulid.to_variant(), combat_data.to_variant()]);
+        self.base_mut().emit_signal(
+            "combat_state_changed",
+            &[ulid.to_variant(), combat_data.to_variant()],
+        );
     }
 
     /// Get combat state
     #[func]
     pub fn get_combat_state(&self, ulid: GString) -> GString {
-        self.warehouse.get_combat_state(&ulid.to_string())
+        self.warehouse
+            .get_combat_state(&ulid.to_string())
             .map(|s| GString::from(s))
             .unwrap_or_else(|| GString::from(""))
     }
@@ -3349,7 +3947,8 @@ impl GodotNPCDataWarehouse {
         let count_after = self.warehouse.read_store_count();
 
         // Emit signal with count of synced entries
-        self.base_mut().emit_signal("sync_completed", &[(count_after as i32).to_variant()]);
+        self.base_mut()
+            .emit_signal("sync_completed", &[(count_after as i32).to_variant()]);
     }
 
     /// Clear all data
@@ -3379,13 +3978,21 @@ impl GodotNPCDataWarehouse {
     /// Defensive programming: tracks spawn success rate
     /// Usage: NPCDataWarehouse.confirm_spawn(ulid_bytes, monster_type, static_state, behavioral_state)
     #[func]
-    pub fn confirm_spawn(&self, ulid_bytes: PackedByteArray, monster_type: GString, static_state: i32, behavioral_state: i32) {
+    pub fn confirm_spawn(
+        &self,
+        ulid_bytes: PackedByteArray,
+        monster_type: GString,
+        static_state: i32,
+        behavioral_state: i32,
+    ) {
         use std::sync::atomic::Ordering;
 
         match packed_bytes_to_hex(&ulid_bytes) {
             Ok(ulid_hex) => {
                 // Increment confirmation counter
-                self.warehouse.spawn_confirmations.fetch_add(1, Ordering::Relaxed);
+                self.warehouse
+                    .spawn_confirmations
+                    .fetch_add(1, Ordering::Relaxed);
 
                 // Log confirmation (every 10th spawn)
                 let confirmations = self.warehouse.spawn_confirmations.load(Ordering::Relaxed);
@@ -3397,19 +4004,27 @@ impl GodotNPCDataWarehouse {
                     } else {
                         100
                     };
-                    godot_print!("[RUST SPAWN] Spawn stats: {} requests, {} confirmed ({}% success)",
-                        requests, confirmations, success_rate);
+                    godot_print!(
+                        "[RUST SPAWN] Spawn stats: {} requests, {} confirmed ({}% success)",
+                        requests,
+                        confirmations,
+                        success_rate
+                    );
                 }
 
                 // Verify the spawned NPC has correct state
-                if let Some(actual_static) = self.warehouse.get_stat_value(&ulid_hex, "static_state") {
+                if let Some(actual_static) =
+                    self.warehouse.get_stat_value(&ulid_hex, "static_state")
+                {
                     if (actual_static as i32) != static_state {
                         godot_warn!("[RUST SPAWN] NPC {} spawned with incorrect static_state! Expected: {}, Got: {}",
                             &ulid_hex[0..8], static_state, actual_static as i32);
                     }
                 }
 
-                if let Some(actual_behavioral) = self.warehouse.get_stat_value(&ulid_hex, "behavioral_state") {
+                if let Some(actual_behavioral) =
+                    self.warehouse.get_stat_value(&ulid_hex, "behavioral_state")
+                {
                     if (actual_behavioral as i32) != behavioral_state {
                         godot_warn!("[RUST SPAWN] NPC {} spawned with incorrect behavioral_state! Expected: {}, Got: {}",
                             &ulid_hex[0..8], behavioral_state, actual_behavioral as i32);
@@ -3426,7 +4041,11 @@ impl GodotNPCDataWarehouse {
     /// Calculates damage, applies it, and returns events (damage or death)
     /// Usage: var events_json = NPCDataWarehouse.projectile_hit(attacker_ulid, target_ulid)
     #[func]
-    pub fn projectile_hit(&self, attacker_ulid_bytes: PackedByteArray, target_ulid_bytes: PackedByteArray) -> Array<GString> {
+    pub fn projectile_hit(
+        &self,
+        attacker_ulid_bytes: PackedByteArray,
+        target_ulid_bytes: PackedByteArray,
+    ) -> Array<GString> {
         use std::sync::atomic::Ordering;
 
         let attacker_result = packed_bytes_to_hex(&attacker_ulid_bytes);
@@ -3441,15 +4060,24 @@ impl GodotNPCDataWarehouse {
         let target_ulid = target_result.unwrap();
 
         // Validate target is alive
-        let target_hp = self.warehouse.get_stat_value(&target_ulid, "hp").unwrap_or(0.0);
+        let target_hp = self
+            .warehouse
+            .get_stat_value(&target_ulid, "hp")
+            .unwrap_or(0.0);
         if target_hp <= 0.0 {
             // Target already dead, no damage
             return Array::new();
         }
 
         // Get attacker and target stats
-        let attacker_attack = self.warehouse.get_stat_value(&attacker_ulid, "attack").unwrap_or(10.0);
-        let target_defense = self.warehouse.get_stat_value(&target_ulid, "defense").unwrap_or(5.0);
+        let attacker_attack = self
+            .warehouse
+            .get_stat_value(&attacker_ulid, "attack")
+            .unwrap_or(10.0);
+        let target_defense = self
+            .warehouse
+            .get_stat_value(&target_ulid, "defense")
+            .unwrap_or(5.0);
 
         // Calculate damage
         let damage = (attacker_attack - (target_defense / 2.0)).max(1.0);
@@ -3458,7 +4086,9 @@ impl GodotNPCDataWarehouse {
         let new_target_hp = self.warehouse.apply_damage(&target_ulid, damage);
 
         // Get target position for event
-        let (target_x, target_y) = self.warehouse.get_npc_position_internal(&target_ulid)
+        let (target_x, target_y) = self
+            .warehouse
+            .get_npc_position_internal(&target_ulid)
             .unwrap_or((0.0, 0.0));
 
         // Generate event based on result
@@ -3521,11 +4151,25 @@ impl GodotNPCDataWarehouse {
     #[func]
     pub fn set_world_bounds(&self, min_x: f32, max_x: f32, min_y: f32, max_y: f32) {
         use std::sync::atomic::Ordering;
-        self.warehouse.world_min_x.store(min_x.to_bits(), Ordering::Relaxed);
-        self.warehouse.world_max_x.store(max_x.to_bits(), Ordering::Relaxed);
-        self.warehouse.world_min_y.store(min_y.to_bits(), Ordering::Relaxed);
-        self.warehouse.world_max_y.store(max_y.to_bits(), Ordering::Relaxed);
-        godot_print!("[RUST BOUNDS] Updated world bounds: X({} to {}), Y({} to {})", min_x, max_x, min_y, max_y);
+        self.warehouse
+            .world_min_x
+            .store(min_x.to_bits(), Ordering::Relaxed);
+        self.warehouse
+            .world_max_x
+            .store(max_x.to_bits(), Ordering::Relaxed);
+        self.warehouse
+            .world_min_y
+            .store(min_y.to_bits(), Ordering::Relaxed);
+        self.warehouse
+            .world_max_y
+            .store(max_y.to_bits(), Ordering::Relaxed);
+        godot_print!(
+            "[RUST BOUNDS] Updated world bounds: X({} to {}), Y({} to {})",
+            min_x,
+            max_x,
+            min_y,
+            max_y
+        );
     }
 
     /// Check if a state has a specific flag set
@@ -3569,7 +4213,10 @@ impl GodotNPCDataWarehouse {
                 self.warehouse.remove_attacking_state(&ulid_hex);
             }
             Err(e) => {
-                godot_error!("[COMBAT ERROR] Invalid ULID bytes for clear_attacking_state: {}", e);
+                godot_error!(
+                    "[COMBAT ERROR] Invalid ULID bytes for clear_attacking_state: {}",
+                    e
+                );
             }
         }
     }
@@ -3584,7 +4231,10 @@ impl GodotNPCDataWarehouse {
                 self.warehouse.remove_damaged_state(&ulid_hex);
             }
             Err(e) => {
-                godot_error!("[COMBAT ERROR] Invalid ULID bytes for clear_damaged_state: {}", e);
+                godot_error!(
+                    "[COMBAT ERROR] Invalid ULID bytes for clear_damaged_state: {}",
+                    e
+                );
             }
         }
     }
@@ -3596,7 +4246,12 @@ impl GodotNPCDataWarehouse {
     pub fn get_npc_waypoint(&self, ulid_bytes: PackedByteArray) -> PackedFloat32Array {
         if ulid_bytes.len() == 16 {
             if let Ok(ulid_array) = TryInto::<[u8; 16]>::try_into(ulid_bytes.as_slice()) {
-                if let Some(pos_str) = self.warehouse.npc_waypoints.get(&ulid_array).map(|v| v.value().clone()) {
+                if let Some(pos_str) = self
+                    .warehouse
+                    .npc_waypoints
+                    .get(&ulid_array)
+                    .map(|v| v.value().clone())
+                {
                     if let Some((x_str, y_str)) = pos_str.split_once(',') {
                         if let (Ok(x), Ok(y)) = (x_str.parse::<f32>(), y_str.parse::<f32>()) {
                             return PackedFloat32Array::from(&[x, y]);
@@ -3651,10 +4306,14 @@ impl GodotNPCDataWarehouse {
     pub fn unregister_npc_from_combat(&self, ulid_bytes: PackedByteArray) {
         match packed_bytes_to_hex(&ulid_bytes) {
             Ok(ulid_hex) => {
-                self.warehouse.unregister_npc_from_combat_internal(&ulid_hex);
+                self.warehouse
+                    .unregister_npc_from_combat_internal(&ulid_hex);
             }
             Err(e) => {
-                godot_error!("[COMBAT ERROR] Invalid ULID bytes in unregister_npc_from_combat: {}", e);
+                godot_error!(
+                    "[COMBAT ERROR] Invalid ULID bytes in unregister_npc_from_combat: {}",
+                    e
+                );
             }
         }
     }
@@ -3669,7 +4328,10 @@ impl GodotNPCDataWarehouse {
                 self.warehouse.update_npc_position_internal(&ulid_hex, x, y);
             }
             Err(e) => {
-                godot_error!("[COMBAT ERROR] Invalid ULID bytes in update_npc_position: {}", e);
+                godot_error!(
+                    "[COMBAT ERROR] Invalid ULID bytes in update_npc_position: {}",
+                    e
+                );
             }
         }
     }
@@ -3705,15 +4367,55 @@ impl GodotNPCDataWarehouse {
         godot_array
     }
 
+    /// Tick ONLY the combat phase (damage calculations and state changes)
+    /// Returns array of JSON strings representing combat events
+    /// Usage: var events = NPCDataWarehouse.tick_combat_phase()
+    #[func]
+    pub fn tick_combat_phase(&self) -> Array<GString> {
+        let events = self.warehouse.tick_combat_phase();
+        let mut godot_array = Array::new();
+
+        for event in events {
+            let json = serde_json::to_string(&event).unwrap_or_default();
+            let gstring = GString::from(&json);
+            godot_array.push(&gstring);
+        }
+
+        godot_array
+    }
+
+    /// Tick ONLY the movement phase (position updates and spawning)
+    /// Returns array of JSON strings representing movement events
+    /// Usage: var events = NPCDataWarehouse.tick_movement_phase(delta)
+    #[func]
+    pub fn tick_movement_phase(&self, delta: f32) -> Array<GString> {
+        let events = self.warehouse.tick_movement_phase(delta);
+        let mut godot_array = Array::new();
+
+        for event in events {
+            let json = serde_json::to_string(&event).unwrap_or_default();
+            let gstring = GString::from(&json);
+            godot_array.push(&gstring);
+        }
+
+        godot_array
+    }
+
+    /// Tick ONLY the animation phase (visual updates)
+    /// Does not return events - just updates animation states
+    /// Usage: NPCDataWarehouse.tick_animation_phase()
+    #[func]
+    pub fn tick_animation_phase(&self) {
+        self.warehouse.tick_animation_phase();
+    }
+
     /// Get NPC current HP
     /// Usage: var hp = NPCDataWarehouse.get_npc_hp(ulid_bytes)
     #[func]
     pub fn get_npc_hp(&self, ulid_bytes: PackedByteArray) -> f32 {
         match packed_bytes_to_hex(&ulid_bytes) {
-            Ok(ulid_hex) => {
-                self.warehouse.get_npc_hp_internal(&ulid_hex).unwrap_or(0.0)
-            }
-            Err(_) => 0.0
+            Ok(ulid_hex) => self.warehouse.get_npc_hp_internal(&ulid_hex).unwrap_or(0.0),
+            Err(_) => 0.0,
         }
     }
 
@@ -3722,10 +4424,11 @@ impl GodotNPCDataWarehouse {
     #[func]
     pub fn get_npc_behavioral_state(&self, ulid_bytes: PackedByteArray) -> i32 {
         match packed_bytes_to_hex(&ulid_bytes) {
-            Ok(ulid_hex) => {
-                self.warehouse.get_stat_value(&ulid_hex, "behavioral_state").unwrap_or(0.0) as i32
-            }
-            Err(_) => 0
+            Ok(ulid_hex) => self
+                .warehouse
+                .get_stat_value(&ulid_hex, "behavioral_state")
+                .unwrap_or(0.0) as i32,
+            Err(_) => 0,
         }
     }
 
@@ -3740,7 +4443,12 @@ impl GodotNPCDataWarehouse {
         let ulid_bytes: [u8; 16] = ulid.as_slice().try_into().unwrap_or([0u8; 16]);
 
         // Get position from npc_positions ByteMap (stored as "x,y")
-        if let Some(pos_str) = self.warehouse.npc_positions.get(&ulid_bytes).map(|v| v.value().clone()) {
+        if let Some(pos_str) = self
+            .warehouse
+            .npc_positions
+            .get(&ulid_bytes)
+            .map(|v| v.value().clone())
+        {
             let coords: Vec<&str> = pos_str.split(',').collect();
             if coords.len() == 2 {
                 if let (Ok(x), Ok(y)) = (coords[0].parse::<f32>(), coords[1].parse::<f32>()) {
@@ -3808,12 +4516,24 @@ impl GodotNPCDataWarehouse {
         let mut parts = Vec::new();
 
         // NPCState flags (SIMPLIFIED)
-        if state & NPCState::IDLE.bits() as i32 != 0 { parts.push("IDLE"); }
-        if state & NPCState::WALKING.bits() as i32 != 0 { parts.push("WALKING"); }
-        if state & NPCState::ATTACKING.bits() as i32 != 0 { parts.push("ATTACKING"); }
-        if state & NPCState::COMBAT.bits() as i32 != 0 { parts.push("COMBAT"); }
-        if state & NPCState::DAMAGED.bits() as i32 != 0 { parts.push("DAMAGED"); }
-        if state & NPCState::DEAD.bits() as i32 != 0 { parts.push("DEAD"); }
+        if state & NPCState::IDLE.bits() as i32 != 0 {
+            parts.push("IDLE");
+        }
+        if state & NPCState::WALKING.bits() as i32 != 0 {
+            parts.push("WALKING");
+        }
+        if state & NPCState::ATTACKING.bits() as i32 != 0 {
+            parts.push("ATTACKING");
+        }
+        if state & NPCState::COMBAT.bits() as i32 != 0 {
+            parts.push("COMBAT");
+        }
+        if state & NPCState::DAMAGED.bits() as i32 != 0 {
+            parts.push("DAMAGED");
+        }
+        if state & NPCState::DEAD.bits() as i32 != 0 {
+            parts.push("DEAD");
+        }
 
         if parts.is_empty() {
             GString::from("NONE")

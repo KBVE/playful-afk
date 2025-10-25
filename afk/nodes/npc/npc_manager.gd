@@ -269,10 +269,11 @@ func _ready() -> void:
 	# RUST COMBAT: Enable combat system
 	NPCDataWarehouse.start_combat_system()
 
-	# RUST COMBAT: Create fixed combat tick timer (16ms = 60 ticks per second)
+	# RUST COMBAT: Create combat tick timer at 60fps (smooth animations)
+	# Rust handles attack cooldowns internally (3.5 seconds between attacks)
 	var combat_tick_timer = Timer.new()
 	combat_tick_timer.name = "CombatTickTimer"
-	combat_tick_timer.wait_time = 0.016  # 16ms = 60 ticks/second
+	combat_tick_timer.wait_time = 0.016  # 16ms = 60fps for smooth animations
 	combat_tick_timer.autostart = true
 	combat_tick_timer.timeout.connect(_on_combat_tick)
 	add_child(combat_tick_timer)
@@ -280,10 +281,11 @@ func _ready() -> void:
 
 ## ===== COMBAT TICK =====
 
-## Combat tick handler (called by timer at fixed 60Hz rate)
+## Combat tick handler (called at 60fps for smooth animations)
 func _on_combat_tick() -> void:
-	# RUST COMBAT: Tick combat logic and get events
+	# RUST COMBAT: Tick all combat phases (combat, movement, animation) in one unified call
 	# Pass fixed delta of 0.016 (60 ticks per second)
+	# Rust internally manages attack cooldowns (3.5 seconds) to prevent rapid-fire attacks
 	var events_json = NPCDataWarehouse.tick_combat(0.016)
 
 	for event_json in events_json:

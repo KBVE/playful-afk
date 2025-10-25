@@ -305,7 +305,7 @@ func _get_state_message(rust_state: int, gdscript_state: int) -> String:
 	# Show state comparison for debugging (can be removed later)
 	var rust_decoded = decode_state.call(rust_state)
 	var gd_decoded = decode_state.call(gdscript_state)
-	var debug_info = "\n[color=gray][font_size=10]Rust: %s | GDScript: %s[/font_size][/color]" % [rust_decoded, gd_decoded]
+	var debug_info = "\n[color=gray][font_size=14]Rust: %s | GDScript: %s[/font_size][/color]" % [rust_decoded, gd_decoded]
 
 	return primary_message + debug_info
 
