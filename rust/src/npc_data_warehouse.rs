@@ -983,7 +983,7 @@ impl NPCDataWarehouse {
         let now_ms = Self::get_current_time_ms();
         self.storage.insert(
             format!("wander_cooldown:{}", ulid_hex),
-            (now_ms + initial_idle_time.to_string())
+            (now_ms + initial_idle_time).to_string()
         );
 
         // Move to active pool (use [u8; 16] directly as key)
@@ -1729,7 +1729,7 @@ impl NPCDataWarehouse {
                     // Update wander cooldown - set to 3 seconds in the future
                     self.storage.insert(
                         cooldown_key,
-                        (now_ms + 3000.to_string())
+                        (now_ms + 3000).to_string()
                     );
 
                     // Set state to WALKING (remove IDLE, add WALKING, keep other flags like COMBAT if present)
@@ -2009,7 +2009,7 @@ impl NPCDataWarehouse {
             let ulid_hex = bytes_to_hex(ulid_bytes);
 
             // Get current position from npc_positions ByteMap (stored as "x,y")
-            let pos_str = self.npc_positions.get(&ulid_bytes).map(|v| v.value().clone()).unwrap_or_default();
+            let pos_str = self.npc_positions.get(ulid_bytes).map(|v| v.value().clone()).unwrap_or_default();
             let coords: Vec<&str> = pos_str.split(',').collect();
             if coords.len() != 2 {
                 // static mut POS_FAIL_COUNT: u32 = 0;
@@ -2025,7 +2025,7 @@ impl NPCDataWarehouse {
             let current_y: f32 = coords[1].parse().unwrap_or(0.0);
 
             // Get waypoint from ByteMap (ULID bytes -> "x,y")
-            if let Some(waypoint_value) = self.npc_waypoints.get(&ulid_bytes).map(|v| v.value().clone()) {
+            if let Some(waypoint_value) = self.npc_waypoints.get(ulid_bytes).map(|v| v.value().clone()) {
                 // Removed spam logging
                 let waypoint_coords: Vec<&str> = waypoint_value.split(',').collect();
                 if waypoint_coords.len() != 2 {
@@ -2050,10 +2050,10 @@ impl NPCDataWarehouse {
                     // Store normalized movement direction for sprite flipping
                     let dir_x = dx / distance;
                     let dir_y = dy / distance;
-                    self.npc_move_directions.insert(*&ulid_bytes,  format!("{},{}", dir_x, dir_y));
+                    self.npc_move_directions.insert(*ulid_bytes,  format!("{},{}", dir_x, dir_y));
 
                     // Update position in npc_positions ByteMap (data store)
-                    self.npc_positions.insert(*&ulid_bytes,  format!("{},{}", target_x, target_y));
+                    self.npc_positions.insert(*ulid_bytes,  format!("{},{}", target_x, target_y));
 
                     // Set WALKING state since NPC is actually moving
                     // CRITICAL: Remove IDLE when adding WALKING (mutually exclusive)
