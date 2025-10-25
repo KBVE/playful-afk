@@ -6,9 +6,9 @@ extends Node
 
 ## Simple rectangle bounds - 4 values: min_x, max_x, min_y, max_y
 var min_x: float = -200.0
-var max_x: float = 1480.0
-var min_y: float = 514.0
-var max_y: float = 640.0
+var max_x: float = 1280.0
+var min_y: float = 510.0  # Top of playable area (just below UI fold at ~514)
+var max_y: float = 650.0  # Bottom of visible viewport
 
 ## Reference to the active background scene
 var active_background: Control = null
@@ -23,14 +23,10 @@ func _ready() -> void:
 func register_background(background: Control) -> void:
 	active_background = background
 
-	# If background has a safe_rectangle, extract the 4 bounds
-	if "safe_rectangle" in background:
-		var rect: Rect2 = background.safe_rectangle
-		min_x = rect.position.x
-		max_x = rect.position.x + rect.size.x
-		min_y = rect.position.y
-		max_y = rect.position.y + rect.size.y
-		print("BackgroundManager: Bounds set to X(%f to %f), Y(%f to %f)" % [min_x, max_x, min_y, max_y])
+	# NOTE: safe_rectangle was giving incorrect bounds (too small Y range)
+	# Using fixed defaults instead for now
+	# TODO: Fix safe_rectangle in background scenes or use a different bounds property
+	print("BackgroundManager: Using default bounds X(%f to %f), Y(%f to %f)" % [min_x, max_x, min_y, max_y])
 
 
 ## Check if position is in bounds

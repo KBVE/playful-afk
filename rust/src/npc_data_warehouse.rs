@@ -9,6 +9,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// Import the animation module
+use crate::animation::EffectPool;
+
 // ============================================================================
 // ULID CONVERSION HELPERS
 // ============================================================================
@@ -54,8 +57,19 @@ pub struct NPCCombatStats {
     pub max_mana: f32,
     pub energy: f32,
     pub max_energy: f32,
+    #[serde(default = "default_hunger")]
     pub hunger: f32,
+    #[serde(default = "default_max_hunger")]
     pub max_hunger: f32,
+}
+
+// Default values for backwards compatibility with old saved data
+fn default_hunger() -> f32 {
+    100.0
+}
+
+fn default_max_hunger() -> f32 {
+    100.0
 }
 
 /// Rust-controlled NPC instance with direct scene node access
@@ -725,14 +739,14 @@ pub struct NPCDataWarehouse {
 
     /// Monster spawn configuration
     spawn_interval_ms: u64, // Time between monster waves (default 10 seconds)
-    min_wave_size: i32,       // Minimum monsters per wave (default 4)
-    max_wave_size: i32,       // Maximum monsters per wave (default 10)
-    min_active_monsters: i32, // Spawn new wave when below this count (default 3)
+    min_wave_size: i32,       // Minimum monsters per wave (8 monsters)
+    max_wave_size: i32,       // Maximum monsters per wave (8 monsters)
+    min_active_monsters: i32, // Spawn new wave when below this count (3 monsters)
 
-    /// Ally spawn configuration (warriors, archers)
-    ally_spawn_interval_ms: u64, // Time between ally spawns (default 3 seconds)
-    max_warriors: i32, // Max warrior count (default 6)
-    max_archers: i32,  // Max archer count (default 6)
+    /// Ally spawn configuration (warriors, archers) - 12 total allies max
+    ally_spawn_interval_ms: u64, // Time between ally spawns (3 seconds for gradual ramp-up)
+    max_warriors: i32, // Max warrior count (6 warriors)
+    max_archers: i32,  // Max archer count (6 archers)
 
     /// Spawn tracking (defensive programming)
     spawn_requests: Arc<AtomicU64>, // Total spawn requests sent
@@ -765,8 +779,8 @@ pub struct NPCDataWarehouse {
 
     /// Scene tree container node (set by GDScript, NPCs are added as children)
     /// This is the Layer4Objects container from the background
-    /// Wrapped in RwLock for thread-safe access (write-once, read-many pattern)
-    scene_container: RwLock<Option<Gd<Node2D>>>,
+    /// Wrapped in Arc<RwLock> for thread-safe sharing with animation pools
+    scene_container: Arc<RwLock<Option<Gd<Node2D>>>>,
 
     // ============================================================================
     // HEALTHBAR POOL SYSTEM - Managed by Rust alongside NPC pools
@@ -781,6 +795,12 @@ pub struct NPCDataWarehouse {
 
     /// Next available healthbar pool index (atomic for thread safety)
     healthbar_pool_size: Arc<AtomicUsize>,
+
+    // ============================================================================
+    // RELEASE EFFECT POOL SYSTEM - Death animation/particle effects
+    // ============================================================================
+    /// Release effect pool for death animations (managed by animation module)
+    release_pool: EffectPool,
 
     // ============================================================================
     // BYTE-KEYED STORAGE - ByteMap now uses DashMap internally for strong consistency
@@ -833,6 +853,13 @@ impl NPCDataWarehouse {
             "NPCDataWarehouse: Initializing with {}ms sync interval",
             sync_interval_ms
         );
+
+        // Create scene container (shared between warehouse and effect pools)
+        let scene_container = Arc::new(RwLock::new(None));
+
+        // Create release effect pool with shared scene container
+        let release_pool = EffectPool::new(Arc::clone(&scene_container), "RELEASE");
+
         Self {
             storage: DashMap::new(),
             sync_interval_ms,
@@ -843,12 +870,12 @@ impl NPCDataWarehouse {
             last_spawn_time_ms: Arc::new(AtomicU64::new(0)),
             last_ally_spawn_time_ms: Arc::new(AtomicU64::new(0)),
             spawn_interval_ms: 10000, // 10 seconds between monster waves
-            min_wave_size: 4,
-            max_wave_size: 10,
-            min_active_monsters: 3, // Spawn new wave when below 3 monsters
+            min_wave_size: 8,         // Start with 8 monsters per wave
+            max_wave_size: 8,         // Fixed at 8 monsters per wave
+            min_active_monsters: 3,   // Spawn new wave when below 3 monsters
             ally_spawn_interval_ms: 3000, // 3 seconds between ally spawns (gradual ramp-up)
-            max_warriors: 6,        // Cap at 6 warriors
-            max_archers: 6,         // Cap at 6 archers
+            max_warriors: 6,          // Cap at 6 warriors
+            max_archers: 6,           // Cap at 6 archers (12 total allies)
             spawn_requests: Arc::new(AtomicU64::new(0)),
             spawn_confirmations: Arc::new(AtomicU64::new(0)),
             initial_spawn_done: Arc::new(AtomicBool::new(false)),
@@ -861,12 +888,15 @@ impl NPCDataWarehouse {
             active_npc_pool: DashMap::new(),
             inactive_npc_pool: DashMap::new(),
             scene_cache: DashMap::new(),
-            scene_container: RwLock::new(None), // Will be set by GDScript via set_scene_container()
+            scene_container,
 
             // Initialize healthbar pool system
             healthbar_pool: DashMap::new(),
             healthbar_assignments: DashMap::new(),
             healthbar_pool_size: Arc::new(AtomicUsize::new(0)),
+
+            // Initialize release effect pool (created above)
+            release_pool,
 
             // Initialize DashMap storage directly (no wrappers)
             npc_positions: DashMap::new(),
@@ -1007,8 +1037,10 @@ impl NPCDataWarehouse {
         *self.scene_container.write() = Some(container);
 
         // Auto-initialize healthbar pool now that we have a container
+        // Use smaller pool size to avoid blocking on init
         godot_print!("[RUST POOL] Auto-initializing healthbar pool...");
-        self.initialize_healthbar_pool(50, "res://nodes/ui/healthbar/healthbar.tscn");
+        self.initialize_healthbar_pool(20, "res://nodes/ui/healthbar/healthbar.tscn");
+        godot_print!("[RUST POOL] Healthbar pool initialization complete");
     }
 
     /// Spawn an NPC from the inactive pool
@@ -1343,6 +1375,12 @@ impl NPCDataWarehouse {
     pub fn active_healthbar_count(&self) -> usize {
         self.healthbar_assignments.len()
     }
+
+    // ============================================================================
+    // RELEASE EFFECT POOL MANAGEMENT - Delegated to animation::EffectPool
+    // ============================================================================
+    // All release pool functionality is now handled by the animation module.
+    // See self.release_pool methods: initialize(), trigger_at_position(), etc.
 
     /// Register NPC for combat using pre-extracted combat stats
     fn register_npc_with_stats(&self, ulid: &[u8; 16], stats: &NPCCombatStats) {
@@ -2027,9 +2065,22 @@ impl NPCDataWarehouse {
         // Phase 3: Animation (visual updates)
         self.tick_animation_phase();
 
-        // Phase 4: Cleanup (despawn dead NPCs AFTER they've played death animation)
+        // Phase 3.5: Global Regeneration (collect allies for healing every 5 seconds)
+        // DISABLED: Causing grey screen freeze
         let now_ms = Self::get_current_time_ms();
+        // if self.check_regen_tick(now_ms) {
+        //     self.apply_regen_to_allies();
+        // }
+
+        // Phase 3.6: Process Regen Queue (heal one NPC per tick to avoid freezing)
+        // DISABLED: Causing grey screen freeze
+        // self.process_regen_queue();
+
+        // Phase 4: Cleanup (despawn dead NPCs AFTER they've played death animation)
         self.cleanup_dead_npcs(now_ms);
+
+        // Phase 4.5: Tick release effect pool (auto-return expired animations)
+        self.release_pool.tick(now_ms);
 
         // Reduced logging
         static mut TICK_END_LOG: u32 = 0;
@@ -3191,7 +3242,7 @@ impl NPCDataWarehouse {
         if let Some(pool_index_ref) = self.healthbar_assignments.get(ulid) {
             let pool_index = *pool_index_ref.value();
 
-            // Get the healthbar from the pool
+            // Get the healthbar from the pool (clone to avoid holding lock during Godot call)
             if let Some(healthbar_ref) = self.healthbar_pool.get(&pool_index) {
                 let mut healthbar = healthbar_ref.value().clone();
 
@@ -3228,9 +3279,20 @@ impl NPCDataWarehouse {
             }
         }
 
-        // Despawn scheduled NPCs
+        // Despawn scheduled NPCs and trigger release effects
         for ulid_bytes in to_despawn {
             godot_print!("[RUST CLEANUP] Despawning dead NPC: {:?}", &ulid_bytes[..8]);
+
+            // Get the NPC's position before despawning and trigger release effect
+            if let Some(npc_ref) = self.active_npc_pool.get(&ulid_bytes) {
+                let npc_position = npc_ref.node.get_global_position();
+
+                // Trigger release effect at NPC's position (using animation module)
+                // Returns true if effect was triggered, false if pool is full
+                self.release_pool.trigger_at_position(npc_position);
+            }
+
+            // Despawn the NPC
             self.rust_despawn_npc(&ulid_bytes);
         }
     }
@@ -3585,43 +3647,63 @@ impl NPCDataWarehouse {
         let center_x = (world_min_x + world_max_x) / 2.0;
         let center_y = (world_min_y + world_max_y) / 2.0;
 
-        // Spawn 1 warrior on left side - closer to center for quicker engagement
-        // Allies spawn around x=350 (30% from left edge, moving toward center at 50%)
-        let warrior_pos = Vector2::new(350.0, center_y - 30.0);
-        let warrior_ulid = self.rust_spawn_npc("warrior", warrior_pos);
+        // Calculate spawn positions based on world bounds
+        let ally_spawn_x = world_min_x + (world_max_x - world_min_x) * 0.25; // 25% from left
+        let archer_spawn_x = world_min_x + (world_max_x - world_min_x) * 0.20; // 20% from left (behind warriors)
+        let monster_spawn_x = world_min_x + (world_max_x - world_min_x) * 0.75; // 75% from left (right side)
 
-        // Give warrior initial waypoint toward center-right (to meet monsters)
-        if let Some(ulid_bytes) = warrior_ulid {
-            self.npc_waypoints.insert(
-                *&ulid_bytes,
-                format!("{},{}", center_x - 100.0, center_y - 30.0),
-            );
-            godot_print!("[RUST SPAWN] Warrior spawned with waypoint toward center");
-        }
-
-        // Spawn 1 archer on left side - slightly behind warrior
-        let archer_pos = Vector2::new(300.0, center_y + 30.0);
-        let archer_ulid = self.rust_spawn_npc("archer", archer_pos);
-
-        // Give archer waypoint toward center-right (stays behind warrior)
-        if let Some(ulid_bytes) = archer_ulid {
-            self.npc_waypoints.insert(
-                *&ulid_bytes,
-                format!("{},{}", center_x - 150.0, center_y + 30.0),
-            );
-            godot_print!("[RUST SPAWN] Archer spawned with waypoint toward center");
-        }
-
-        // Spawn 2 random monsters on right side - closer to center
+        // Random number generator for scatter
         use rand::Rng;
         let mut rng = rand::rng();
+
+        // Spawn 6 warriors on left side - scattered vertically to avoid stacking
+        for i in 0..6 {
+            let base_y = world_min_y + (world_max_y - world_min_y) * (i as f32 / 5.0); // Evenly distribute
+            let scatter = rng.random_range(-15.0..15.0); // Add random scatter
+            let warrior_y = (base_y + scatter).clamp(world_min_y + 20.0, world_max_y - 20.0);
+            let scatter_x = rng.random_range(-10.0..10.0); // Small horizontal scatter
+            let warrior_pos = Vector2::new(ally_spawn_x + scatter_x, warrior_y);
+            let warrior_ulid = self.rust_spawn_npc("warrior", warrior_pos);
+
+            // Give warrior initial waypoint toward center-right (to meet monsters)
+            if let Some(ulid_bytes) = warrior_ulid {
+                self.npc_waypoints.insert(
+                    *&ulid_bytes,
+                    format!("{},{}", center_x - 100.0, warrior_y),
+                );
+            }
+        }
+        godot_print!("[RUST SPAWN] 6 warriors spawned (scattered) at x≈{} with waypoints toward center", ally_spawn_x);
+
+        // Spawn 6 archers on left side - scattered to avoid stacking with warriors
+        for i in 0..6 {
+            let base_y = world_min_y + (world_max_y - world_min_y) * (i as f32 / 5.0); // Evenly distribute
+            let scatter = rng.random_range(-15.0..15.0); // Add random scatter
+            let archer_y = (base_y + scatter).clamp(world_min_y + 20.0, world_max_y - 20.0);
+            let scatter_x = rng.random_range(-10.0..10.0); // Small horizontal scatter
+            let archer_pos = Vector2::new(archer_spawn_x + scatter_x, archer_y);
+            let archer_ulid = self.rust_spawn_npc("archer", archer_pos);
+
+            // Give archer waypoint toward center-right (stays behind warriors)
+            if let Some(ulid_bytes) = archer_ulid {
+                self.npc_waypoints.insert(
+                    *&ulid_bytes,
+                    format!("{},{}", center_x - 150.0, archer_y),
+                );
+            }
+        }
+        godot_print!("[RUST SPAWN] 6 archers spawned (scattered) at x≈{} with waypoints toward center", archer_spawn_x);
+
+        // Spawn 8 random monsters on right side - scattered to avoid stacking
         let monster_types = vec!["goblin", "mushroom", "skeleton", "eyebeast"];
 
-        for i in 0..2 {
+        for i in 0..8 {
             let monster_type = monster_types[rng.random_range(0..monster_types.len())];
-            // Spawn monsters closer to center (70% from left edge, moving toward center at 50%)
-            let monster_y = center_y + ((i as f32 - 0.5) * 60.0); // Spread vertically
-            let monster_pos = Vector2::new(850.0, monster_y);
+            let base_y = world_min_y + (world_max_y - world_min_y) * (i as f32 / 7.0); // Evenly distribute
+            let scatter = rng.random_range(-15.0..15.0); // Add random scatter
+            let monster_y = (base_y + scatter).clamp(world_min_y + 20.0, world_max_y - 20.0);
+            let scatter_x = rng.random_range(-10.0..10.0); // Small horizontal scatter
+            let monster_pos = Vector2::new(monster_spawn_x + scatter_x, monster_y);
 
             let monster_ulid = self.rust_spawn_npc(monster_type, monster_pos);
 
@@ -3629,14 +3711,11 @@ impl NPCDataWarehouse {
             if let Some(ulid_bytes) = monster_ulid {
                 self.npc_waypoints
                     .insert(*&ulid_bytes, format!("{},{}", center_x + 100.0, monster_y));
-                godot_print!(
-                    "[RUST SPAWN] Monster {} spawned with waypoint toward center",
-                    monster_type
-                );
             }
         }
+        godot_print!("[RUST SPAWN] 8 monsters spawned (scattered) at x≈{} with waypoints toward center", monster_spawn_x);
 
-        godot_print!("[RUST SPAWN] Initial spawn complete: 1 warrior, 1 archer, 2 random monsters (all moving toward center)");
+        godot_print!("[RUST SPAWN] Initial spawn complete: 6 warriors, 6 archers, 8 monsters (12 vs 8)");
 
         Vec::new() // No events needed - NPCs are spawned directly
     }
@@ -3985,6 +4064,40 @@ impl GodotNPCDataWarehouse {
     #[func]
     pub fn active_healthbar_count(&self) -> i64 {
         self.warehouse.active_healthbar_count() as i64
+    }
+
+    // ===== Release Effect Pool System Methods =====
+
+    /// Initialize the release effect pool for death animations
+    /// pool_size: Number of release effects to pre-allocate
+    /// scene_path: Path to the release.tscn file
+    /// animation_duration_ms: Duration of the release animation in milliseconds
+    #[func]
+    pub fn initialize_release_pool(&self, pool_size: i32, scene_path: GString, animation_duration_ms: i32) {
+        self.warehouse.release_pool.initialize(
+            pool_size as usize,
+            &scene_path.to_string(),
+            animation_duration_ms as u64
+        );
+    }
+
+    /// Return a release effect to the pool (called from GDScript when animation finishes)
+    /// pool_index: The index of the release effect to return
+    #[func]
+    pub fn return_release_to_pool(&self, pool_index: i64) -> bool {
+        self.warehouse.release_pool.return_to_pool(pool_index as usize)
+    }
+
+    /// Get the number of release effects in the pool
+    #[func]
+    pub fn release_pool_count(&self) -> i64 {
+        self.warehouse.release_pool.count() as i64
+    }
+
+    /// Get the number of release effects currently in use
+    #[func]
+    pub fn active_release_count(&self) -> i64 {
+        self.warehouse.release_pool.active_count() as i64
     }
 
     /// Get NPC name by ULID bytes
@@ -4703,6 +4816,13 @@ impl GodotNPCDataWarehouse {
     #[func]
     pub fn stop_combat_system(&self) {
         self.warehouse.stop_combat_thread();
+    }
+
+    /// Check if combat system is running
+    /// Usage: NPCDataWarehouse.is_combat_enabled()
+    #[func]
+    pub fn is_combat_enabled(&self) -> bool {
+        self.warehouse.is_combat_enabled()
     }
 
     /// Tick combat logic and get events

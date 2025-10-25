@@ -3,6 +3,7 @@ use godot::prelude::*;
 mod name_generator;
 //mod inventory_data_warehouse;
 mod npc_data_warehouse;
+mod animation;
 
 struct Godo;
 

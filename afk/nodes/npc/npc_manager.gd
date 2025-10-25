@@ -49,6 +49,9 @@ enum NPCStaticState {
 var cat: Cat = null
 var cat_scene: PackedScene = preload("res://nodes/npc/cat/cat.tscn")
 
+# Combat system tracking
+var combat_system_started: bool = false
+
 ## ===== STATE HISTORY SYSTEM =====
 ## Centralized state tracking for all NPCs
 ## Maps ULID -> Single state entry with 3-state history
@@ -266,15 +269,12 @@ func _ready() -> void:
 		# Listen to state change requests from EventManager (debounced pathway)
 		EventManager.npc_state_change_requested.connect(_handle_state_change_request)
 
-	# RUST COMBAT: Enable combat system
-	NPCDataWarehouse.start_combat_system()
-
 	# RUST COMBAT: Create combat tick timer at 60fps (smooth animations)
-	# Rust handles attack cooldowns internally (3.5 seconds between attacks)
+	# NOTE: Combat system will be started when set_layer4_container is called (after bounds are set)
 	var combat_tick_timer = Timer.new()
 	combat_tick_timer.name = "CombatTickTimer"
 	combat_tick_timer.wait_time = 0.016  # 16ms = 60fps for smooth animations
-	combat_tick_timer.autostart = true
+	combat_tick_timer.autostart = false  # Will be started manually after bounds are set
 	combat_tick_timer.timeout.connect(_on_combat_tick)
 	add_child(combat_tick_timer)
 
@@ -283,6 +283,10 @@ func _ready() -> void:
 
 ## Combat tick handler (called at 60fps for smooth animations)
 func _on_combat_tick() -> void:
+	# Don't tick if combat system hasn't been started yet (waiting for bounds)
+	if not combat_system_started:
+		return
+
 	# RUST COMBAT: Tick all combat phases (combat, movement, animation) in one unified call
 	# Pass fixed delta of 0.016 (60 ticks per second)
 	# Rust internally manages attack cooldowns (3.5 seconds) to prevent rapid-fire attacks
@@ -769,16 +773,63 @@ func set_layer4_container(container: Node2D) -> void:
 		if slot["character"] and not slot["character"].get_parent():
 			foreground_container.add_child(slot["character"])
 
+	# Set world bounds from BackgroundManager (if available)
+	var bounds_set = false
+	if BackgroundManager:
+		var min_x = BackgroundManager.min_x
+		var max_x = BackgroundManager.max_x
+		var min_y = BackgroundManager.min_y
+		var max_y = BackgroundManager.max_y
+
+		NPCDataWarehouse.set_world_bounds(min_x, max_x, min_y, max_y)
+		print("[NPCManager] Set world bounds from BackgroundManager: x=[%f, %f], y=[%f, %f]" % [min_x, max_x, min_y, max_y])
+		bounds_set = true
+	else:
+		print("[NPCManager] Warning: BackgroundManager not available for world bounds")
+
 	# Initialize release effect pool now that we have foreground_container
 	_initialize_release_effect_pool()
 
 	# Initialize healthbar pool now that we have foreground_container
 	_initialize_healthbar_pool()
 
+	# Start combat system now that bounds are set and pools are initialized
+	if bounds_set:
+		NPCDataWarehouse.start_combat_system()
+		combat_system_started = true
+
+		# Start combat tick timer
+		var combat_timer = get_node_or_null("CombatTickTimer")
+		if combat_timer:
+			combat_timer.start()
+			print("[NPCManager] Combat system started")
+	else:
+		print("[NPCManager] Combat system NOT started - waiting for world bounds")
+
 
 ## Set the background reference for heightmap queries (called from main scene)
 func set_background_reference(background: Control) -> void:
 	background_reference = background
+
+	# Set world bounds from BackgroundManager (has the correct playable area bounds)
+	if BackgroundManager:
+		var min_x = BackgroundManager.min_x
+		var max_x = BackgroundManager.max_x
+		var min_y = BackgroundManager.min_y
+		var max_y = BackgroundManager.max_y
+
+		NPCDataWarehouse.set_world_bounds(min_x, max_x, min_y, max_y)
+		print("[NPCManager] Set world bounds from BackgroundManager: x=[%f, %f], y=[%f, %f]" % [min_x, max_x, min_y, max_y])
+
+		# Start combat system if it hasn't been started yet (and we have foreground_container)
+		if foreground_container and not combat_system_started:
+			var combat_timer = get_node_or_null("CombatTickTimer")
+			if combat_timer:
+				# Timer exists but not running - start combat system now
+				NPCDataWarehouse.start_combat_system()
+				combat_system_started = true
+				combat_timer.start()
+				print("[NPCManager] Combat system started (from set_background_reference)")
 
 
 ## ===== SAFE MOVEMENT HELPERS =====
