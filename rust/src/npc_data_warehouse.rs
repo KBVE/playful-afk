@@ -838,7 +838,7 @@ impl NPCDataWarehouse {
     /// Get active NPC data
     pub fn get_npc(&self, ulid: &str) -> Option<String> {
         let key = format!("active:{}", ulid);
-        self.storage.get(&key).map(|v| .value().clone())
+        self.storage.get(&key).map(|v| v.value().clone())
     }
 
     /// Remove NPC from active pool
@@ -857,7 +857,7 @@ impl NPCDataWarehouse {
     /// Get AI state for an NPC
     pub fn get_ai_state(&self, ulid: &str) -> Option<String> {
         let key = format!("ai:{}", ulid);
-        self.storage.get(&key).map(|v| .value().clone())
+        self.storage.get(&key).map(|v| v.value().clone())
     }
 
     /// Store combat state for an NPC
@@ -870,7 +870,7 @@ impl NPCDataWarehouse {
     /// Get combat state for an NPC
     pub fn get_combat_state(&self, ulid: &str) -> Option<String> {
         let key = format!("combat:{}", ulid);
-        self.storage.get(&key).map(|v| .value().clone())
+        self.storage.get(&key).map(|v| v.value().clone())
     }
 
     // ============================================================================
@@ -1091,17 +1091,17 @@ impl NPCDataWarehouse {
 
     /// Get number of entries in read store (Papaya)
     pub fn read_store_count(&self) -> usize {
-        self.storage.len()
+        self.storage.read_count()
     }
 
     /// Get number of entries in write store (DashMap)
     pub fn write_store_count(&self) -> usize {
-        self.storage.len()
+        self.storage.write_count()
     }
 
     /// Manually trigger sync from write store to read store
     pub fn sync(&self) {
-        ;
+        self.storage.sync();
     }
 
     /// Clear all data (use with caution!)
@@ -1694,7 +1694,7 @@ impl NPCDataWarehouse {
                 // Check wander cooldown (don't wander too frequently)
                 let cooldown_key = format!("wander_cooldown:{}", ulid_hex);
                 let can_wander = if let Some(cooldown_str) = self.storage.get(&cooldown_key) {
-                    if let Ok(cooldown_until_ms) = .value().parse::<u64>() {
+                    if let Ok(cooldown_until_ms) = cooldown_str.value().parse::<u64>() {
                         now_ms >= cooldown_until_ms // Can wander if current time is past the cooldown time
                     } else {
                         true
@@ -2558,7 +2558,7 @@ impl NPCDataWarehouse {
             let despawn_key = format!("despawn_at:{}", ulid_hex);
 
             if let Some(despawn_time_str) = self.storage.get(&despawn_key) {
-                if let Ok(despawn_time) = .value().parse::<u64>() {
+                if let Ok(despawn_time) = despawn_time_str.value().parse::<u64>() {
                     if now_ms >= despawn_time {
                         to_despawn.push(npc.ulid);
                     }
