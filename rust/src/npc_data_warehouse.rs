@@ -2057,7 +2057,7 @@ impl NPCDataWarehouse {
 
                     // Set WALKING state since NPC is actually moving
                     // CRITICAL: Remove IDLE when adding WALKING (mutually exclusive)
-                    if let Some(state_str) = self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone()) {
+                    if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
                         if let Ok(current_state) = state_str.parse::<i32>() {
                             let has_combat = (current_state & NPCState::COMBAT.bits() as i32) != 0;
                             let has_walking = (current_state & NPCState::WALKING.bits() as i32) != 0;
@@ -2065,7 +2065,7 @@ impl NPCDataWarehouse {
                             // Add WALKING flag and remove IDLE (mutually exclusive)
                             if !has_walking {
                                 let new_state = (current_state & !(NPCState::IDLE.bits() as i32)) | NPCState::WALKING.bits() as i32;
-                                self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
+                                self.npc_behavioral_state.insert(*ulid_bytes,  new_state.to_string());
 
                                 // Removed spam logging
                             }
@@ -2091,15 +2091,15 @@ impl NPCDataWarehouse {
                     // Removed spam logging
                 } else {
                     // Reached waypoint! Clear it and movement direction
-                    self.npc_waypoints.remove(&ulid_bytes).map(|(_, v)| v);
-                    self.npc_move_directions.remove(&ulid_bytes).map(|(_, v)| v);
+                    self.npc_waypoints.remove(ulid_bytes).map(|(_, v)| v);
+                    self.npc_move_directions.remove(ulid_bytes).map(|(_, v)| v);
 
                     // Set state to IDLE (remove WALKING and ATTACKING flags, add IDLE, keep other flags like COMBAT)
-                    if let Some(state_str) = self.npc_behavioral_state.get(&ulid_bytes).map(|v| v.value().clone()) {
+                    if let Some(state_str) = self.npc_behavioral_state.get(ulid_bytes).map(|v| v.value().clone()) {
                         if let Ok(current_state) = state_str.parse::<i32>() {
                             // Remove WALKING and ATTACKING, add IDLE (keep COMBAT flag if present)
                             let new_state = (current_state & !(NPCState::WALKING.bits() as i32 | NPCState::ATTACKING.bits() as i32)) | NPCState::IDLE.bits() as i32;
-                            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
+                            self.npc_behavioral_state.insert(*ulid_bytes,  new_state.to_string());
                         }
                     }
                 }
@@ -3595,8 +3595,8 @@ impl GodotNPCDataWarehouse {
     #[func]
     pub fn get_npc_waypoint(&self, ulid_bytes: PackedByteArray) -> PackedFloat32Array {
         if ulid_bytes.len() == 16 {
-            if let Ok(ulid_array) = ulid_bytes.as_slice().try_into() {
-                if let Some(pos_str) = self.warehouse.npc_waypoints.get(ulid_array).map(|v| v.value().clone()) {
+            if let Ok(ulid_array) = TryInto::<[u8; 16]>::try_into(ulid_bytes.as_slice()) {
+                if let Some(pos_str) = self.warehouse.npc_waypoints.get(&ulid_array).map(|v| v.value().clone()) {
                     if let Some((x_str, y_str)) = pos_str.split_once(',') {
                         if let (Ok(x), Ok(y)) = (x_str.parse::<f32>(), y_str.parse::<f32>()) {
                             return PackedFloat32Array::from(&[x, y]);
