@@ -1,8 +1,7 @@
-use crate::holymap::HolyMap;
-use godot::prelude::*;
-use godot::builtin::VariantType;
-use once_cell::sync::Lazy;
 use dashmap::DashMap;
+use godot::builtin::VariantType;
+use godot::prelude::*;
+use once_cell::sync::Lazy;
 
 // ============================================================================
 // Tile metadata
@@ -82,22 +81,22 @@ impl MapLayerId {
 /// Global registry describing which PackedScenes represent each tile type.
 pub static TILE_DEFINITIONS: Lazy<DashMap<String, TileDefinition>> = Lazy::new(|| DashMap::new());
 
-/// Each layer maintains a HolyMap giving fast spatial lookups by axial coordinate.
+/// Each layer maintains a DashMap giving fast spatial lookups by axial coordinate.
 pub struct MapLayer {
     pub id: MapLayerId,
-    tiles: HolyMap<HexCoord, TileInstance>,
+    tiles: DashMap<HexCoord, TileInstance>,
 }
 
 impl MapLayer {
-    pub fn new(id: MapLayerId, sync_interval_ms: u64) -> Self {
+    pub fn new(id: MapLayerId, _sync_interval_ms: u64) -> Self {
         Self {
             id,
-            tiles: HolyMap::new(sync_interval_ms),
+            tiles: DashMap::new(),
         }
     }
 
     pub fn get_tile(&self, coord: HexCoord) -> Option<TileInstance> {
-        self.tiles.get(&coord)
+        self.tiles.get(&coord).map(|entry| entry.value().clone())
     }
 
     pub fn insert_tile(&self, coord: HexCoord, tile: TileInstance) -> Option<TileInstance> {
@@ -105,7 +104,7 @@ impl MapLayer {
     }
 
     pub fn remove_tile(&self, coord: HexCoord) -> Option<TileInstance> {
-        self.tiles.remove(&coord)
+        self.tiles.remove(&coord).map(|(_, tile)| tile)
     }
 }
 
@@ -132,13 +131,16 @@ impl MapDataWarehouse {
 
     /// Fetch a tile definition by name.
     pub fn get_tile_definition(&self, name: &str) -> Option<TileDefinition> {
-        TILE_DEFINITIONS.get(name).map(|entry| entry.value().clone())
+        TILE_DEFINITIONS
+            .get(name)
+            .map(|entry| entry.value().clone())
     }
 
     /// Ensure a layer exists with the provided identifier.
     pub fn ensure_layer(&self, id: MapLayerId, sync_interval_ms: u64) -> MapLayerId {
         if !self.layers.contains_key(&id) {
-            self.layers.insert(id.clone(), MapLayer::new(id.clone(), sync_interval_ms));
+            self.layers
+                .insert(id.clone(), MapLayer::new(id.clone(), sync_interval_ms));
         }
         id
     }
@@ -175,12 +177,7 @@ impl INode for GodotMapDataWarehouse {
 impl GodotMapDataWarehouse {
     /// Placeholder API: Godot will register tile definitions via scene name + metadata.
     #[func]
-    fn register_tile(
-        &self,
-        name: GString,
-        scene_path: GString,
-        metadata_json: Variant,
-    ) {
+    fn register_tile(&self, name: GString, scene_path: GString, metadata_json: Variant) {
         let metadata = if metadata_json.get_type() == VariantType::NIL {
             None
         } else {

@@ -599,10 +599,10 @@ pub struct CombatEvent {
     /// Event type: "attack", "damage", "death", "heal", etc.
     pub event_type: String,
 
-    /// Attacker/source NPC ULID (hex string)
+    /// Attacker/source NPC ULID (as hex for GDScript compatibility)
     pub attacker_ulid: String,
 
-    /// Target/victim NPC ULID (hex string)
+    /// Target/victim NPC ULID (as hex for GDScript compatibility)
     pub target_ulid: String,
 
     /// Damage/heal amount
@@ -692,7 +692,7 @@ pub struct NPCDataWarehouse {
     combat_thread_running: Arc<AtomicBool>,
 
     /// Active NPCs in combat system - Set of ULIDs for iteration
-    active_combat_npcs: DashMap<String, ()>,
+    active_combat_npcs: DashMap<[u8; 16], ()>,
 
     /// Error tracking - prevents spam by logging each error type once per NPC
     /// Key format: "error_type:ulid" -> "1"
@@ -1252,7 +1252,7 @@ impl NPCDataWarehouse {
 
     /// Get NPC position - public for Arc access (accepts hex ULID for backward compat)
     pub fn get_npc_position_internal(&self, ulid: &str) -> Option<(f32, f32)> {
-        // Convert hex string to bytes, then lookup in ByteMap
+        // Convert hex to bytes, then lookup in DashMap
         let ulid_bytes = hex_to_bytes(ulid).ok()?;
         if let Some(pos_str) = self
             .npc_positions
@@ -1296,12 +1296,12 @@ impl NPCDataWarehouse {
         attack: f32,
         defense: f32,
     ) {
-        // Convert ULID bytes to hex string for storage (combat system still uses strings internally)
-        let ulid_hex = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        // Convert to hex only for error messages (combat system uses bytes internally)
+        let ulid_hex_for_logging = format!("{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
             ulid[0], ulid[1], ulid[2], ulid[3], ulid[4], ulid[5], ulid[6], ulid[7],
             ulid[8], ulid[9], ulid[10], ulid[11], ulid[12], ulid[13], ulid[14], ulid[15]);
 
-        let ulid_str = &ulid_hex;
+        let ulid_str = &ulid_hex_for_logging;
 
         // DEFENSIVE: Validate stats are finite and non-negative
         if !max_hp.is_finite() || max_hp < 0.0 {
@@ -1395,8 +1395,8 @@ impl NPCDataWarehouse {
             .insert(*ulid, behavioral_state.to_string());
         self.npc_cooldown.insert(*ulid, "0".to_string());
 
-        // Still use hex string for active_combat_npcs DashMap (for iteration)
-        self.active_combat_npcs.insert(ulid_hex, ());
+        // Use bytes for active_combat_npcs DashMap
+        self.active_combat_npcs.insert(*ulid, ());
     }
 
     /// Unregister NPC from combat (on death/despawn)
@@ -1436,8 +1436,10 @@ impl NPCDataWarehouse {
             self.error_log.remove(&format!("{}:{}", error_type, ulid));
         }
 
-        // Remove from active NPCs set
-        self.active_combat_npcs.remove(ulid);
+        // Remove from active NPCs set (convert hex string to bytes)
+        if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
+            self.active_combat_npcs.remove(&ulid_bytes);
+        }
     }
 
     /// Log error once per error_type:ulid combination using error_log HolyMap
@@ -1456,7 +1458,7 @@ impl NPCDataWarehouse {
 
     /// Get NPC current HP
     pub fn get_npc_hp_internal(&self, ulid: &str) -> Option<f32> {
-        // Convert hex string to bytes
+        // Convert hex to bytes (legacy interface, should be refactored to take bytes)
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
             // Get combat stats from ByteMap
             if let Some(stats_json) = self
@@ -1628,8 +1630,8 @@ impl NPCDataWarehouse {
             // Generate attack event (for animation)
             events.push(CombatEvent {
                 event_type: "attack".to_string(),
-                attacker_ulid: attacker_ulid.clone(),
-                target_ulid: target_ulid.clone(),
+                attacker_ulid: attacker_ulid_hex.clone(),
+                target_ulid: target_ulid_hex.clone(),
                 amount: 0.0,
                 attacker_animation: "attack".to_string(),
                 target_animation: "".to_string(),
@@ -1643,8 +1645,8 @@ impl NPCDataWarehouse {
                 // GDScript will read attacker position from attacker NPC node
                 events.push(CombatEvent {
                     event_type: "projectile".to_string(),
-                    attacker_ulid: attacker_ulid.clone(),
-                    target_ulid: target_ulid.clone(),
+                    attacker_ulid: attacker_ulid_hex.clone(),
+                    target_ulid: target_ulid_hex.clone(),
                     amount: 0.0, // Damage will be calculated on hit
                     attacker_animation: "arrow".to_string(), // Projectile type
                     target_animation: format!("{},{}", attacker_y, 300.0), // Encode attacker_y and arrow speed
@@ -1655,9 +1657,11 @@ impl NPCDataWarehouse {
             } else {
                 // MELEE and MAGIC attacks: Apply damage instantly
                 let attacker_attack = self
-                    .get_stat_value(&attacker_ulid, "attack")
+                    .get_stat_value(&attacker_ulid_hex, "attack")
                     .unwrap_or(10.0);
-                let target_defense = self.get_stat_value(&target_ulid, "defense").unwrap_or(5.0);
+                let target_defense = self
+                    .get_stat_value(&target_ulid_hex, "defense")
+                    .unwrap_or(5.0);
 
                 // Calculate damage (heavily reduced formula for much slower, strategic combat)
                 // Formula: (attack / 6) - (defense / 8), minimum 1.5 damage
@@ -1679,18 +1683,18 @@ impl NPCDataWarehouse {
                 }
 
                 // Apply damage and get new HP
-                let target_hp = self.apply_damage(&target_ulid, damage);
+                let target_hp = self.apply_damage(&target_ulid_hex, damage);
 
                 // Handle target state based on HP
                 if target_hp <= 0.0 {
                     // Mark target as dead (Rust manages all states)
-                    self.mark_dead(&target_ulid);
+                    self.mark_dead(&target_ulid_hex);
 
                     // Generate death event
                     events.push(CombatEvent {
                         event_type: "death".to_string(),
-                        attacker_ulid,
-                        target_ulid: target_ulid.clone(),
+                        attacker_ulid: attacker_ulid_hex.clone(),
+                        target_ulid: target_ulid_hex.clone(),
                         amount: damage,
                         attacker_animation: "".to_string(),
                         target_animation: "death".to_string(),
@@ -1699,16 +1703,16 @@ impl NPCDataWarehouse {
                     });
                 } else {
                     // Set DAMAGED state on target (Rust manages all states)
-                    self.add_damaged_state(&target_ulid);
+                    self.add_damaged_state(&target_ulid_hex);
 
                     // Set aggro: target should now attack their attacker
-                    self.set_aggro_target(&target_ulid, &attacker_ulid);
+                    self.set_aggro_target(&target_ulid_hex, &attacker_ulid_hex);
 
                     // Generate damage event
                     events.push(CombatEvent {
                         event_type: "damage".to_string(),
-                        attacker_ulid,
-                        target_ulid: target_ulid.clone(),
+                        attacker_ulid: attacker_ulid_hex.clone(),
+                        target_ulid: target_ulid_hex.clone(),
                         amount: damage,
                         attacker_animation: "".to_string(),
                         target_animation: "hurt".to_string(),
@@ -2662,27 +2666,11 @@ impl NPCDataWarehouse {
     fn get_active_npcs_with_positions(&self) -> Vec<([u8; 16], f32, f32, i32, i32, f32, f32, f32)> {
         let mut npcs = Vec::new();
 
-        // Iterate over active combat NPCs DashMap
+        // Iterate over active combat NPCs DashMap (now uses bytes as keys)
         for entry in self.active_combat_npcs.iter() {
-            let ulid_hex = entry.key();
+            let ulid_bytes = *entry.key();
 
-            // Convert hex to bytes (only once per NPC)
-            let ulid_bytes = match hex_to_bytes(ulid_hex) {
-                Ok(bytes) => bytes,
-                Err(_) => {
-                    self.log_error_once(
-                        "invalid_ulid",
-                        ulid_hex,
-                        &format!(
-                            "[COMBAT ERROR] Invalid ULID hex: {}",
-                            &ulid_hex[0..8.min(ulid_hex.len())]
-                        ),
-                    );
-                    continue;
-                }
-            };
-
-            // Get position using ByteMap (takes bytes directly)
+            // Get position using DashMap (takes bytes directly)
             let pos = self
                 .npc_positions
                 .get(&ulid_bytes)
@@ -2698,9 +2686,10 @@ impl NPCDataWarehouse {
                 });
 
             if pos.is_none() {
+                let ulid_hex = bytes_to_hex(&ulid_bytes);
                 self.log_error_once(
                     "missing_position",
-                    ulid_hex,
+                    &ulid_hex,
                     &format!(
                         "[COMBAT ERROR] NPC {} has no position - skipping from combat",
                         &ulid_hex[0..8.min(ulid_hex.len())]
@@ -2856,7 +2845,7 @@ impl NPCDataWarehouse {
 
     /// Helper to get stat value from HolyMap
     fn get_stat_value(&self, ulid: &str, stat_name: &str) -> Option<f32> {
-        // Convert hex string to bytes
+        // Convert hex to bytes (legacy interface, should be refactored to take bytes)
         let ulid_bytes = hex_to_bytes(ulid).ok()?;
 
         // For combat stats, read from the struct
@@ -2921,7 +2910,7 @@ impl NPCDataWarehouse {
 
     /// Apply damage to target, return new HP
     fn apply_damage(&self, target_ulid: &str, damage: f32) -> f32 {
-        // Convert hex string to bytes
+        // Convert hex to bytes (legacy interface, should be refactored to take bytes)
         if let Ok(ulid_bytes) = hex_to_bytes(target_ulid) {
             // Get current combat stats
             if let Some(stats_json) = self
@@ -2987,7 +2976,7 @@ impl NPCDataWarehouse {
 
             // IMPORTANT: Remove from active combat immediately
             // This prevents dead NPCs from being included in combat processing next tick
-            self.active_combat_npcs.remove(ulid);
+            self.active_combat_npcs.remove(&ulid_bytes);
 
             // Schedule despawn after death animation (2 seconds)
             let now_ms = Self::get_current_time_ms();
@@ -3358,8 +3347,9 @@ impl NPCDataWarehouse {
             .active_combat_npcs
             .iter()
             .filter(|entry| {
-                let ulid = entry.key();
-                if let Some(static_state) = self.get_stat_value(ulid, "static_state") {
+                let ulid_bytes = entry.key();
+                let ulid_hex = bytes_to_hex(ulid_bytes);
+                if let Some(static_state) = self.get_stat_value(&ulid_hex, "static_state") {
                     let state = static_state as i32;
                     (state & NPCStaticState::MONSTER.bits() as i32) != 0
                 } else {
@@ -3435,8 +3425,9 @@ impl NPCDataWarehouse {
         let mut archer_count = 0;
 
         for entry in self.active_combat_npcs.iter() {
-            let ulid = entry.key();
-            if let Some(static_state) = self.get_stat_value(ulid, "static_state") {
+            let ulid_bytes = entry.key();
+            let ulid_hex = bytes_to_hex(ulid_bytes);
+            if let Some(static_state) = self.get_stat_value(&ulid_hex, "static_state") {
                 let state = static_state as i32;
                 // Check if ALLY faction
                 if (state & NPCStaticState::ALLY.bits() as i32) != 0 {
