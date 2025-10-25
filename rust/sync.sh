@@ -28,7 +28,7 @@ echo ""
 
 # Pre-flight: terminate running Godot instances to avoid locking dylibs
 echo "Pre-flight: checking for running Godot instances..."
-if pkill -9 godot >/dev/null 2>&1; then
+if pkill -9 Godot >/dev/null 2>&1; then
     echo "  ✓ Terminated existing Godot processes"
 else
     echo "  ℹ No running Godot processes found (or unable to terminate)"
@@ -147,7 +147,33 @@ echo "✓ Sync complete!"
 echo "======================================"
 echo "Plugin location: $PLUGIN_DIR"
 echo ""
-echo "Next steps:"
-echo "1. Update godo.gdextension to use plugin paths"
-echo "2. Move godo.gdextension to: $PLUGIN_DIR/"
-echo "3. Restart Godot to load the plugin"
+
+LOG_FILE="$SCRIPT_DIR/logs.txt"
+LOG_ARCHIVE="$SCRIPT_DIR/logs_archive.txt"
+
+if [ -f "$LOG_ARCHIVE" ]; then
+    LINE_COUNT=$(wc -l < "$LOG_ARCHIVE")
+    if [ "$LINE_COUNT" -gt 100000 ]; then
+        echo "Logs archive exceeds 100,000 lines; resetting..."
+        : > "$LOG_ARCHIVE"
+    fi
+fi
+
+if [ -f "$LOG_FILE" ] && [ -s "$LOG_FILE" ]; then
+    echo "Archiving previous Godot logs..."
+    {
+        echo "----- Archived on $(date '+%Y-%m-%d %H:%M:%S') -----"
+        cat "$LOG_FILE"
+        echo ""
+    } >>"$LOG_ARCHIVE"
+fi
+: > "$LOG_FILE"
+
+echo "Attempting to restart Godot editor with AFK project..."
+if command -v godot >/dev/null 2>&1; then
+    echo "  → Godot output will be appended to: $LOG_FILE"
+    (cd "$AFK_DIR" && nohup godot --editor --path "$AFK_DIR" >>"$LOG_FILE" 2>&1 &)
+    echo "✓ Godot editor launched in background (project: $AFK_DIR)"
+else
+    echo "⚠ 'godot' CLI not found in PATH; please start Godot manually."
+fi

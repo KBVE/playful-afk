@@ -1,4 +1,6 @@
 COMMAND.md
+logs.txt
+logs_archive.txt
 
 # Godot 4+ specific ignores
 .godot/

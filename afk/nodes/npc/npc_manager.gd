@@ -325,7 +325,12 @@ func _handle_combat_event(event: Dictionary) -> void:
 			_spawn_monster(npc_type, spawn_pos, initial_target)
 		return  # Spawn event handled, exit early
 
-	# For non-spawn events, look up NPCs by ULID
+	# RUST-SPAWNED NPCs: All combat is handled by Rust
+	# Events are only used for optional VFX/SFX on GDScript-spawned NPCs
+	# For Rust-spawned NPCs, this function does nothing (Rust handles everything)
+
+	# Only process events for GDScript-spawned NPCs (legacy support)
+	# Try to find NPCs - if not found, Rust is handling them, so skip
 	var attacker: Node2D = null
 	var target: Node2D = null
 
@@ -334,76 +339,29 @@ func _handle_combat_event(event: Dictionary) -> void:
 	if "target_ulid" in event:
 		target = _find_npc_by_ulid(event.target_ulid)
 
-	# DEFENSIVE: Check for missing NPCs (should not happen if Rust properly cleaned up)
-	if "attacker_ulid" in event and not attacker:
-		if not has_meta("_logged_missing_" + event.attacker_ulid):
-			push_error("[COMBAT ERROR] Could not find attacker with ULID: %s" % event.attacker_ulid)
-			set_meta("_logged_missing_" + event.attacker_ulid, true)
+	# If NPCs not found, they're Rust-managed - skip silently
+	if ("attacker_ulid" in event and not attacker) or ("target_ulid" in event and not target):
 		return
 
-	if "target_ulid" in event and not target:
-		if not has_meta("_logged_missing_" + event.target_ulid):
-			push_error("[COMBAT ERROR] Could not find target with ULID: %s" % event.target_ulid)
-			set_meta("_logged_missing_" + event.target_ulid, true)
-		return
-
-	# DEFENSIVE: Validate attacker and target are different NPCs
-	if attacker and target and attacker == target:
-		push_error("[COMBAT ERROR] NPC is attacking itself! Attacker: %s" % event.attacker_ulid)
-		return
-
+	# LEGACY GDScript-SPAWNED NPCs ONLY: Emit EventManager signals for VFX/SFX
 	match event.event_type:
 		"attack":
-			# VISUAL ONLY: Sync state from Rust and emit signals
 			if attacker and target:
 				EventManager.combat_started.emit(attacker, target)
-				# Sync attacker state from Rust (ATTACKING flag already set by Rust)
-				if attacker.stats and attacker.stats.ulid:
-					var attacker_state = NPCDataWarehouse.get_npc_behavioral_state(attacker.stats.ulid)
-					if "current_state" in attacker and attacker.current_state != attacker_state:
-						attacker.current_state = attacker_state
 		"damage":
-			# VISUAL ONLY: Sync state and HP from Rust, update healthbar
 			if attacker and target and "amount" in event:
 				EventManager.damage_dealt.emit(attacker, target, event.amount)
-				# Sync target state from Rust (DAMAGED flag already set by Rust)
-				if target.stats and target.stats.ulid:
-					var target_state = NPCDataWarehouse.get_npc_behavioral_state(target.stats.ulid)
-					if "current_state" in target and target.current_state != target_state:
-						target.current_state = target_state
-					# Update healthbar (read HP from Rust)
-					var current_hp = NPCDataWarehouse.get_npc_hp(target.stats.ulid)
-					target.stats.hp = current_hp  # Sync from Rust
-					# Emit damage_taken signal for healthbar update
-					if target.has_signal("damage_taken"):
-						target.damage_taken.emit(event.amount, current_hp, target.stats.max_hp)
-				# TODO: Show damage number floating text
 		"death":
-			# VISUAL ONLY: Sync state from Rust and despawn
 			if attacker and target:
 				EventManager.target_killed.emit(attacker, target)
-				# Sync target state from Rust (DEAD flag already set by Rust)
-				if target.stats and target.stats.ulid:
-					var target_state = NPCDataWarehouse.get_npc_behavioral_state(target.stats.ulid)
-					if "current_state" in target:
-						target.current_state = target_state
-				# Schedule despawn after death animation
-				get_tree().create_timer(1.0).timeout.connect(func(): _despawn_dead_npc(target))
 		"projectile":
-			# PROJECTILE EVENT: Store projectile data on attacker for delayed firing
-			# Arrow will be fired during attack animation (frame-based)
-			# event.attacker_animation contains projectile type (e.g., "arrow")
-			# event.target_x, event.target_y contain target position
 			if attacker and target:
-				# Store projectile data on attacker NPC to be fired during animation
 				attacker.set_meta("pending_projectile", {
-					"type": event.attacker_animation,  # "arrow"
+					"type": event.attacker_animation,
 					"target": target,
 					"target_pos": Vector2(event.target_x, event.target_y),
 					"speed": 300.0
 				})
-		_:
-			push_error("[COMBAT] Unknown event type: %s" % event.event_type)
 
 
 ## Despawn a dead NPC and return to pool
@@ -474,10 +432,19 @@ func _complete_npc_despawn(npc: Node2D) -> void:
 func _find_npc_by_ulid(ulid_hex: String) -> Node2D:
 	# Search through all active NPCs
 	for npc in _npc_ai_states.keys():
-		if npc and "stats" in npc and npc.stats and "ulid" in npc.stats:
-			var npc_ulid_hex = ULID.to_hex(npc.stats.ulid)
-			if npc_ulid_hex == ulid_hex:
-				return npc
+		if npc:
+			# Check if NPC has ulid property (Rust-spawned NPCs)
+			if "ulid" in npc:
+				var npc_ulid_bytes = npc.ulid
+				if npc_ulid_bytes:
+					var npc_ulid_hex = ULID.to_hex(npc_ulid_bytes)
+					if npc_ulid_hex == ulid_hex:
+						return npc
+			# Fallback: Check stats.ulid for GDScript-spawned NPCs
+			elif "stats" in npc and npc.stats and "ulid" in npc.stats:
+				var npc_ulid_hex = ULID.to_hex(npc.stats.ulid)
+				if npc_ulid_hex == ulid_hex:
+					return npc
 	return null
 
 
@@ -1061,7 +1028,8 @@ func is_npc_registered(npc: Node2D) -> bool:
 	return _npc_ai_states.has(npc)
 
 
-## Called when NPC takes damage - sets combat target for counter-attack
+## LEGACY: Called when GDScript-spawned NPC takes damage
+## Rust-spawned NPCs don't use this - Rust handles all combat AI
 func on_npc_damaged(victim: Node2D, attacker: Node2D) -> void:
 	if not is_instance_valid(victim) or not is_instance_valid(attacker):
 		return
