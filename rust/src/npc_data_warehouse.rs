@@ -1036,6 +1036,12 @@ impl NPCDataWarehouse {
         godot_print!("[RUST POOL] Setting scene container");
         *self.scene_container.write() = Some(container);
 
+        // Auto-initialize release effect pool now that we have a container
+        // Use smaller pool size (3) to avoid blocking the main thread
+        godot_print!("[RUST POOL] Auto-initializing release effect pool...");
+        self.release_pool.initialize(3, "res://nodes/npc/common/release.tscn", 2000);
+        godot_print!("[RUST POOL] Release effect pool initialization complete");
+
         // Auto-initialize healthbar pool now that we have a container
         // Use smaller pool size to avoid blocking on init
         godot_print!("[RUST POOL] Auto-initializing healthbar pool...");
@@ -1979,15 +1985,13 @@ impl NPCDataWarehouse {
         // 3. Apply waypoint movement (move NPCs towards their waypoints)
         self.apply_waypoint_movement(&active_npcs, delta);
 
-        // 4. DISABLED: Check if we need to spawn monsters (Rust manages monster spawn timing)
-        // TODO: Re-enable once initial spawn is stable
-        // let monster_spawn_events = self.check_spawn_wave(now_ms);
-        // events.extend(monster_spawn_events);
+        // 4. Check if we need to spawn monsters (Rust manages monster spawn timing)
+        let monster_spawn_events = self.check_spawn_wave(now_ms);
+        events.extend(monster_spawn_events);
 
-        // 5. DISABLED: Check if we need to spawn allies (gradual ramp-up)
-        // TODO: Re-enable once initial spawn is stable
-        // let ally_spawn_events = self.check_ally_spawn(now_ms);
-        // events.extend(ally_spawn_events);
+        // 5. Check if we need to spawn allies (gradual ramp-up)
+        let ally_spawn_events = self.check_ally_spawn(now_ms);
+        events.extend(ally_spawn_events);
 
         // Removed: Too spammy
         events
@@ -2040,8 +2044,8 @@ impl NPCDataWarehouse {
     }
 
     /// Legacy tick_combat_internal - now calls three phases sequentially
-    /// This maintains backward compatibility while using the new three-phase system
-    pub fn tick_combat_internal(&self, delta: f32) -> Vec<CombatEvent> {
+    /// Returns (events, death_positions) where death_positions is Vec<(x, y)>
+    pub fn tick_combat_internal(&self, delta: f32) -> (Vec<CombatEvent>, Vec<(f32, f32)>) {
         let mut all_events = Vec::new();
 
         // Reduced logging
@@ -2077,10 +2081,12 @@ impl NPCDataWarehouse {
         // self.process_regen_queue();
 
         // Phase 4: Cleanup (despawn dead NPCs AFTER they've played death animation)
-        self.cleanup_dead_npcs(now_ms);
+        // Returns death positions for GDScript to spawn effects
+        let death_positions = self.cleanup_dead_npcs(now_ms);
 
         // Phase 4.5: Tick release effect pool (auto-return expired animations)
-        self.release_pool.tick(now_ms);
+        // DISABLED: Release effects moved to GDScript for thread safety
+        // self.release_pool.tick(now_ms);
 
         // Reduced logging
         static mut TICK_END_LOG: u32 = 0;
@@ -2095,7 +2101,7 @@ impl NPCDataWarehouse {
             }
         }
 
-        all_events
+        (all_events, death_positions)
     }
 
     /// Handle idle wandering for NPCs that are IDLE and not in COMBAT
@@ -2477,7 +2483,18 @@ impl NPCDataWarehouse {
                 // Only modify state if NPC was in COMBAT
                 if (current_state & NPCState::COMBAT.bits() as i32) != 0 {
                     // Remove COMBAT flag, but keep WALKING/IDLE as-is (for idle wandering)
-                    let new_state = current_state & !(NPCState::COMBAT.bits() as i32);
+                    let mut new_state = current_state & !(NPCState::COMBAT.bits() as i32);
+
+                    // IMPORTANT: If no movement state flags are set, add IDLE to prevent NONE state
+                    // This prevents archers/ranged units from going into NONE state after combat
+                    let has_walking = (new_state & NPCState::WALKING.bits() as i32) != 0;
+                    let has_idle = (new_state & NPCState::IDLE.bits() as i32) != 0;
+                    let has_attacking = (new_state & NPCState::ATTACKING.bits() as i32) != 0;
+
+                    if !has_walking && !has_idle && !has_attacking {
+                        new_state |= NPCState::IDLE.bits() as i32;
+                    }
+
                     self.npc_behavioral_state
                         .insert(*ulid_bytes_a, new_state.to_string());
                 }
@@ -2553,8 +2570,18 @@ impl NPCDataWarehouse {
                     let move_distance = MOVEMENT_SPEED * delta_time;
                     let move_ratio = (move_distance / distance).min(1.0);
 
-                    let target_x = current_x + dx * move_ratio;
-                    let target_y = current_y + dy * move_ratio;
+                    let unclamped_x = current_x + dx * move_ratio;
+                    let unclamped_y = current_y + dy * move_ratio;
+
+                    // Load world bounds for clamping
+                    let world_min_x = f32::from_bits(self.world_min_x.load(Ordering::Relaxed));
+                    let world_max_x = f32::from_bits(self.world_max_x.load(Ordering::Relaxed));
+                    let world_min_y = f32::from_bits(self.world_min_y.load(Ordering::Relaxed));
+                    let world_max_y = f32::from_bits(self.world_max_y.load(Ordering::Relaxed));
+
+                    // Clamp position to world bounds to prevent NPCs from leaving viewport
+                    let target_x = unclamped_x.clamp(world_min_x, world_max_x);
+                    let target_y = unclamped_y.clamp(world_min_y, world_max_y);
 
                     // Store normalized movement direction for sprite flipping
                     let dir_x = dx / distance;
@@ -2599,12 +2626,16 @@ impl NPCDataWarehouse {
                             let current_visual_pos = node.get_position();
 
                             // Lerp from current visual position to target position for smooth movement
-                            let lerped_x = current_visual_pos.x
+                            let unclamped_x = current_visual_pos.x
                                 + (target_x - current_visual_pos.x) * LERP_WEIGHT;
-                            let lerped_y = current_visual_pos.y
+                            let unclamped_y = current_visual_pos.y
                                 + (target_y - current_visual_pos.y) * LERP_WEIGHT;
 
-                            node.set_position(Vector2::new(lerped_x, lerped_y));
+                            // Clamp the lerped visual position to world bounds as well
+                            let final_x = unclamped_x.clamp(world_min_x, world_max_x);
+                            let final_y = unclamped_y.clamp(world_min_y, world_max_y);
+
+                            node.set_position(Vector2::new(final_x, final_y));
                             break;
                         }
                     }
@@ -2733,6 +2764,89 @@ impl NPCDataWarehouse {
                         let should_flip = if is_dead {
                             // Keep current flip state for dead NPCs
                             sprite_mut.is_flipped_h()
+                        } else if (behavioral_state & NPCState::COMBAT.bits() as i32) != 0 {
+                            // PRIORITY: In combat - face the combat target
+                            if let Some(aggro_target_hex) = self
+                                .npc_aggro_targets
+                                .get(ulid_bytes)
+                                .map(|v| v.value().clone())
+                            {
+                                // Find the target's position
+                                if let Ok(target_ulid_bytes) = hex_to_bytes(&aggro_target_hex) {
+                                    if let Some(target_pos_str) = self
+                                        .npc_positions
+                                        .get(&target_ulid_bytes)
+                                        .map(|v| v.value().clone())
+                                    {
+                                        // Get current position
+                                        if let Some(current_pos_str) = self
+                                            .npc_positions
+                                            .get(ulid_bytes)
+                                            .map(|v| v.value().clone())
+                                        {
+                                            let current_parts: Vec<&str> = current_pos_str.split(',').collect();
+                                            let target_parts: Vec<&str> = target_pos_str.split(',').collect();
+
+                                            if current_parts.len() == 2 && target_parts.len() == 2 {
+                                                if let (Ok(curr_x), Ok(target_x)) = (
+                                                    current_parts[0].parse::<f32>(),
+                                                    target_parts[0].parse::<f32>(),
+                                                ) {
+                                                    target_x < curr_x // Flip if target is to the left
+                                                } else {
+                                                    false
+                                                }
+                                            } else {
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        // Target position not found, fall through to move_dir logic
+                                        if let Some(move_dir) = self
+                                            .npc_move_directions
+                                            .get(ulid_bytes)
+                                            .map(|v| v.value().clone())
+                                        {
+                                            let parts: Vec<&str> = move_dir.split(',').collect();
+                                            if parts.len() == 2 {
+                                                if let Ok(dir_x) = parts[0].parse::<f32>() {
+                                                    dir_x < 0.0
+                                                } else {
+                                                    false
+                                                }
+                                            } else {
+                                                false
+                                            }
+                                        } else {
+                                            false
+                                        }
+                                    }
+                                } else {
+                                    false
+                                }
+                            } else {
+                                // No aggro target but in combat - use move direction
+                                if let Some(move_dir) = self
+                                    .npc_move_directions
+                                    .get(ulid_bytes)
+                                    .map(|v| v.value().clone())
+                                {
+                                    let parts: Vec<&str> = move_dir.split(',').collect();
+                                    if parts.len() == 2 {
+                                        if let Ok(dir_x) = parts[0].parse::<f32>() {
+                                            dir_x < 0.0
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
+                            }
                         } else if let Some(move_dir) = self
                             .npc_move_directions
                             .get(ulid_bytes)
@@ -3061,13 +3175,13 @@ impl NPCDataWarehouse {
     /// Get attack range based on combat type (from static_state)
     fn get_attack_range(static_state: i32) -> f32 {
         if (static_state & NPCStaticState::MELEE.bits() as i32) != 0 {
-            50.0 // Melee range
+            30.0 // Melee range - close combat
         } else if (static_state & NPCStaticState::RANGED.bits() as i32) != 0 {
             200.0 // Ranged range
         } else if (static_state & NPCStaticState::MAGIC.bits() as i32) != 0 {
             150.0 // Magic range
         } else {
-            50.0 // Default
+            30.0 // Default - close combat
         }
     }
 
@@ -3260,7 +3374,8 @@ impl NPCDataWarehouse {
     }
 
     /// Cleanup dead NPCs that have finished their death animation
-    fn cleanup_dead_npcs(&self, now_ms: u64) {
+    /// Returns Vec of death positions (x, y) for GDScript to spawn effects
+    fn cleanup_dead_npcs(&self, now_ms: u64) -> Vec<(f32, f32)> {
         // Collect ULIDs of NPCs to despawn
         let mut to_despawn = Vec::new();
 
@@ -3279,22 +3394,24 @@ impl NPCDataWarehouse {
             }
         }
 
-        // Despawn scheduled NPCs and trigger release effects
+        // Despawn scheduled NPCs and collect death positions for GDScript
+        let mut death_positions = Vec::new();
+
         for ulid_bytes in to_despawn {
             godot_print!("[RUST CLEANUP] Despawning dead NPC: {:?}", &ulid_bytes[..8]);
 
-            // Get the NPC's position before despawning and trigger release effect
+            // Get the NPC's position before despawning (store for signal emission)
             if let Some(npc_ref) = self.active_npc_pool.get(&ulid_bytes) {
-                let npc_position = npc_ref.node.get_global_position();
-
-                // Trigger release effect at NPC's position (using animation module)
-                // Returns true if effect was triggered, false if pool is full
-                self.release_pool.trigger_at_position(npc_position);
+                let pos = npc_ref.node.get_global_position();
+                death_positions.push((pos.x, pos.y));
             }
 
             // Despawn the NPC
             self.rust_despawn_npc(&ulid_bytes);
         }
+
+        // Return death positions so GodotNPCDataWarehouse can emit signals
+        death_positions
     }
 
     /// Mark NPC as dead and remove from active combat
@@ -3837,6 +3954,23 @@ impl NPCDataWarehouse {
         let last_ally_spawn = self.last_ally_spawn_time_ms.load(Ordering::Relaxed);
         let time_since_spawn = now_ms - last_ally_spawn;
 
+        // Debug logging every 5 seconds
+        static mut LAST_DEBUG_LOG: u64 = 0;
+        unsafe {
+            if now_ms - LAST_DEBUG_LOG > 5000 {
+                godot_print!(
+                    "[ALLY SPAWN CHECK] Warriors: {}/{}, Archers: {}/{}, Time since spawn: {}ms (need {}ms)",
+                    warrior_count,
+                    self.max_warriors,
+                    archer_count,
+                    self.max_archers,
+                    time_since_spawn,
+                    self.ally_spawn_interval_ms
+                );
+                LAST_DEBUG_LOG = now_ms;
+            }
+        }
+
         if time_since_spawn < self.ally_spawn_interval_ms {
             return events; // Not time yet
         }
@@ -3986,6 +4120,11 @@ impl GodotNPCDataWarehouse {
     /// Parameters: (npc_type: String, max_size: int)
     #[signal]
     fn pool_registered(npc_type: GString, max_size: i32);
+
+    /// Emitted when an NPC dies (for death effects)
+    /// Parameters: (position_x: float, position_y: float)
+    #[signal]
+    fn npc_died(position_x: f32, position_y: f32);
 
     /// Emitted when sync completes
     /// Parameters: (synced_count: int)
@@ -4827,16 +4966,23 @@ impl GodotNPCDataWarehouse {
 
     /// Tick combat logic and get events
     /// Returns array of JSON strings representing combat events
+    /// Emits npc_died signal for each death position
     /// Usage: var events = NPCDataWarehouse.tick_combat(delta)
     #[func]
-    pub fn tick_combat(&self, delta: f32) -> Array<GString> {
-        let events = self.warehouse.tick_combat_internal(delta);
+    pub fn tick_combat(&mut self, delta: f32) -> Array<GString> {
+        let (events, death_positions) = self.warehouse.tick_combat_internal(delta);
         let mut godot_array = Array::new();
 
         for event in events {
             let json = serde_json::to_string(&event).unwrap_or_default();
             let gstring = GString::from(&json);
             godot_array.push(&gstring);
+        }
+
+        // Emit npc_died signal for each death position (for GDScript to spawn effects)
+        let signal_name = StringName::from("npc_died");
+        for (x, y) in death_positions {
+            self.base_mut().emit_signal(&signal_name, &[x.to_variant(), y.to_variant()]);
         }
 
         godot_array

@@ -798,6 +798,11 @@ func set_layer4_container(container: Node2D) -> void:
 		NPCDataWarehouse.start_combat_system()
 		combat_system_started = true
 
+		# Connect to npc_died signal for release effects
+		if not NPCDataWarehouse.is_connected("npc_died", _on_npc_died):
+			NPCDataWarehouse.connect("npc_died", _on_npc_died)
+			print("[NPCManager] Connected to NPC death signal")
+
 		# Start combat tick timer
 		var combat_timer = get_node_or_null("CombatTickTimer")
 		if combat_timer:
@@ -933,22 +938,9 @@ func _initialize_emoji_manager() -> void:
 
 ## Initialize Release Effect Pool for death animations
 func _initialize_release_effect_pool() -> void:
-	# Pre-allocate release effect pool
-	for i in range(RELEASE_POOL_SIZE):
-		var effect = release_effect_scene.instantiate()
-		effect.visible = false
-		effect.scale = Vector2(0.5, 0.5)  # Scale down to 80%
-		effect.modulate.a = 0.5  # Set transparency to 50% so death animation shows through
-
-		# Add to foreground container if available, otherwise add to NPCManager
-		if foreground_container:
-			foreground_container.add_child(effect)
-		else:
-			add_child(effect)
-
-		release_effect_pool.append(effect)
-
-	# Release Effect Pool initialized silently
+	# Release pool is now auto-initialized by Rust when scene_container is set
+	# See NPCDataWarehouse.set_scene_container() in Rust
+	pass
 
 
 ## Get available release effect from pool (or create new if all busy)
@@ -2097,3 +2089,16 @@ func get_npc_type(npc: Node2D) -> String:
 
 	push_warning("NPCManager: Unknown NPC type for %s (class: %s)" % [npc, npc_class_name])
 	return ""
+
+
+## ===== DEATH EFFECT HANDLING =====
+
+## Handle NPC death signal from Rust (triggers release effect)
+func _on_npc_died(position_x: float, position_y: float) -> void:
+	# Get a release effect from the pool
+	var effect = _get_release_effect()
+	if effect:
+		effect.global_position = Vector2(position_x, position_y)
+		effect.visible = true
+		effect.play()
+		print("[NPCManager] Triggered release effect at (%f, %f)" % [position_x, position_y])

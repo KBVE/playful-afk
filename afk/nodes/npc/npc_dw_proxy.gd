@@ -34,6 +34,11 @@ func _ready() -> void:
 	_warehouse = GodotNPCDataWarehouse.new()
 	add_child(_warehouse)
 
+	# Forward signals from the Rust warehouse to this proxy
+	# This allows NPCDataWarehouse.connect("npc_died", ...) to work
+	if _warehouse.has_signal("npc_died"):
+		_warehouse.connect("npc_died", _on_warehouse_npc_died)
+
 	# Initialize NPC pools immediately (before combat tick can run)
 	# This prevents race conditions where combat tries to spawn before pools exist
 	print("[NPCDataWarehouse] Pre-initializing NPC pools...")
@@ -555,3 +560,16 @@ func active_healthbar_count() -> int:
 	if _warehouse:
 		return _warehouse.active_healthbar_count()
 	return 0
+
+
+# ============================================================================
+# Signal Forwarding (from Rust GodotNPCDataWarehouse to this proxy)
+# ============================================================================
+
+## Emitted when an NPC dies (for death effects)
+## Parameters: (position_x: float, position_y: float)
+signal npc_died(position_x: float, position_y: float)
+
+## Forward npc_died signal from Rust warehouse to this proxy
+func _on_warehouse_npc_died(position_x: float, position_y: float) -> void:
+	npc_died.emit(position_x, position_y)

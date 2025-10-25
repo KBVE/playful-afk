@@ -1,5 +1,5 @@
 use godot::prelude::*;
-use godot::classes::{PackedScene, Node, Node2D};
+use godot::classes::{PackedScene, Node, Node2D, Object};
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -82,17 +82,18 @@ impl EffectPool {
         let mut container = container_opt.unwrap();
 
         // Instantiate effects and add to pool
-        for _i in 0..pool_size {
+        for i in 0..pool_size {
             let effect = scene.instantiate_as::<Node>();
 
-            // Add to scene tree
-            container.add_child(&effect);
-
-            // Configure effect
+            // Configure effect BEFORE adding to scene tree
             if let Ok(mut node2d_effect) = effect.clone().try_cast::<Node2D>() {
                 node2d_effect.set_visible(false); // Hide until triggered
                 node2d_effect.set_z_index(50);     // Render between NPCs and healthbars
             }
+
+            // Add to scene tree synchronously (with internal_mode to skip _ready initially if possible)
+            container.add_child(&effect);
+            godot_print!("[{} POOL] Added effect {} to scene tree", self.pool_name, i);
 
             // Add to pool and mark as available
             let index = self.pool_size.fetch_add(1, Ordering::Relaxed);
@@ -164,7 +165,14 @@ impl EffectPool {
     /// Trigger an effect at a specific position
     /// Returns true if effect was triggered, false if pool is full
     pub fn trigger_at_position(&self, position: Vector2) -> bool {
-        if let Some((mut effect, pool_index)) = self.get_effect() {
+        godot_print!("[{} POOL] trigger_at_position called at {:?}", self.pool_name, position);
+
+        let effect_opt = self.get_effect();
+        godot_print!("[{} POOL] get_effect returned: {}", self.pool_name, effect_opt.is_some());
+
+        if let Some((mut effect, pool_index)) = effect_opt {
+            godot_print!("[{} POOL] Got effect {}, recording trigger time", self.pool_name, pool_index);
+
             // Record when this effect was triggered
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -172,18 +180,33 @@ impl EffectPool {
                 .as_millis() as u64;
             self.trigger_times.insert(pool_index, now_ms);
 
+            godot_print!("[{} POOL] Trigger time recorded, trying to cast to Node2D", self.pool_name);
+
             // Position the effect
             if let Ok(mut node2d_effect) = effect.clone().try_cast::<Node2D>() {
+                godot_print!("[{} POOL] Successfully cast to Node2D, setting position", self.pool_name);
                 node2d_effect.set_global_position(position);
+                godot_print!("[{} POOL] Position set, setting visibility", self.pool_name);
                 node2d_effect.set_visible(true);
-
-                godot_print!("[{} POOL] Triggered effect {} at {:?}", self.pool_name, pool_index, position);
+                godot_print!("[{} POOL] Visibility set", self.pool_name);
             }
+
+            godot_print!("[{} POOL] About to call deferred play()", self.pool_name);
 
             // Call play on the effect to start the animation
             // Rust will auto-return it to the pool after animation_duration_ms via tick()
-            let _ = effect.call("play", &[]);
+            // Use try_call_deferred to avoid panics if the call fails
+            let play_method = StringName::from("play");
+            match effect.try_call_deferred(&play_method, &[]) {
+                Ok(_) => {
+                    godot_print!("[{} POOL] Deferred play() call succeeded for effect {}", self.pool_name, pool_index);
+                }
+                Err(e) => {
+                    godot_error!("[{} POOL] Failed to call deferred play() on effect {}: {:?}", self.pool_name, pool_index, e);
+                }
+            }
 
+            godot_print!("[{} POOL] Returning true from trigger_at_position", self.pool_name);
             true
         } else {
             godot_print!("[{} POOL] No effects available (all in use)", self.pool_name);
