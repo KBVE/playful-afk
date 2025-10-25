@@ -754,7 +754,7 @@ impl NPCDataWarehouse {
                 godot_print!("[STATE WRITE] {} - ULID {} - setting to {}", caller, &ulid_hex[..8], new_state);
             }
         }
-        self.npc_behavioral_state.insert(*ulid, new_state.to_string());
+        self.npc_behavioral_state.insert(*ulid,  new_state.to_string());
     }
 
     /// Create a new NPCDataWarehouse with the specified sync interval
@@ -963,8 +963,8 @@ impl NPCDataWarehouse {
         // Store NPC metadata (name, type) in ByteMaps
         let npc_name = npc.name.clone();
         let npc_type_str = npc.npc_type.clone();
-        self.npc_names.insert(*&ulid, npc_name.clone());
-        self.npc_types.insert(*&ulid, npc_type_str.clone());
+        self.npc_names.insert(*&ulid,  npc_name.clone());
+        self.npc_types.insert(*&ulid,  npc_type_str.clone());
 
         // Register for combat using the stats extracted during pool initialization
         let npc_stats = npc.stats;
@@ -973,7 +973,7 @@ impl NPCDataWarehouse {
         self.register_npc_with_stats(&ulid, &npc_stats);
 
         // Store position for combat system using ByteMap (no hex conversion!)
-        self.npc_positions.insert(*&ulid, format!("{},{}", position.x, position.y));
+        self.npc_positions.insert(*&ulid,  format!("{},{}", position.x, position.y));
 
         // Set initial wander cooldown so NPC stays idle for a bit after spawning (5-10 seconds)
         use rand::Rng;
@@ -1033,16 +1033,16 @@ impl NPCDataWarehouse {
             if let Ok(mut combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
                 combat_stats.hp = combat_stats.max_hp;  // Reset HP to max
                 if let Ok(updated_json) = serde_json::to_string(&combat_stats) {
-                    self.npc_combat_stats.insert(*&ulid_array, updated_json);
+                    self.npc_combat_stats.insert(*&ulid_array,  updated_json);
                 }
             }
         }
 
         // Behavioral state: reset to IDLE (0)
-        self.npc_behavioral_state.insert(*&ulid_array, "0".to_string());
+        self.npc_behavioral_state.insert(*&ulid_array,  "0".to_string());
 
         // Cooldown: reset to 0
-        self.npc_cooldown.insert(*&ulid_array, "0".to_string());
+        self.npc_cooldown.insert(*&ulid_array,  "0".to_string());
 
         // Note: Keep name and type - they don't change when pooled NPCs respawn
         // Note: Static state (faction, combat type) never changes
@@ -1089,19 +1089,19 @@ impl NPCDataWarehouse {
         self.storage.len()
     }
 
-    /// Get number of entries in read store (Papaya)
+    /// Get number of entries in storage (DashMap)
     pub fn read_store_count(&self) -> usize {
-        self.storage.read_count()
+        self.storage.len()
     }
 
     /// Get number of entries in write store (DashMap)
     pub fn write_store_count(&self) -> usize {
-        self.storage.write_count()
+        self.storage.len()
     }
 
-    /// Manually trigger sync from write store to read store
+    /// Manually trigger sync from write store to read store - no-op for DashMap
     pub fn sync(&self) {
-        self.storage.sync();
+        // DashMap doesn't need syncing - it's always consistent
     }
 
     /// Clear all data (use with caution!)
@@ -1232,11 +1232,11 @@ impl NPCDataWarehouse {
             energy: 100.0,      // Default full energy
             max_energy: 100.0,
         };
-        self.npc_combat_stats.insert(*ulid, serde_json::to_string(&combat_stats).unwrap());
+        self.npc_combat_stats.insert(*ulid,  serde_json::to_string(&combat_stats).unwrap());
         let ulid_hex = bytes_to_hex(ulid);
         godot_print!("[RUST STATE] register_npc_for_combat_internal ULID {} - setting state to {}", ulid_hex, behavioral_state);
-        self.npc_behavioral_state.insert(*ulid, behavioral_state.to_string());
-        self.npc_cooldown.insert(*ulid, "0".to_string());
+        self.npc_behavioral_state.insert(*ulid,  behavioral_state.to_string());
+        self.npc_cooldown.insert(*ulid,  "0".to_string());
 
         // Still use hex string for active_combat_npcs DashMap (for iteration)
         self.active_combat_npcs.insert(ulid_hex, ());
@@ -1724,7 +1724,7 @@ impl NPCDataWarehouse {
                     let target_y = rng.random_range(min_y..max_y);
 
                     // Store waypoint in ByteMap
-                    self.npc_waypoints.insert(*ulid_bytes, format!("{},{}", target_x, target_y));
+                    self.npc_waypoints.insert(*ulid_bytes,  format!("{},{}", target_x, target_y));
 
                     // Update wander cooldown - set to 3 seconds in the future
                     self.storage.insert(
@@ -1847,7 +1847,7 @@ impl NPCDataWarehouse {
                             if (current_state & NPCState::COMBAT.bits() as i32) != 0 {
                                 // Remove COMBAT flag
                                 let new_state = current_state & !(NPCState::COMBAT.bits() as i32);
-                                self.npc_behavioral_state.insert(*ulid_bytes_a, new_state.to_string());
+                                self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
                             }
                         }
                     }
@@ -1888,7 +1888,7 @@ impl NPCDataWarehouse {
                             let clamped_y = retreat_y.clamp(min_y, max_y);
 
                             // Store retreat waypoint (clamped)
-                            self.npc_waypoints.insert(*ulid_bytes_a, format!("{},{}", clamped_x, clamped_y));
+                            self.npc_waypoints.insert(*ulid_bytes_a,  format!("{},{}", clamped_x, clamped_y));
 
                             // Update behavioral state to COMBAT only (remove IDLE)
                             // WALKING will be set in apply_waypoint_movement when actually moving
@@ -1896,7 +1896,7 @@ impl NPCDataWarehouse {
                             let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
                                 | NPCState::COMBAT.bits() as i32;
 
-                            self.npc_behavioral_state.insert(*ulid_bytes_a, new_state.to_string());
+                            self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
                         }
                     } else if distance > attack_range {
                         // TOO FAR - Move toward target to get in range
@@ -1909,14 +1909,14 @@ impl NPCDataWarehouse {
                         let clamped_x = target_x.clamp(min_x, max_x);
                         let clamped_y = target_y.clamp(min_y, max_y);
 
-                        self.npc_waypoints.insert(*ulid_bytes_a, format!("{},{}", clamped_x, clamped_y));
+                        self.npc_waypoints.insert(*ulid_bytes_a,  format!("{},{}", clamped_x, clamped_y));
 
                         // Update behavioral state to COMBAT only (remove IDLE)
                         // WALKING will be set in apply_waypoint_movement when actually moving
                         let current_state = *behavioral_state_a;
                         let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
                             | NPCState::COMBAT.bits() as i32;
-                        self.npc_behavioral_state.insert(*ulid_bytes_a, new_state.to_string());
+                        self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
                     } else {
                         // OPTIMAL RANGE (100-200px) - Stop and shoot
                         self.npc_waypoints.remove(ulid_bytes_a).map(|(_, v)| v);
@@ -1925,7 +1925,7 @@ impl NPCDataWarehouse {
                         let current_state = *behavioral_state_a;
                         let new_state = (current_state & !(NPCState::IDLE.bits() as i32) & !(NPCState::WALKING.bits() as i32))
                             | NPCState::COMBAT.bits() as i32;
-                        self.npc_behavioral_state.insert(*ulid_bytes_a, new_state.to_string());
+                        self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
                     }
                 } else {
                     // MELEE/MAGIC units: Simple pursue behavior (original logic)
@@ -1939,14 +1939,14 @@ impl NPCDataWarehouse {
                         let clamped_x = target_x.clamp(min_x, max_x);
                         let clamped_y = target_y.clamp(min_y, max_y);
 
-                        self.npc_waypoints.insert(*ulid_bytes_a, format!("{},{}", clamped_x, clamped_y));
+                        self.npc_waypoints.insert(*ulid_bytes_a,  format!("{},{}", clamped_x, clamped_y));
 
                         // Update behavioral state to COMBAT only (remove IDLE)
                         // WALKING will be set in apply_waypoint_movement when actually moving
                         let current_state = *behavioral_state_a;
                         let new_state = (current_state & !(NPCState::IDLE.bits() as i32))
                             | NPCState::COMBAT.bits() as i32;
-                        self.npc_behavioral_state.insert(*ulid_bytes_a, new_state.to_string());
+                        self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
                     } else {
                         // In range - stop moving
                         self.npc_waypoints.remove(ulid_bytes_a).map(|(_, v)| v);
@@ -1969,7 +1969,7 @@ impl NPCDataWarehouse {
                             }
                         }
 
-                        self.npc_behavioral_state.insert(*ulid_bytes_a, new_state.to_string());
+                        self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
                     }
                 }
             } else {
@@ -1982,7 +1982,7 @@ impl NPCDataWarehouse {
                 if (current_state & NPCState::COMBAT.bits() as i32) != 0 {
                     // Remove COMBAT flag, but keep WALKING/IDLE as-is (for idle wandering)
                     let new_state = current_state & !(NPCState::COMBAT.bits() as i32);
-                    self.npc_behavioral_state.insert(*ulid_bytes_a, new_state.to_string());
+                    self.npc_behavioral_state.insert(*ulid_bytes_a,  new_state.to_string());
                 }
                 // If not in combat, leave state alone (might be idle wandering with WALKING state)
             }
@@ -2050,10 +2050,10 @@ impl NPCDataWarehouse {
                     // Store normalized movement direction for sprite flipping
                     let dir_x = dx / distance;
                     let dir_y = dy / distance;
-                    self.npc_move_directions.insert(*&ulid_bytes, format!("{},{}", dir_x, dir_y));
+                    self.npc_move_directions.insert(*&ulid_bytes,  format!("{},{}", dir_x, dir_y));
 
                     // Update position in npc_positions ByteMap (data store)
-                    self.npc_positions.insert(*&ulid_bytes, format!("{},{}", target_x, target_y));
+                    self.npc_positions.insert(*&ulid_bytes,  format!("{},{}", target_x, target_y));
 
                     // Set WALKING state since NPC is actually moving
                     // CRITICAL: Remove IDLE when adding WALKING (mutually exclusive)
@@ -2065,7 +2065,7 @@ impl NPCDataWarehouse {
                             // Add WALKING flag and remove IDLE (mutually exclusive)
                             if !has_walking {
                                 let new_state = (current_state & !(NPCState::IDLE.bits() as i32)) | NPCState::WALKING.bits() as i32;
-                                self.npc_behavioral_state.insert(*&ulid_bytes, new_state.to_string());
+                                self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
 
                                 // Removed spam logging
                             }
@@ -2099,7 +2099,7 @@ impl NPCDataWarehouse {
                         if let Ok(current_state) = state_str.parse::<i32>() {
                             // Remove WALKING and ATTACKING, add IDLE (keep COMBAT flag if present)
                             let new_state = (current_state & !(NPCState::WALKING.bits() as i32 | NPCState::ATTACKING.bits() as i32)) | NPCState::IDLE.bits() as i32;
-                            self.npc_behavioral_state.insert(*&ulid_bytes, new_state.to_string());
+                            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
                         }
                     }
                 }
@@ -2518,7 +2518,7 @@ impl NPCDataWarehouse {
     /// Update attack cooldown
     fn update_cooldown(&self, ulid: &str, now_ms: u64) {
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            self.npc_cooldown.insert(*&ulid_bytes, now_ms.to_string());
+            self.npc_cooldown.insert(*&ulid_bytes,  now_ms.to_string());
         }
     }
 
@@ -2534,7 +2534,7 @@ impl NPCDataWarehouse {
 
                     // Store updated stats
                     if let Ok(updated_json) = serde_json::to_string(&combat_stats) {
-                        self.npc_combat_stats.insert(*&ulid_bytes, updated_json);
+                        self.npc_combat_stats.insert(*&ulid_bytes,  updated_json);
                     }
 
                     return combat_stats.hp;
@@ -2579,7 +2579,7 @@ impl NPCDataWarehouse {
         if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
             // Set behavioral state to DEAD only (clear all other flags)
             let dead_state = NPCState::DEAD.bits() as i32;
-            self.npc_behavioral_state.insert(*&ulid_bytes, dead_state.to_string());
+            self.npc_behavioral_state.insert(*&ulid_bytes,  dead_state.to_string());
 
             godot_print!("[DEATH] Marked NPC {} as DEAD (state={})", ulid, dead_state);
 
@@ -2606,11 +2606,11 @@ impl NPCDataWarehouse {
                 0
             };
             let new_state = current | NPCState::ATTACKING.bits() as i32;
-            self.npc_behavioral_state.insert(*&ulid_bytes, new_state.to_string());
+            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
 
             // Record timestamp for auto-clearing (format: "attacking:timestamp,damaged:timestamp")
             let now_ms = Self::get_current_time_ms();
-            self.npc_state_timestamps.insert(*&ulid_bytes, format!("attacking:{}", now_ms));
+            self.npc_state_timestamps.insert(*&ulid_bytes,  format!("attacking:{}", now_ms));
 
             godot_print!("[ATTACK STATE] NPC {} - Setting ATTACKING flag (old_state={}, new_state={})",
                 &ulid[0..8.min(ulid.len())], current, new_state);
@@ -2626,11 +2626,11 @@ impl NPCDataWarehouse {
                 0
             };
             let new_state = current | NPCState::DAMAGED.bits() as i32;
-            self.npc_behavioral_state.insert(*&ulid_bytes, new_state.to_string());
+            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
 
             // Record timestamp for auto-clearing
             let now_ms = Self::get_current_time_ms();
-            self.npc_state_timestamps.insert(*&ulid_bytes, format!("damaged:{}", now_ms));
+            self.npc_state_timestamps.insert(*&ulid_bytes,  format!("damaged:{}", now_ms));
 
             godot_print!("[DAMAGED STATE] NPC {} - Setting DAMAGED flag (old_state={}, new_state={})",
                 &ulid[0..8.min(ulid.len())], current, new_state);
@@ -2646,7 +2646,7 @@ impl NPCDataWarehouse {
                 0
             };
             let new_state = current & !(NPCState::ATTACKING.bits() as i32);
-            self.npc_behavioral_state.insert(*&ulid_bytes, new_state.to_string());
+            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
         }
     }
 
@@ -2659,14 +2659,14 @@ impl NPCDataWarehouse {
                 0
             };
             let new_state = current & !(NPCState::DAMAGED.bits() as i32);
-            self.npc_behavioral_state.insert(*&ulid_bytes, new_state.to_string());
+            self.npc_behavioral_state.insert(*&ulid_bytes,  new_state.to_string());
         }
     }
 
     /// Set aggro target for an NPC (makes them prioritize attacking this target)
     fn set_aggro_target(&self, npc_ulid: &str, target_ulid: &str) {
         if let Ok(ulid_bytes) = hex_to_bytes(npc_ulid) {
-            self.npc_aggro_targets.insert(*&ulid_bytes, target_ulid.to_string());
+            self.npc_aggro_targets.insert(*&ulid_bytes,  target_ulid.to_string());
             godot_print!("[AGGRO] NPC {} now targets {} (retaliation)",
                 &npc_ulid[0..8.min(npc_ulid.len())], &target_ulid[0..8.min(target_ulid.len())]);
         }
@@ -2724,7 +2724,7 @@ impl NPCDataWarehouse {
                             }
 
                             // Update state and remove timestamp
-                            self.npc_behavioral_state.insert(*ulid_bytes, new_state.to_string());
+                            self.npc_behavioral_state.insert(*ulid_bytes,  new_state.to_string());
                             self.npc_state_timestamps.remove(ulid_bytes).map(|(_, v)| v);
                         }
                     }
@@ -2782,7 +2782,7 @@ impl NPCDataWarehouse {
 
         // Give warrior initial waypoint toward center-right (to meet monsters)
         if let Some(ulid_bytes) = warrior_ulid {
-            self.npc_waypoints.insert(*&ulid_bytes, format!("{},{}", center_x - 100.0, center_y - 30.0));
+            self.npc_waypoints.insert(*&ulid_bytes,  format!("{},{}", center_x - 100.0, center_y - 30.0));
             godot_print!("[RUST SPAWN] Warrior spawned with waypoint toward center");
         }
 
@@ -2792,7 +2792,7 @@ impl NPCDataWarehouse {
 
         // Give archer waypoint toward center-right (stays behind warrior)
         if let Some(ulid_bytes) = archer_ulid {
-            self.npc_waypoints.insert(*&ulid_bytes, format!("{},{}", center_x - 150.0, center_y + 30.0));
+            self.npc_waypoints.insert(*&ulid_bytes,  format!("{},{}", center_x - 150.0, center_y + 30.0));
             godot_print!("[RUST SPAWN] Archer spawned with waypoint toward center");
         }
 
@@ -2811,7 +2811,7 @@ impl NPCDataWarehouse {
 
             // Give monster waypoint toward center-left (to meet allies)
             if let Some(ulid_bytes) = monster_ulid {
-                self.npc_waypoints.insert(*&ulid_bytes, format!("{},{}", center_x + 100.0, monster_y));
+                self.npc_waypoints.insert(*&ulid_bytes,  format!("{},{}", center_x + 100.0, monster_y));
                 godot_print!("[RUST SPAWN] Monster {} spawned with waypoint toward center", monster_type);
             }
         }
