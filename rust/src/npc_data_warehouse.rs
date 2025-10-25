@@ -1625,7 +1625,7 @@ impl NPCDataWarehouse {
             self.update_cooldown(&attacker_ulid_bytes, now_ms);
 
             // Set ATTACKING state on attacker (Rust manages all states)
-            self.add_attacking_state(&attacker_ulid_hex);
+            self.add_attacking_state(&attacker_ulid_bytes);
 
             // Generate attack event (for animation)
             events.push(CombatEvent {
@@ -1703,10 +1703,10 @@ impl NPCDataWarehouse {
                     });
                 } else {
                     // Set DAMAGED state on target (Rust manages all states)
-                    self.add_damaged_state(&target_ulid_hex);
+                    self.add_damaged_state(&target_ulid_bytes);
 
                     // Set aggro: target should now attack their attacker
-                    self.set_aggro_target(&target_ulid_hex, &attacker_ulid_hex);
+                    self.set_aggro_target(&target_ulid_bytes, &attacker_ulid_bytes);
 
                     // Generate damage event
                     events.push(CombatEvent {
@@ -2987,146 +2987,172 @@ impl NPCDataWarehouse {
     }
 
     /// Add ATTACKING state flag (set during attack)
-    fn add_attacking_state(&self, ulid: &str) {
-        if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            let current = if let Some(state_str) = self
-                .npc_behavioral_state
-                .get(&ulid_bytes)
-                .map(|v| v.value().clone())
-            {
-                state_str.parse::<i32>().unwrap_or(0)
-            } else {
-                0
-            };
-            let new_state = current | NPCState::ATTACKING.bits() as i32;
-            self.npc_behavioral_state
-                .insert(*&ulid_bytes, new_state.to_string());
+    /// Takes ULID as bytes for zero-copy performance
+    fn add_attacking_state(&self, ulid_bytes: &[u8; 16]) {
+        let current = if let Some(state_str) = self
+            .npc_behavioral_state
+            .get(ulid_bytes)
+            .map(|v| v.value().clone())
+        {
+            state_str.parse::<i32>().unwrap_or(0)
+        } else {
+            0
+        };
+        // Add ATTACKING and remove IDLE (can't be idle while attacking)
+        let mut new_state = current | NPCState::ATTACKING.bits() as i32;
+        new_state &= !(NPCState::IDLE.bits() as i32);
+        self.npc_behavioral_state
+            .insert(*ulid_bytes, new_state.to_string());
 
-            // Record timestamp for auto-clearing (format: "attacking:timestamp,damaged:timestamp")
-            // Preserve existing damaged timestamp if present
-            let now_ms = Self::get_current_time_ms();
-            let existing_timestamps = self
-                .npc_state_timestamps
-                .get(&ulid_bytes)
-                .map(|v| v.value().clone())
-                .unwrap_or_default();
+        // Record timestamp for auto-clearing (format: "attacking:timestamp,damaged:timestamp")
+        // Preserve existing damaged timestamp if present
+        let now_ms = Self::get_current_time_ms();
+        let existing_timestamps = self
+            .npc_state_timestamps
+            .get(ulid_bytes)
+            .map(|v| v.value().clone())
+            .unwrap_or_default();
 
-            // Parse existing timestamps to preserve damaged timestamp
-            let mut damaged_part = String::new();
-            for part in existing_timestamps.split(',') {
-                if part.starts_with("damaged:") {
-                    damaged_part = format!(",{}", part);
-                    break;
-                }
+        // Parse existing timestamps to preserve damaged timestamp
+        let mut damaged_part = String::new();
+        for part in existing_timestamps.split(',') {
+            if part.starts_with("damaged:") {
+                damaged_part = format!(",{}", part);
+                break;
             }
-
-            let new_timestamps = format!("attacking:{}{}", now_ms, damaged_part);
-            self.npc_state_timestamps
-                .insert(*&ulid_bytes, new_timestamps);
-
-            godot_print!(
-                "[ATTACK STATE] NPC {} - Setting ATTACKING flag (old_state={}, new_state={})",
-                &ulid[0..8.min(ulid.len())],
-                current,
-                new_state
-            );
         }
+
+        let new_timestamps = format!("attacking:{}{}", now_ms, damaged_part);
+        self.npc_state_timestamps
+            .insert(*ulid_bytes, new_timestamps);
+
+        let ulid_hex = bytes_to_hex(ulid_bytes);
+        godot_print!(
+            "[ATTACK STATE] NPC {} - Setting ATTACKING flag (old_state={}, new_state={})",
+            &ulid_hex[0..8.min(ulid_hex.len())],
+            current,
+            new_state
+        );
     }
 
     /// Add DAMAGED state flag (set when taking damage)
-    fn add_damaged_state(&self, ulid: &str) {
-        if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            let current = if let Some(state_str) = self
-                .npc_behavioral_state
-                .get(&ulid_bytes)
-                .map(|v| v.value().clone())
-            {
-                state_str.parse::<i32>().unwrap_or(0)
-            } else {
-                0
-            };
-            let new_state = current | NPCState::DAMAGED.bits() as i32;
-            self.npc_behavioral_state
-                .insert(*&ulid_bytes, new_state.to_string());
+    /// Takes ULID as bytes for zero-copy performance
+    fn add_damaged_state(&self, ulid_bytes: &[u8; 16]) {
+        let current = if let Some(state_str) = self
+            .npc_behavioral_state
+            .get(ulid_bytes)
+            .map(|v| v.value().clone())
+        {
+            state_str.parse::<i32>().unwrap_or(0)
+        } else {
+            0
+        };
+        // Add DAMAGED and remove IDLE (can't be idle while damaged)
+        let mut new_state = current | NPCState::DAMAGED.bits() as i32;
+        new_state &= !(NPCState::IDLE.bits() as i32);
+        self.npc_behavioral_state
+            .insert(*ulid_bytes, new_state.to_string());
 
-            // Record timestamp for auto-clearing (format: "attacking:timestamp,damaged:timestamp")
-            // Preserve existing attacking timestamp if present
-            let now_ms = Self::get_current_time_ms();
-            let existing_timestamps = self
-                .npc_state_timestamps
-                .get(&ulid_bytes)
-                .map(|v| v.value().clone())
-                .unwrap_or_default();
+        // Record timestamp for auto-clearing (format: "attacking:timestamp,damaged:timestamp")
+        // Preserve existing attacking timestamp if present
+        let now_ms = Self::get_current_time_ms();
+        let existing_timestamps = self
+            .npc_state_timestamps
+            .get(ulid_bytes)
+            .map(|v| v.value().clone())
+            .unwrap_or_default();
 
-            // Parse existing timestamps to preserve attacking timestamp
-            let mut attacking_part = String::new();
-            for part in existing_timestamps.split(',') {
-                if part.starts_with("attacking:") {
-                    attacking_part = format!("{},", part);
-                    break;
-                }
+        // Parse existing timestamps to preserve attacking timestamp
+        let mut attacking_part = String::new();
+        for part in existing_timestamps.split(',') {
+            if part.starts_with("attacking:") {
+                attacking_part = format!("{},", part);
+                break;
             }
-
-            let new_timestamps = format!("{}damaged:{}", attacking_part, now_ms);
-            self.npc_state_timestamps
-                .insert(*&ulid_bytes, new_timestamps);
-
-            godot_print!(
-                "[DAMAGED STATE] NPC {} - Setting DAMAGED flag (old_state={}, new_state={})",
-                &ulid[0..8.min(ulid.len())],
-                current,
-                new_state
-            );
         }
+
+        let new_timestamps = format!("{}damaged:{}", attacking_part, now_ms);
+        self.npc_state_timestamps
+            .insert(*ulid_bytes, new_timestamps);
+
+        let ulid_hex = bytes_to_hex(ulid_bytes);
+        godot_print!(
+            "[DAMAGED STATE] NPC {} - Setting DAMAGED flag (old_state={}, new_state={})",
+            &ulid_hex[0..8.min(ulid_hex.len())],
+            current,
+            new_state
+        );
     }
 
     /// Remove ATTACKING state flag (called by GDScript after attack animation finishes)
-    pub fn remove_attacking_state(&self, ulid: &str) {
-        if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            let current = if let Some(state_str) = self
-                .npc_behavioral_state
-                .get(&ulid_bytes)
-                .map(|v| v.value().clone())
-            {
-                state_str.parse::<i32>().unwrap_or(0)
-            } else {
-                0
-            };
-            let new_state = current & !(NPCState::ATTACKING.bits() as i32);
-            self.npc_behavioral_state
-                .insert(*&ulid_bytes, new_state.to_string());
+    /// Takes ULID as bytes for zero-copy performance
+    pub fn remove_attacking_state(&self, ulid_bytes: &[u8; 16]) {
+        let current = if let Some(state_str) = self
+            .npc_behavioral_state
+            .get(ulid_bytes)
+            .map(|v| v.value().clone())
+        {
+            state_str.parse::<i32>().unwrap_or(0)
+        } else {
+            0
+        };
+        // Remove ATTACKING
+        let mut new_state = current & !(NPCState::ATTACKING.bits() as i32);
+
+        // Add IDLE back if not DAMAGED, DEAD, or in other active states
+        let is_damaged = (new_state & NPCState::DAMAGED.bits() as i32) != 0;
+        let is_dead = (new_state & NPCState::DEAD.bits() as i32) != 0;
+        let is_walking = (new_state & NPCState::WALKING.bits() as i32) != 0;
+
+        if !is_damaged && !is_dead && !is_walking {
+            new_state |= NPCState::IDLE.bits() as i32;
         }
+
+        self.npc_behavioral_state
+            .insert(*ulid_bytes, new_state.to_string());
     }
 
     /// Remove DAMAGED state flag (called by GDScript after hurt animation finishes)
-    pub fn remove_damaged_state(&self, ulid: &str) {
-        if let Ok(ulid_bytes) = hex_to_bytes(ulid) {
-            let current = if let Some(state_str) = self
-                .npc_behavioral_state
-                .get(&ulid_bytes)
-                .map(|v| v.value().clone())
-            {
-                state_str.parse::<i32>().unwrap_or(0)
-            } else {
-                0
-            };
-            let new_state = current & !(NPCState::DAMAGED.bits() as i32);
-            self.npc_behavioral_state
-                .insert(*&ulid_bytes, new_state.to_string());
+    /// Takes ULID as bytes for zero-copy performance
+    pub fn remove_damaged_state(&self, ulid_bytes: &[u8; 16]) {
+        let current = if let Some(state_str) = self
+            .npc_behavioral_state
+            .get(ulid_bytes)
+            .map(|v| v.value().clone())
+        {
+            state_str.parse::<i32>().unwrap_or(0)
+        } else {
+            0
+        };
+        // Remove DAMAGED
+        let mut new_state = current & !(NPCState::DAMAGED.bits() as i32);
+
+        // Add IDLE back if not ATTACKING, DEAD, or in other active states
+        let is_attacking = (new_state & NPCState::ATTACKING.bits() as i32) != 0;
+        let is_dead = (new_state & NPCState::DEAD.bits() as i32) != 0;
+        let is_walking = (new_state & NPCState::WALKING.bits() as i32) != 0;
+
+        if !is_attacking && !is_dead && !is_walking {
+            new_state |= NPCState::IDLE.bits() as i32;
         }
+
+        self.npc_behavioral_state
+            .insert(*ulid_bytes, new_state.to_string());
     }
 
     /// Set aggro target for an NPC (makes them prioritize attacking this target)
-    fn set_aggro_target(&self, npc_ulid: &str, target_ulid: &str) {
-        if let Ok(ulid_bytes) = hex_to_bytes(npc_ulid) {
-            self.npc_aggro_targets
-                .insert(*&ulid_bytes, target_ulid.to_string());
-            godot_print!(
-                "[AGGRO] NPC {} now targets {} (retaliation)",
-                &npc_ulid[0..8.min(npc_ulid.len())],
-                &target_ulid[0..8.min(target_ulid.len())]
-            );
-        }
+    /// Takes ULIDs as bytes for zero-copy performance
+    fn set_aggro_target(&self, npc_ulid_bytes: &[u8; 16], target_ulid_bytes: &[u8; 16]) {
+        let target_ulid_hex = bytes_to_hex(target_ulid_bytes);
+        self.npc_aggro_targets
+            .insert(*npc_ulid_bytes, target_ulid_hex.clone());
+
+        let npc_ulid_hex = bytes_to_hex(npc_ulid_bytes);
+        godot_print!(
+            "[AGGRO] NPC {} now targets {} (retaliation)",
+            &npc_ulid_hex[0..8.min(npc_ulid_hex.len())],
+            &target_ulid_hex[0..8.min(target_ulid_hex.len())]
+        );
     }
 
     /// Clear ATTACKING and DAMAGED states after animation duration
@@ -4039,16 +4065,18 @@ impl GodotNPCDataWarehouse {
     ) -> Array<GString> {
         use std::sync::atomic::Ordering;
 
-        let attacker_result = packed_bytes_to_hex(&attacker_ulid_bytes);
-        let target_result = packed_bytes_to_hex(&target_ulid_bytes);
-
-        if attacker_result.is_err() || target_result.is_err() {
-            godot_error!("[PROJECTILE] Invalid ULID bytes in projectile_hit");
+        // Convert PackedByteArray to [u8; 16]
+        if attacker_ulid_bytes.len() != 16 || target_ulid_bytes.len() != 16 {
+            godot_error!("[PROJECTILE] Invalid ULID bytes length in projectile_hit");
             return Array::new();
         }
 
-        let attacker_ulid = attacker_result.unwrap();
-        let target_ulid = target_result.unwrap();
+        let attacker_bytes: [u8; 16] = attacker_ulid_bytes.as_slice().try_into().unwrap();
+        let target_bytes: [u8; 16] = target_ulid_bytes.as_slice().try_into().unwrap();
+
+        // Convert to hex for legacy functions
+        let attacker_ulid = bytes_to_hex(&attacker_bytes);
+        let target_ulid = bytes_to_hex(&target_bytes);
 
         // Validate target is alive
         let target_hp = self
@@ -4098,8 +4126,8 @@ impl GodotNPCDataWarehouse {
                 target_y,
             }
         } else {
-            // Set DAMAGED state on target
-            self.warehouse.add_damaged_state(&target_ulid);
+            // Set DAMAGED state on target (use bytes)
+            self.warehouse.add_damaged_state(&target_bytes);
 
             CombatEvent {
                 event_type: "damage".to_string(),
@@ -4199,16 +4227,17 @@ impl GodotNPCDataWarehouse {
     /// Usage: NPCDataWarehouse.clear_attacking_state(ulid_bytes)
     #[func]
     pub fn clear_attacking_state(&self, ulid_bytes: PackedByteArray) {
-        match packed_bytes_to_hex(&ulid_bytes) {
-            Ok(ulid_hex) => {
-                self.warehouse.remove_attacking_state(&ulid_hex);
+        if ulid_bytes.len() == 16 {
+            if let Ok(ulid_array) = TryInto::<[u8; 16]>::try_into(ulid_bytes.as_slice()) {
+                self.warehouse.remove_attacking_state(&ulid_array);
+            } else {
+                godot_error!("[COMBAT ERROR] Failed to convert PackedByteArray to [u8; 16]");
             }
-            Err(e) => {
-                godot_error!(
-                    "[COMBAT ERROR] Invalid ULID bytes for clear_attacking_state: {}",
-                    e
-                );
-            }
+        } else {
+            godot_error!(
+                "[COMBAT ERROR] Invalid ULID bytes length for clear_attacking_state: {} (expected 16)",
+                ulid_bytes.len()
+            );
         }
     }
 
@@ -4217,16 +4246,17 @@ impl GodotNPCDataWarehouse {
     /// Usage: NPCDataWarehouse.clear_damaged_state(ulid_bytes)
     #[func]
     pub fn clear_damaged_state(&self, ulid_bytes: PackedByteArray) {
-        match packed_bytes_to_hex(&ulid_bytes) {
-            Ok(ulid_hex) => {
-                self.warehouse.remove_damaged_state(&ulid_hex);
+        if ulid_bytes.len() == 16 {
+            if let Ok(ulid_array) = TryInto::<[u8; 16]>::try_into(ulid_bytes.as_slice()) {
+                self.warehouse.remove_damaged_state(&ulid_array);
+            } else {
+                godot_error!("[COMBAT ERROR] Failed to convert PackedByteArray to [u8; 16]");
             }
-            Err(e) => {
-                godot_error!(
-                    "[COMBAT ERROR] Invalid ULID bytes for clear_damaged_state: {}",
-                    e
-                );
-            }
+        } else {
+            godot_error!(
+                "[COMBAT ERROR] Invalid ULID bytes length for clear_damaged_state: {} (expected 16)",
+                ulid_bytes.len()
+            );
         }
     }
 
