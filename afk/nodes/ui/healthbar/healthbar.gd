@@ -24,6 +24,10 @@ var floating_damage_text_scene: PackedScene = preload("res://nodes/ui/floating_d
 static var damage_text_pool: Array = []
 static var damage_text_pool_size: int = 10  # Pre-allocate 10 damage texts
 
+## Floating healing text pool (static, shared across all healthbars)
+static var healing_text_pool: Array = []
+static var healing_text_pool_size: int = 10  # Pre-allocate 10 healing texts
+
 ## Health state
 var current_hp: float = 100.0
 var max_hp: float = 100.0
@@ -33,8 +37,13 @@ var health_percent: float = 1.0
 var tracked_entity: Node2D = null
 
 ## Node references
+var border_rect: ColorRect = null
 var background_rect: ColorRect = null
 var health_rect: ColorRect = null
+
+## Border styling (golden border like chat UI)
+var border_color: Color = Color(0.8, 0.6, 0.2, 1.0)  # Golden color
+var border_width: float = 1.0
 
 
 func _ready() -> void:
@@ -42,14 +51,25 @@ func _ready() -> void:
 	if damage_text_pool.is_empty():
 		_initialize_damage_text_pool()
 
-	# Create background rectangle
+	# Initialize healing text pool on first healthbar creation (static, shared)
+	if healing_text_pool.is_empty():
+		_initialize_healing_text_pool()
+
+	# Create golden border rectangle (outermost)
+	border_rect = ColorRect.new()
+	border_rect.color = border_color
+	border_rect.size = Vector2(bar_width + border_width * 2, bar_height + border_width * 2)
+	border_rect.position = Vector2(-bar_width / 2.0 - border_width, -border_width)
+	add_child(border_rect)
+
+	# Create background rectangle (inner, sits on top of border)
 	background_rect = ColorRect.new()
 	background_rect.color = background_color
 	background_rect.size = Vector2(bar_width, bar_height)
 	background_rect.position = Vector2(-bar_width / 2.0, 0)  # Center horizontally
 	add_child(background_rect)
 
-	# Create health fill rectangle
+	# Create health fill rectangle (topmost)
 	health_rect = ColorRect.new()
 	health_rect.color = health_color
 	health_rect.size = Vector2(bar_width, bar_height)
@@ -125,6 +145,16 @@ func _on_entity_damage_taken(amount: float, current: float, maximum: float) -> v
 	_spawn_floating_damage_text(int(amount))
 
 
+## Called when tracked entity is healed
+func _on_entity_healed(amount: float, current: float, maximum: float) -> void:
+	current_hp = current
+	max_hp = maximum
+	_update_health_display()
+
+	# Spawn floating healing text (green) above the entity
+	_spawn_floating_healing_text(int(amount))
+
+
 ## Update the visual health bar
 func _update_health_display() -> void:
 	if not health_rect or not background_rect:
@@ -153,6 +183,17 @@ func _initialize_damage_text_pool() -> void:
 		var damage_text = floating_damage_text_scene.instantiate()
 		damage_text.visible = false
 		damage_text_pool.append(damage_text)
+
+
+## Initialize the static healing text pool (called once by first healthbar)
+func _initialize_healing_text_pool() -> void:
+	# Pre-allocate healing text instances (green color, + prefix)
+	for i in range(healing_text_pool_size):
+		var healing_text = floating_damage_text_scene.instantiate()
+		healing_text.visible = false
+		# Mark this as a healing text so it can use green color
+		healing_text.set_meta("is_healing", true)
+		healing_text_pool.append(healing_text)
 
 
 ## Get an available damage text from the pool
@@ -185,12 +226,53 @@ func _spawn_floating_damage_text(damage_amount: int) -> void:
 			# Fallback: add to scene tree root
 			get_tree().root.add_child(damage_text)
 
-	# Position just above the healthbar using the healthbar's own global position
-	# Spawn text 10 pixels above the top of the healthbar
-	var text_position = global_position + Vector2(0, -10)
+	# Position just above the healthbar using LOCAL position (same as healthbar positioning)
+	# Both healthbar and damage text are in Layer4, so use local coords
+	# Spawn text 10 pixels above the healthbar
+	var text_position = tracked_entity.position + Vector2(0, y_offset - 10)
 
 	# Setup and start the animation (this will make it visible)
 	damage_text.setup(damage_amount, text_position)
+
+
+## Get an available healing text from the pool
+func _get_healing_text_from_pool() -> Node:
+	# Find first inactive healing text
+	for healing_text in healing_text_pool:
+		if is_instance_valid(healing_text) and not healing_text.visible:
+			return healing_text
+
+	# All busy - create a new one and add to pool
+	var new_healing_text = floating_damage_text_scene.instantiate()
+	new_healing_text.set_meta("is_healing", true)
+	healing_text_pool.append(new_healing_text)
+	return new_healing_text
+
+
+## Spawn floating healing text above the tracked entity (using pool)
+func _spawn_floating_healing_text(heal_amount: int) -> void:
+	if not tracked_entity or not is_instance_valid(tracked_entity):
+		return
+
+	# Get healing text from pool
+	var healing_text = _get_healing_text_from_pool()
+
+	# Add to parent if not already in scene tree
+	if not healing_text.is_inside_tree():
+		var parent = get_parent()
+		if parent:
+			parent.add_child(healing_text)
+		else:
+			# Fallback: add to scene tree root
+			get_tree().root.add_child(healing_text)
+
+	# Position just above the healthbar using LOCAL position (same as healthbar positioning)
+	# Both healthbar and healing text are in Layer4, so use local coords
+	# Spawn text 10 pixels above the healthbar
+	var text_position = tracked_entity.position + Vector2(0, y_offset - 10)
+
+	# Setup and start the animation with positive number (will show as +N in green)
+	healing_text.setup(heal_amount, text_position)
 
 
 ## Cleanup when healthbar is freed

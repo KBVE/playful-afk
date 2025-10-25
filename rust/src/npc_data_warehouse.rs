@@ -54,6 +54,8 @@ pub struct NPCCombatStats {
     pub max_mana: f32,
     pub energy: f32,
     pub max_energy: f32,
+    pub hunger: f32,
+    pub max_hunger: f32,
 }
 
 /// Rust-controlled NPC instance with direct scene node access
@@ -162,6 +164,8 @@ impl RustNPC {
                 max_mana: 50.0,
                 energy: 100.0,
                 max_energy: 100.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
             "archer" => NPCCombatStats {
                 hp: 150.0,
@@ -174,6 +178,8 @@ impl RustNPC {
                 max_mana: 30.0,
                 energy: 120.0,
                 max_energy: 120.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
 
             // Monsters
@@ -189,6 +195,8 @@ impl RustNPC {
                 max_mana: 0.0,
                 energy: 80.0,
                 max_energy: 80.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
             "skeleton" => NPCCombatStats {
                 hp: 120.0,
@@ -202,6 +210,8 @@ impl RustNPC {
                 max_mana: 0.0,
                 energy: 70.0,
                 max_energy: 70.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
             "mushroom" => NPCCombatStats {
                 hp: 80.0,
@@ -215,6 +225,8 @@ impl RustNPC {
                 max_mana: 20.0,
                 energy: 60.0,
                 max_energy: 60.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
             "eyebeast" => NPCCombatStats {
                 hp: 150.0,
@@ -228,6 +240,8 @@ impl RustNPC {
                 max_mana: 100.0,
                 energy: 90.0,
                 max_energy: 90.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
 
             // Passive
@@ -242,6 +256,8 @@ impl RustNPC {
                 max_mana: 0.0,
                 energy: 50.0,
                 max_energy: 50.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
             "cat" => NPCCombatStats {
                 hp: 100.0,
@@ -254,6 +270,8 @@ impl RustNPC {
                 max_mana: 0.0,
                 energy: 80.0,
                 max_energy: 80.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
 
             // Default to basic stats if unknown type
@@ -268,6 +286,8 @@ impl RustNPC {
                 max_mana: 0.0,
                 energy: 100.0,
                 max_energy: 100.0,
+                hunger: 100.0,
+                max_hunger: 100.0,
             },
         }
     }
@@ -1537,6 +1557,8 @@ impl NPCDataWarehouse {
             max_mana: 0.0,
             energy: 100.0, // Default full energy
             max_energy: 100.0,
+            hunger: 100.0, // Default full hunger
+            max_hunger: 100.0,
         };
         self.npc_combat_stats
             .insert(*ulid, serde_json::to_string(&combat_stats).unwrap());
@@ -3098,6 +3120,47 @@ impl NPCDataWarehouse {
         0.0
     }
 
+    /// Apply healing to target, return new HP
+    /// Increases HP without exceeding max_hp
+    /// Also increases hunger and energy (hidden stats)
+    fn apply_healing(&self, target_ulid: &str, heal_amount: f32, hunger_gain: f32, energy_gain: f32) -> f32 {
+        // Convert hex to bytes (legacy interface, should be refactored to take bytes)
+        if let Ok(ulid_bytes) = hex_to_bytes(target_ulid) {
+            // Get current combat stats
+            if let Some(stats_json) = self
+                .npc_combat_stats
+                .get(&ulid_bytes)
+                .map(|v| v.value().clone())
+            {
+                if let Ok(mut combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                    let old_hp = combat_stats.hp;
+                    let max_hp = combat_stats.max_hp;
+
+                    // Apply healing (cap at max_hp)
+                    combat_stats.hp = (combat_stats.hp + heal_amount).min(max_hp);
+                    let new_hp = combat_stats.hp;
+
+                    // Apply hunger and energy gains (cap at max values)
+                    combat_stats.energy = (combat_stats.energy + energy_gain).min(combat_stats.max_energy);
+                    combat_stats.hunger = (combat_stats.hunger + hunger_gain).min(combat_stats.max_hunger);
+
+                    // Store updated stats
+                    if let Ok(updated_json) = serde_json::to_string(&combat_stats) {
+                        self.npc_combat_stats.insert(*&ulid_bytes, updated_json);
+                    }
+
+                    // Update healthbar with healing (use negative damage to indicate healing)
+                    self.update_healthbar_healing(&ulid_bytes, heal_amount, new_hp, max_hp);
+
+                    return combat_stats.hp;
+                }
+            }
+        }
+
+        // Fallback if ULID not found
+        0.0
+    }
+
     /// Update the healthbar for an NPC when they take damage
     fn update_healthbar_hp(&self, ulid: &[u8; 16], damage: f32, current_hp: f32, max_hp: f32) {
         // Get the healthbar assigned to this NPC
@@ -3114,6 +3177,29 @@ impl NPCDataWarehouse {
                     "_on_entity_damage_taken",
                     &[
                         damage.to_variant(),
+                        current_hp.to_variant(),
+                        max_hp.to_variant(),
+                    ],
+                );
+            }
+        }
+    }
+
+    /// Update the healthbar for an NPC when they are healed
+    fn update_healthbar_healing(&self, ulid: &[u8; 16], heal_amount: f32, current_hp: f32, max_hp: f32) {
+        // Get the healthbar assigned to this NPC
+        if let Some(pool_index_ref) = self.healthbar_assignments.get(ulid) {
+            let pool_index = *pool_index_ref.value();
+
+            // Get the healthbar from the pool
+            if let Some(healthbar_ref) = self.healthbar_pool.get(&pool_index) {
+                let mut healthbar = healthbar_ref.value().clone();
+
+                // Call _on_entity_healed to update health AND spawn green healing text
+                let _ = healthbar.call(
+                    "_on_entity_healed",
+                    &[
+                        heal_amount.to_variant(),
                         current_hp.to_variant(),
                         max_hp.to_variant(),
                     ],
@@ -4369,6 +4455,31 @@ impl GodotNPCDataWarehouse {
         let json = serde_json::to_string(&event).unwrap_or_default();
         godot_array.push(&GString::from(&json));
         godot_array
+    }
+
+    /// Apply healing to an NPC
+    /// target_ulid_bytes: ULID of NPC to heal
+    /// heal_amount: Amount of HP to restore
+    /// hunger_gain: Hunger increase (hidden stat)
+    /// energy_gain: Energy increase (hidden stat)
+    /// Returns: New HP value
+    #[func]
+    pub fn apply_healing(
+        &self,
+        target_ulid_bytes: PackedByteArray,
+        heal_amount: f32,
+        hunger_gain: f32,
+        energy_gain: f32,
+    ) -> f32 {
+        if target_ulid_bytes.len() != 16 {
+            godot_error!("[HEALING] Invalid ULID bytes length");
+            return 0.0;
+        }
+
+        let target_bytes: [u8; 16] = target_ulid_bytes.as_slice().try_into().unwrap();
+        let target_ulid = bytes_to_hex(&target_bytes);
+
+        self.warehouse.apply_healing(&target_ulid, heal_amount, hunger_gain, energy_gain)
     }
 
     /// Get NPCStaticState constant value by name (combat types + factions)
