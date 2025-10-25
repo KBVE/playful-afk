@@ -1,11 +1,11 @@
 use bitflags::bitflags;
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
-use godot::classes::{AnimatedSprite2D, Node2D, PackedScene};
+use godot::classes::{AnimatedSprite2D, Control, Node2D, PackedScene};
 use godot::prelude::*;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -749,6 +749,20 @@ pub struct NPCDataWarehouse {
     scene_container: RwLock<Option<Gd<Node2D>>>,
 
     // ============================================================================
+    // HEALTHBAR POOL SYSTEM - Managed by Rust alongside NPC pools
+    // ============================================================================
+    /// Inactive healthbars (in pool, ready to be assigned)
+    /// These are pre-instantiated HealthBar nodes that get connected/disconnected from NPCs
+    healthbar_pool: DashMap<usize, Gd<Node>>, // Pool index -> HealthBar node
+
+    /// Active healthbar assignments (ULID bytes -> pool index)
+    /// Tracks which healthbar is assigned to which NPC
+    healthbar_assignments: DashMap<[u8; 16], usize>,
+
+    /// Next available healthbar pool index (atomic for thread safety)
+    healthbar_pool_size: Arc<AtomicUsize>,
+
+    // ============================================================================
     // BYTE-KEYED STORAGE - ByteMap now uses DashMap internally for strong consistency
     // ============================================================================
     /// NPC positions (ULID bytes -> "x,y")
@@ -828,6 +842,11 @@ impl NPCDataWarehouse {
             inactive_npc_pool: DashMap::new(),
             scene_cache: DashMap::new(),
             scene_container: RwLock::new(None), // Will be set by GDScript via set_scene_container()
+
+            // Initialize healthbar pool system
+            healthbar_pool: DashMap::new(),
+            healthbar_assignments: DashMap::new(),
+            healthbar_pool_size: Arc::new(AtomicUsize::new(0)),
 
             // Initialize DashMap storage directly (no wrappers)
             npc_positions: DashMap::new(),
@@ -966,6 +985,10 @@ impl NPCDataWarehouse {
     pub fn set_scene_container(&self, container: Gd<Node2D>) {
         godot_print!("[RUST POOL] Setting scene container");
         *self.scene_container.write() = Some(container);
+
+        // Auto-initialize healthbar pool now that we have a container
+        godot_print!("[RUST POOL] Auto-initializing healthbar pool...");
+        self.initialize_healthbar_pool(50, "res://nodes/ui/healthbar/healthbar.tscn");
     }
 
     /// Spawn an NPC from the inactive pool
@@ -1062,6 +1085,16 @@ impl NPCDataWarehouse {
         // Move to active pool (use [u8; 16] directly as key)
         self.active_npc_pool.insert(ulid, npc);
 
+        // Get and assign a healthbar from the pool
+        if let Some((mut healthbar, _index)) = self.get_healthbar_for_npc(&ulid) {
+            // Call connect_to_entity on the healthbar to attach it to the NPC
+            // Pass the NPC node as a Variant
+            if let Some(active_npc) = self.active_npc_pool.get(&ulid) {
+                let npc_variant = active_npc.node.to_variant();
+                let _ = healthbar.call("connect_to_entity", &[npc_variant]);
+            }
+        }
+
         // Log spawn with first 8 bytes in hex and static_state
         let ulid_hex_short = format!(
             "{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
@@ -1084,6 +1117,21 @@ impl NPCDataWarehouse {
 
     /// Despawn an NPC and return it to the inactive pool
     pub fn rust_despawn_npc(&self, ulid: &[u8]) -> bool {
+        // Convert ulid slice to array for ByteMap access
+        let ulid_array: [u8; 16] = if ulid.len() == 16 {
+            ulid.try_into().unwrap_or([0u8; 16])
+        } else {
+            [0u8; 16]
+        };
+
+        // Return healthbar to pool BEFORE removing NPC
+        if let Some((_, pool_index)) = self.healthbar_assignments.remove(&ulid_array) {
+            // Get the healthbar and disconnect it from the NPC
+            if let Some(mut healthbar) = self.healthbar_pool.get(&pool_index).map(|e| e.value().clone()) {
+                let _ = healthbar.call("disconnect_from_entity", &[]);
+            }
+        }
+
         // Remove from active pool
         let mut npc = match self.active_npc_pool.remove(ulid) {
             Some((_, npc)) => npc,
@@ -1105,13 +1153,6 @@ impl NPCDataWarehouse {
                 container.remove_child(&npc.node);
             }
         }
-
-        // Convert ulid slice to array for ByteMap access
-        let ulid_array: [u8; 16] = if ulid.len() == 16 {
-            ulid.try_into().unwrap_or([0u8; 16])
-        } else {
-            [0u8; 16]
-        };
 
         // Reset NPC stats in ByteMaps (HP back to max, remove DEAD state)
         // Get current combat stats and reset HP to max
@@ -1167,6 +1208,120 @@ impl NPCDataWarehouse {
             );
             false
         }
+    }
+
+    // ============================================================================
+    // HEALTHBAR POOL MANAGEMENT
+    // ============================================================================
+
+    /// Initialize the healthbar pool by loading and instantiating the packed scene
+    /// Similar to how NPC pools work - load scene once, instantiate multiple times
+    pub fn initialize_healthbar_pool(&self, pool_size: usize, scene_path: &str) {
+        godot_print!("[RUST HEALTHBAR] Initializing healthbar pool: size={}, scene={}", pool_size, scene_path);
+
+        // Load the healthbar scene
+        let scene: Gd<PackedScene> = match try_load::<PackedScene>(scene_path) {
+            Ok(scene) => scene,
+            Err(err) => {
+                godot_error!("[RUST HEALTHBAR] Failed to load healthbar scene: {} - {:?}", scene_path, err);
+                return;
+            }
+        };
+
+        // Get the foreground container (scene parent)
+        let container_opt = {
+            let container_guard = self.scene_container.read();
+            container_guard.clone()
+        };
+
+        if container_opt.is_none() {
+            godot_error!("[RUST HEALTHBAR] Cannot initialize healthbar pool - scene container not set!");
+            return;
+        }
+
+        let mut container = container_opt.unwrap();
+
+        // Instantiate healthbars and add to pool
+        for _i in 0..pool_size {
+            let healthbar = scene.instantiate_as::<Node>();
+
+            // Add to scene tree
+            container.add_child(&healthbar);
+
+            // Configure healthbar (clone to avoid move)
+            if let Ok(mut control_healthbar) = healthbar.clone().try_cast::<Control>() {
+                control_healthbar.set_visible(false); // Hide until assigned
+                control_healthbar.set_z_index(100);   // Render above NPCs
+            }
+
+            // Add to pool
+            let index = self.healthbar_pool_size.fetch_add(1, Ordering::Relaxed);
+            self.healthbar_pool.insert(index, healthbar);
+        }
+
+        godot_print!("[RUST HEALTHBAR] Initialized {} healthbars in pool", pool_size);
+    }
+
+    /// Get an available healthbar from the pool and assign it to an NPC
+    /// Returns the healthbar node and its pool index, or None if pool is empty
+    pub fn get_healthbar_for_npc(&self, ulid: &[u8; 16]) -> Option<(Gd<Node>, usize)> {
+        // Find first healthbar not currently assigned
+        for entry in self.healthbar_pool.iter() {
+            let index = *entry.key();
+
+            // Check if this healthbar is already assigned
+            let is_assigned = self.healthbar_assignments.iter().any(|a| *a.value() == index);
+
+            if !is_assigned {
+                let healthbar = entry.value().clone();
+                // Assign this healthbar to the NPC
+                self.healthbar_assignments.insert(*ulid, index);
+                godot_print!(
+                    "[RUST HEALTHBAR] Assigned healthbar {} to NPC {:02x}{:02x}{:02x}{:02x}",
+                    index,
+                    ulid[0], ulid[1], ulid[2], ulid[3]
+                );
+                return Some((healthbar, index));
+            }
+        }
+
+        godot_warn!("[RUST HEALTHBAR] No available healthbars in pool!");
+        None
+    }
+
+    /// Return a healthbar to the pool when NPC is despawned
+    pub fn return_healthbar(&self, ulid: &[u8; 16]) -> bool {
+        if let Some((_, pool_index)) = self.healthbar_assignments.remove(ulid) {
+            // Hide the healthbar when returning to pool
+            if let Some(healthbar) = self.healthbar_pool.get(&pool_index) {
+                if let Ok(mut control_healthbar) = healthbar.value().clone().try_cast::<Control>() {
+                    control_healthbar.set_visible(false);
+                }
+            }
+
+            godot_print!(
+                "[RUST HEALTHBAR] Returned healthbar {} to pool from NPC {:02x}{:02x}{:02x}{:02x}",
+                pool_index,
+                ulid[0], ulid[1], ulid[2], ulid[3]
+            );
+            true
+        } else {
+            godot_warn!(
+                "[RUST HEALTHBAR] No healthbar assigned to NPC {:02x}{:02x}{:02x}{:02x}",
+                ulid[0], ulid[1], ulid[2], ulid[3]
+            );
+            false
+        }
+    }
+
+    /// Get the number of healthbars in the pool
+    pub fn healthbar_pool_count(&self) -> usize {
+        self.healthbar_pool.len()
+    }
+
+    /// Get the number of active healthbar assignments
+    pub fn active_healthbar_count(&self) -> usize {
+        self.healthbar_assignments.len()
     }
 
     /// Register NPC for combat using pre-extracted combat stats
@@ -2919,13 +3074,20 @@ impl NPCDataWarehouse {
                 .map(|v| v.value().clone())
             {
                 if let Ok(mut combat_stats) = serde_json::from_str::<NPCCombatStats>(&stats_json) {
+                    let old_hp = combat_stats.hp;
+                    let max_hp = combat_stats.max_hp;
+
                     // Apply damage
                     combat_stats.hp = (combat_stats.hp - damage).max(0.0);
+                    let new_hp = combat_stats.hp;
 
                     // Store updated stats
                     if let Ok(updated_json) = serde_json::to_string(&combat_stats) {
                         self.npc_combat_stats.insert(*&ulid_bytes, updated_json);
                     }
+
+                    // Update healthbar if one is assigned to this NPC
+                    self.update_healthbar_hp(&ulid_bytes, damage, new_hp, max_hp);
 
                     return combat_stats.hp;
                 }
@@ -2934,6 +3096,30 @@ impl NPCDataWarehouse {
 
         // Fallback if ULID not found
         0.0
+    }
+
+    /// Update the healthbar for an NPC when they take damage
+    fn update_healthbar_hp(&self, ulid: &[u8; 16], damage: f32, current_hp: f32, max_hp: f32) {
+        // Get the healthbar assigned to this NPC
+        if let Some(pool_index_ref) = self.healthbar_assignments.get(ulid) {
+            let pool_index = *pool_index_ref.value();
+
+            // Get the healthbar from the pool
+            if let Some(healthbar_ref) = self.healthbar_pool.get(&pool_index) {
+                let mut healthbar = healthbar_ref.value().clone();
+
+                // Call _on_entity_damage_taken directly to update health AND spawn damage text
+                // This mimics what the signal would do
+                let _ = healthbar.call(
+                    "_on_entity_damage_taken",
+                    &[
+                        damage.to_variant(),
+                        current_hp.to_variant(),
+                        max_hp.to_variant(),
+                    ],
+                );
+            }
+        }
     }
 
     /// Cleanup dead NPCs that have finished their death animation
@@ -3100,6 +3286,7 @@ impl NPCDataWarehouse {
         let mut new_state = current & !(NPCState::ATTACKING.bits() as i32);
 
         // Add IDLE back if not DAMAGED, DEAD, or in other active states
+        // Note: IDLE | COMBAT is valid - it means "in combat stance but waiting between attacks"
         let is_damaged = (new_state & NPCState::DAMAGED.bits() as i32) != 0;
         let is_dead = (new_state & NPCState::DEAD.bits() as i32) != 0;
         let is_walking = (new_state & NPCState::WALKING.bits() as i32) != 0;
@@ -3128,6 +3315,7 @@ impl NPCDataWarehouse {
         let mut new_state = current & !(NPCState::DAMAGED.bits() as i32);
 
         // Add IDLE back if not ATTACKING, DEAD, or in other active states
+        // Note: IDLE | COMBAT is valid - it means "in combat stance but waiting between attacks"
         let is_attacking = (new_state & NPCState::ATTACKING.bits() as i32) != 0;
         let is_dead = (new_state & NPCState::DEAD.bits() as i32) != 0;
         let is_walking = (new_state & NPCState::WALKING.bits() as i32) != 0;
@@ -3204,13 +3392,20 @@ impl NPCDataWarehouse {
                             let mut remaining_timestamps = Vec::new();
 
                             if should_clear_attacking {
-                                new_state &= !(NPCState::ATTACKING.bits() as i32);
+                                // Use the proper remove function that also adds IDLE back if needed
+                                self.remove_attacking_state(ulid_bytes);
                                 let ulid_hex = bytes_to_hex(ulid_bytes);
                                 godot_print!(
                                     "[ANIM CLEAR] NPC {} - Clearing ATTACKING flag after {}ms",
                                     &ulid_hex[0..8.min(ulid_hex.len())],
                                     ATTACK_ANIM_DURATION_MS
                                 );
+                                // Note: state already updated by remove_attacking_state
+                                new_state = self.npc_behavioral_state
+                                    .get(ulid_bytes)
+                                    .map(|v| v.value().clone())
+                                    .and_then(|s| s.parse::<i32>().ok())
+                                    .unwrap_or(new_state);
                             } else {
                                 // Keep attacking timestamp if not expired
                                 for part in timestamp_str.split(',') {
@@ -3221,13 +3416,20 @@ impl NPCDataWarehouse {
                             }
 
                             if should_clear_damaged {
-                                new_state &= !(NPCState::DAMAGED.bits() as i32);
+                                // Use the proper remove function that also adds IDLE back if needed
+                                self.remove_damaged_state(ulid_bytes);
                                 let ulid_hex = bytes_to_hex(ulid_bytes);
                                 godot_print!(
                                     "[ANIM CLEAR] NPC {} - Clearing DAMAGED flag after {}ms",
                                     &ulid_hex[0..8.min(ulid_hex.len())],
                                     DAMAGED_ANIM_DURATION_MS
                                 );
+                                // Note: state already updated by remove_damaged_state
+                                new_state = self.npc_behavioral_state
+                                    .get(ulid_bytes)
+                                    .map(|v| v.value().clone())
+                                    .and_then(|s| s.parse::<i32>().ok())
+                                    .unwrap_or(new_state);
                             } else {
                                 // Keep damaged timestamp if not expired
                                 for part in timestamp_str.split(',') {
@@ -3237,9 +3439,8 @@ impl NPCDataWarehouse {
                                 }
                             }
 
-                            // Update state
-                            self.npc_behavioral_state
-                                .insert(*ulid_bytes, new_state.to_string());
+                            // State already updated by remove_attacking_state/remove_damaged_state
+                            // No need to update again here
 
                             // Update or remove timestamp based on remaining timestamps
                             if remaining_timestamps.is_empty() {
@@ -3676,6 +3877,28 @@ impl GodotNPCDataWarehouse {
     pub fn rust_despawn_npc(&self, ulid: PackedByteArray) -> bool {
         let ulid_slice = ulid.as_slice();
         self.warehouse.rust_despawn_npc(ulid_slice)
+    }
+
+    // ===== Healthbar Pool System Methods =====
+
+    /// Initialize the healthbar pool by instantiating packed scenes in Rust
+    /// pool_size: Number of healthbars to pre-allocate
+    /// scene_path: Path to the healthbar.tscn file
+    #[func]
+    pub fn initialize_healthbar_pool(&self, pool_size: i32, scene_path: GString) {
+        self.warehouse.initialize_healthbar_pool(pool_size as usize, &scene_path.to_string());
+    }
+
+    /// Get the number of healthbars in the pool
+    #[func]
+    pub fn healthbar_pool_count(&self) -> i64 {
+        self.warehouse.healthbar_pool_count() as i64
+    }
+
+    /// Get the number of active healthbar assignments
+    #[func]
+    pub fn active_healthbar_count(&self) -> i64 {
+        self.warehouse.active_healthbar_count() as i64
     }
 
     /// Get NPC name by ULID bytes

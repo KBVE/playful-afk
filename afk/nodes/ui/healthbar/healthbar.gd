@@ -4,6 +4,7 @@ class_name HealthBar
 ## Mini HealthBar - Reusable health display for NPCs and Monsters
 ## Shows a small rectangle that fills based on current/max HP
 ## Automatically connects to NPC/Monster damage_taken signals
+## Also spawns floating damage text when damage is taken
 
 ## Visual configuration
 @export var bar_width: float = 40.0
@@ -15,6 +16,13 @@ class_name HealthBar
 
 ## Offset from parent NPC (centered above sprite)
 @export var y_offset: float = -40.0  # Above the NPC
+
+## Floating damage text scene
+var floating_damage_text_scene: PackedScene = preload("res://nodes/ui/floating_damage_text.tscn")
+
+## Floating damage text pool (static, shared across all healthbars)
+static var damage_text_pool: Array = []
+static var damage_text_pool_size: int = 10  # Pre-allocate 10 damage texts
 
 ## Health state
 var current_hp: float = 100.0
@@ -30,6 +38,10 @@ var health_rect: ColorRect = null
 
 
 func _ready() -> void:
+	# Initialize damage text pool on first healthbar creation (static, shared)
+	if damage_text_pool.is_empty():
+		_initialize_damage_text_pool()
+
 	# Create background rectangle
 	background_rect = ColorRect.new()
 	background_rect.color = background_color
@@ -104,10 +116,13 @@ func set_health(current: float, maximum: float) -> void:
 
 
 ## Called when tracked entity takes damage
-func _on_entity_damage_taken(_amount: float, current: float, maximum: float) -> void:
+func _on_entity_damage_taken(amount: float, current: float, maximum: float) -> void:
 	current_hp = current
 	max_hp = maximum
 	_update_health_display()
+
+	# Spawn floating damage text above the entity
+	_spawn_floating_damage_text(int(amount))
 
 
 ## Update the visual health bar
@@ -129,6 +144,53 @@ func _update_health_display() -> void:
 
 	# Hide healthbar if at full health (optional - can be configured)
 	# visible = health_percent < 1.0
+
+
+## Initialize the static damage text pool (called once by first healthbar)
+func _initialize_damage_text_pool() -> void:
+	# Pre-allocate damage text instances
+	for i in range(damage_text_pool_size):
+		var damage_text = floating_damage_text_scene.instantiate()
+		damage_text.visible = false
+		damage_text_pool.append(damage_text)
+
+
+## Get an available damage text from the pool
+func _get_damage_text_from_pool() -> Node:
+	# Find first inactive damage text
+	for damage_text in damage_text_pool:
+		if is_instance_valid(damage_text) and not damage_text.visible:
+			return damage_text
+
+	# All busy - create a new one and add to pool
+	var new_damage_text = floating_damage_text_scene.instantiate()
+	damage_text_pool.append(new_damage_text)
+	return new_damage_text
+
+
+## Spawn floating damage text above the tracked entity (using pool)
+func _spawn_floating_damage_text(damage_amount: int) -> void:
+	if not tracked_entity or not is_instance_valid(tracked_entity):
+		return
+
+	# Get damage text from pool
+	var damage_text = _get_damage_text_from_pool()
+
+	# Add to parent if not already in scene tree
+	if not damage_text.is_inside_tree():
+		var parent = get_parent()
+		if parent:
+			parent.add_child(damage_text)
+		else:
+			# Fallback: add to scene tree root
+			get_tree().root.add_child(damage_text)
+
+	# Position just above the healthbar using the healthbar's own global position
+	# Spawn text 10 pixels above the top of the healthbar
+	var text_position = global_position + Vector2(0, -10)
+
+	# Setup and start the animation (this will make it visible)
+	damage_text.setup(damage_amount, text_position)
 
 
 ## Cleanup when healthbar is freed

@@ -1,0 +1,10 @@
+[gd_scene load_steps=2 format=3 uid="uid://b8n7qxm3ykr1k"]
+
+[ext_resource type="Script" path="res://nodes/ui/floating_damage_text.gd" id="1_floating_damage"]
+
+[node name="FloatingDamageText" type="Label"]
+z_index = 100
+offset_right = 100.0
+offset_bottom = 30.0
+text = "-5"
+script = ExtResource("1_floating_damage")

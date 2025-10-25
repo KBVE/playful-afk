@@ -528,3 +528,30 @@ func get_npc_data_json(ulid_bytes: PackedByteArray) -> String:
 	if _warehouse:
 		return _warehouse.get_npc_data_json(ulid_bytes)
 	return "{}"
+
+
+# ============================================================================
+# Healthbar Pool System Methods
+# ============================================================================
+
+## Initialize the healthbar pool with a specific size and scene path
+## This will instantiate healthbar packed scenes in Rust
+func initialize_healthbar_pool(pool_size: int, scene_path: String) -> void:
+	if _warehouse:
+		_warehouse.initialize_healthbar_pool(pool_size, scene_path)
+	else:
+		push_error("NPCDataWarehouse: Warehouse not initialized!")
+
+
+## Get the number of healthbars in the pool
+func healthbar_pool_count() -> int:
+	if _warehouse:
+		return _warehouse.healthbar_pool_count()
+	return 0
+
+
+## Get the number of active healthbar assignments
+func active_healthbar_count() -> int:
+	if _warehouse:
+		return _warehouse.active_healthbar_count()
+	return 0

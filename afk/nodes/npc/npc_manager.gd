@@ -1594,73 +1594,26 @@ func _initialize_generic_pool() -> void:
 	# NOTE: Healthbar pool will be initialized when set_layer4_container is called
 
 
-## Initialize the healthbar pool with pre-allocated healthbars
+## DEPRECATED: Healthbar pool is now auto-initialized by Rust when scene container is set
+## This function kept for backward compatibility but does nothing
 func _initialize_healthbar_pool() -> void:
-	if not healthbar_scene:
-		push_warning("NPCManager: Healthbar scene not loaded, skipping healthbar pool initialization")
-		return
-
-	if not foreground_container:
-		push_warning("NPCManager: Layer4 container not set, skipping healthbar pool initialization")
-		return
-
-	healthbar_pool.clear()
-
-	# Pre-allocate healthbars
-	for i in range(MAX_HEALTHBAR_POOL_SIZE):
-		var healthbar = healthbar_scene.instantiate()
-		foreground_container.add_child(healthbar)
-		healthbar.visible = false  # Hide until assigned
-
-		healthbar_pool.append({
-			"healthbar": healthbar,
-			"is_active": false,
-			"npc": null
-		})
-
-	# Healthbar pool initialized silently
+	# Healthbar pool is automatically initialized in Rust when set_scene_container is called
+	# No GDScript action needed
+	pass
 
 
-## Get an available healthbar from the pool and assign it to an NPC
+## DEPRECATED: Healthbars are now managed by Rust NPCDataWarehouse
+## This function kept for backward compatibility but does nothing
 func get_healthbar_for_npc(npc: Node2D) -> HealthBar:
-	if not npc:
-		return null
-
-	# Find an inactive healthbar
-	for slot in healthbar_pool:
-		if not slot["is_active"]:
-			var healthbar = slot["healthbar"]
-			slot["is_active"] = true
-			slot["npc"] = npc
-
-			# Connect healthbar to NPC
-			healthbar.connect_to_entity(npc)
-			healthbar.visible = true
-
-			return healthbar
-
-	push_warning("NPCManager: No available healthbars in pool!")
+	# Healthbars are now auto-assigned in Rust when NPC is spawned
 	return null
 
 
-## Return a healthbar to the pool when NPC is released
+## DEPRECATED: Healthbars are now managed by Rust NPCDataWarehouse
+## This function kept for backward compatibility but does nothing
 func return_healthbar(npc: Node2D) -> void:
-	if not npc:
-		return
-
-	# Find the healthbar assigned to this NPC
-	for slot in healthbar_pool:
-		if slot["is_active"] and slot["npc"] == npc:
-			var healthbar = slot["healthbar"]
-
-			# Disconnect from NPC and hide
-			healthbar.disconnect_from_entity()
-			healthbar.visible = false
-
-			# Mark as inactive
-			slot["is_active"] = false
-			slot["npc"] = null
-			return
+	# Healthbars are now auto-returned in Rust when NPC is despawned
+	pass
 
 
 ## Pre-allocate a generic NPC instance (but don't activate it yet)
